@@ -3661,3 +3661,150 @@ body > .magic-effect-layer { position: fixed !important; }
   from { transform: scale(.96) translateY(2px); }
   to { transform: scale(1.07) translateY(-5px); }
 }
+
+
+/* Pro v10.15: visible confetti, one smooth pause-and-glide spotlight, lightweight bubbles */
+.magic-effect-layer.magic-confetti .confetti-full,
+.magic-effect-layer.magic-bubbles .bubbles-full {
+  transform: translateZ(0);
+  contain: strict;
+}
+
+.magic-effect-layer.magic-confetti .magic-confetti {
+  top: -18vh !important;
+  left: var(--x) !important;
+  width: calc(var(--s) * 1.08) !important;
+  height: calc(var(--s) * 1.7) !important;
+  background: hsl(var(--h, 210) 94% 60%) !important;
+  border: 1px solid rgba(255,255,255,.42) !important;
+  box-shadow: 0 4px 7px rgba(0,0,0,.22) !important;
+  filter: none !important;
+  opacity: 1 !important;
+  transform: translate3d(-50%, 0, 0);
+  backface-visibility: hidden;
+  will-change: transform, opacity;
+  animation: magicConfettiVisible var(--dur, 3s) linear var(--d, 0s) both !important;
+}
+.magic-effect-layer.magic-confetti .magic-confetti:nth-child(3n) {
+  border-radius: 999px !important;
+}
+.magic-effect-layer.magic-confetti .magic-confetti:nth-child(4n) {
+  width: calc(var(--s) * 1.45) !important;
+  height: calc(var(--s) * .72) !important;
+}
+.magic-effect-layer.magic-confetti .magic-confetti:nth-child(5n) {
+  clip-path: polygon(50% 0, 100% 45%, 62% 100%, 8% 74%, 0 20%);
+}
+
+.magic-effect-layer.magic-bubbles .magic-bubble {
+  left: var(--x) !important;
+  top: auto !important;
+  bottom: -15vh !important;
+  width: calc(var(--s) * 1.65) !important;
+  height: calc(var(--s) * 1.65) !important;
+  opacity: .88 !important;
+  border: 1px solid rgba(255,255,255,.66) !important;
+  background: radial-gradient(circle at 31% 27%, rgba(255,255,255,.94) 0 7%, rgba(255,255,255,.34) 14%, rgba(125,211,252,.22) 43%, rgba(96,165,250,.10) 68%, transparent 76%) !important;
+  box-shadow: inset 0 0 9px rgba(255,255,255,.34), 0 4px 10px rgba(15,23,42,.12) !important;
+  filter: none !important;
+  transform: translate3d(-50%, 0, 0) scale(.78);
+  backface-visibility: hidden;
+  will-change: transform, opacity;
+  animation: magicBubbleSmooth var(--dur, 5s) linear var(--d, 0s) both !important;
+}
+.magic-effect-layer.magic-bubbles .magic-bubble:nth-child(3n) {
+  opacity: .7 !important;
+}
+
+.magic-effect-layer.magic-spotlight .magic-moving-spotlight {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 4 !important;
+  width: 100% !important;
+  height: 100% !important;
+  opacity: 1 !important;
+  background-color: rgba(0,0,0,.93) !important;
+  background-image: radial-gradient(circle at center,
+    rgba(255,255,255,.15) 0 5%,
+    rgba(255,255,255,.10) 6%,
+    rgba(255,255,255,.03) 10%,
+    rgba(0,0,0,0) 15%,
+    rgba(0,0,0,.72) 25%,
+    rgba(0,0,0,.94) 44%,
+    rgba(0,0,0,.97) 100%) !important;
+  background-repeat: no-repeat !important;
+  background-size: 155% 155% !important;
+  background-position: 3% 8% !important;
+  mix-blend-mode: normal !important;
+  backdrop-filter: none !important;
+  transform: translateZ(0);
+  will-change: background-position;
+  animation: singleSpotlightGlidePause 5.25s linear both !important;
+}
+.magic-effect-layer.magic-spotlight .magic-moving-spotlight.two,
+.magic-effect-layer.magic-spotlight .magic-moving-spotlight.three {
+  display: none !important;
+}
+
+@keyframes magicConfettiVisible {
+  0% {
+    transform: translate3d(-50%, -5vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+  5% { opacity: 1; }
+  86% { opacity: 1; }
+  100% {
+    transform: translate3d(calc(-50% + var(--drift)), 128vh, 0) rotate(var(--rot, 720deg));
+    opacity: 0;
+  }
+}
+
+@keyframes magicBubbleSmooth {
+  0% {
+    transform: translate3d(-50%, 0, 0) scale(.72);
+    opacity: 0;
+  }
+  9% { opacity: .82; }
+  48% {
+    transform: translate3d(calc(-50% + var(--drift-mid)), -56vh, 0) scale(1.02);
+    opacity: .86;
+  }
+  88% { opacity: .68; }
+  100% {
+    transform: translate3d(calc(-50% + var(--drift)), -124vh, 0) scale(1.18);
+    opacity: 0;
+  }
+}
+
+@keyframes singleSpotlightGlidePause {
+  0%, 15% {
+    background-position: 3% 8%;
+  }
+  15% {
+    animation-timing-function: cubic-bezier(.45, 0, .2, 1);
+  }
+  34%, 49% {
+    background-position: 97% 10%;
+  }
+  49% {
+    animation-timing-function: cubic-bezier(.45, 0, .2, 1);
+  }
+  68%, 82% {
+    background-position: 15% 96%;
+  }
+  82% {
+    animation-timing-function: cubic-bezier(.45, 0, .2, 1);
+  }
+  100% {
+    background-position: 74% 64%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .magic-effect-layer.magic-confetti .magic-confetti,
+  .magic-effect-layer.magic-bubbles .magic-bubble,
+  .magic-effect-layer.magic-spotlight .magic-moving-spotlight {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

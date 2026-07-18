@@ -1652,13 +1652,31 @@
 
   function makeParticles(count, className, symbols = []) {
     const items = [];
+    const isConfetti = className === 'magic-confetti';
+    const isBubble = className === 'magic-bubble';
+
     for (let i = 0; i < count; i++) {
       const x = Math.round(Math.random() * 100);
-      const delay = (Math.random() * 0.85).toFixed(2);
-      const drift = Math.round((Math.random() - 0.5) * 140);
-      const size = Math.round(10 + Math.random() * 18);
+      const driftRange = isBubble ? 90 : 140;
+      const drift = Math.round((Math.random() - 0.5) * driftRange);
+      const driftMid = Math.round(drift * 0.42 + (Math.random() - 0.5) * 34);
+      const size = isBubble
+        ? Math.round(12 + Math.random() * 22)
+        : Math.round(10 + Math.random() * 18);
+      const delay = isBubble
+        ? `-${(Math.random() * 3.4).toFixed(2)}`
+        : isConfetti
+          ? `-${(Math.random() * 1.65).toFixed(2)}`
+          : (Math.random() * 0.85).toFixed(2);
+      const duration = isBubble
+        ? (4.4 + Math.random() * 1.5).toFixed(2)
+        : isConfetti
+          ? (2.65 + Math.random() * 0.85).toFixed(2)
+          : '2.15';
+      const hue = Math.round(Math.random() * 360);
+      const rotation = Math.round(520 + Math.random() * 720) * (Math.random() > 0.5 ? 1 : -1);
       const symbol = symbols.length ? symbols[i % symbols.length] : '';
-      items.push(`<i class="${className}" style="--x:${x}%;--d:${delay}s;--drift:${drift}px;--s:${size}px">${symbol}</i>`);
+      items.push(`<i class="${className}" style="--x:${x}%;--d:${delay}s;--drift:${drift}px;--drift-mid:${driftMid}px;--s:${size}px;--dur:${duration}s;--h:${hue};--rot:${rotation}deg">${symbol}</i>`);
     }
     return items.join('');
   }
@@ -1669,13 +1687,13 @@
       case 'drumroll':
         return `<div class="magic-stage-flash subtle"></div><div class="magic-center magic-plain magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-stick right"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span></div></div>`;
       case 'confetti':
-        return `<div class="magic-particles confetti-full">${makeParticles(280, 'magic-confetti')}</div>`;
+        return `<div class="magic-particles confetti-full">${makeParticles(180, 'magic-confetti')}</div>`;
       case 'micdrop':
         return `<div class="magic-stage-flash"></div><div class="magic-center magic-plain magic-micdrop-hero"><span class="magic-mic">🎤</span><span class="magic-mic-shadow"></span></div>`;
       case 'curtain':
         return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-reveal-shine"></div>`;
       case 'bubbles':
-        return `<div class="magic-particles bubbles-full">${makeParticles(240, 'magic-bubble')}</div>`;
+        return `<div class="magic-particles bubbles-full">${makeParticles(82, 'magic-bubble')}</div>`;
       case 'quiet':
         return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji" role="img" aria-label="Be Quiet">🤫</div></div>`;
       case 'applause':
@@ -1711,7 +1729,7 @@
     if (effect.id === 'quiet') speakQuietPrompt();
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 2600, confetti: 2500, micdrop: 2200, curtain: 2700, bubbles: 2600, quiet: 2200, applause: 2400, spotlight: 2400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 2600, confetti: 3400, micdrop: 2200, curtain: 2700, bubbles: 4400, quiet: 2200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       layer.classList.remove('show');
       layer.classList.add('hidden');
