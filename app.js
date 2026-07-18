@@ -46,6 +46,7 @@
     countdownAlert: 'off',
     lastCountdownAlertSecond: null,
     audioContext: null,
+    audioUnlocked: false,
     transitionEffect: 'fade',
     slideChangePending: false,
     pdfPageCache: new Map(),
@@ -112,7 +113,7 @@
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
       'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide',
       'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
-      'countdownAlertSelect', 'slideTransitionSelect',
+      'countdownAlertSelect', 'soundTestBtn', 'slideTransitionSelect',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
@@ -153,6 +154,11 @@
     if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => hideModal(els.qrModal));
     if (els.settingsBtn) els.settingsBtn.addEventListener('click', () => els.controlPanel.classList.toggle('hidden'));
 
+    // Browsers only allow presentation sounds after a user gesture. Prime audio early so
+    // the last-5-second alert still works later, including when autoplay is started by phone.
+    document.addEventListener('pointerdown', primePresentationAudio, { passive: true });
+    document.addEventListener('keydown', primePresentationAudio, true);
+
     if (els.timingModeSelect) els.timingModeSelect.addEventListener('change', () => {
       state.timingMode = els.timingModeSelect.value === 'per-slide' ? 'per-slide' : 'global';
       updateTimingModeUI();
@@ -187,7 +193,13 @@
     if (els.countdownAlertSelect) els.countdownAlertSelect.addEventListener('change', () => {
       state.countdownAlert = els.countdownAlertSelect.value || 'off';
       state.lastCountdownAlertSecond = null;
+      if (state.countdownAlert !== 'off') primePresentationAudio();
       publishSessionState();
+    });
+    if (els.soundTestBtn) els.soundTestBtn.addEventListener('click', () => {
+      const mode = state.countdownAlert === 'off' ? 'both' : state.countdownAlert;
+      primePresentationAudio();
+      triggerCountdownAlert(5, mode);
     });
     if (els.slideTransitionSelect) els.slideTransitionSelect.addEventListener('change', () => {
       state.transitionEffect = els.slideTransitionSelect.value || 'fade';
@@ -1462,41 +1474,62 @@
     triggerCountdownAlert(remaining);
   }
 
-  function triggerCountdownAlert(second) {
-    const mode = state.countdownAlert;
+  function triggerCountdownAlert(second, overrideMode) {
+    const mode = overrideMode || state.countdownAlert;
     if (mode === 'sound' || mode === 'both') playCountdownBeep(second);
     if (mode === 'voice' || mode === 'both') speakCountdown(second);
   }
 
-  function playCountdownBeep(second) {
+  function primePresentationAudio() {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (AudioContext) {
+        state.audioContext = state.audioContext || new AudioContext();
+        if (state.audioContext.state === 'suspended') {
+          state.audioContext.resume().catch(() => {});
+        }
+        state.audioUnlocked = true;
+      }
+      if (window.speechSynthesis && window.speechSynthesis.getVoices) {
+        window.speechSynthesis.getVoices();
+      }
+    } catch (error) {}
+  }
+
+  async function playCountdownBeep(second) {
     try {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (!AudioContext) return;
       state.audioContext = state.audioContext || new AudioContext();
-      if (state.audioContext.state === 'suspended') state.audioContext.resume().catch(() => {});
       const ctx = state.audioContext;
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+      if (ctx.state === 'suspended') return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.value = second === 1 ? 1040 : 760;
+      osc.frequency.value = second === 1 ? 1100 : 760;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+      gain.gain.exponentialRampToValueAtTime(0.22, ctx.currentTime + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.2);
+      osc.stop(ctx.currentTime + 0.24);
     } catch (error) {}
   }
 
   function speakCountdown(second) {
     try {
       if (!window.speechSynthesis) return;
+      const words = { 5: 'five', 4: 'four', 3: 'three', 2: 'two', 1: 'one' };
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(String(second));
-      utterance.rate = 1.05;
+      const utterance = new SpeechSynthesisUtterance(words[second] || String(second));
+      utterance.lang = 'en-US';
+      utterance.rate = 1.03;
       utterance.pitch = 1;
-      utterance.volume = 0.9;
+      utterance.volume = 1;
       window.speechSynthesis.speak(utterance);
     } catch (error) {}
   }
@@ -1643,9 +1676,16 @@
       case 'setCountdownAlert':
         state.countdownAlert = ['off', 'sound', 'voice', 'both'].includes(command.value) ? command.value : 'off';
         state.lastCountdownAlertSecond = null;
+        if (state.countdownAlert !== 'off') primePresentationAudio();
         applyTimerSettings();
         publishSessionState();
         break;
+      case 'testCountdownAlert': {
+        const mode = ['sound', 'voice', 'both'].includes(command.value) ? command.value : (state.countdownAlert === 'off' ? 'both' : state.countdownAlert);
+        primePresentationAudio();
+        triggerCountdownAlert(5, mode);
+        break;
+      }
       case 'setTransitionEffect':
         state.transitionEffect = command.value || 'fade';
         applyTimerSettings();
@@ -1733,6 +1773,15 @@
             <input id="remoteTiming" type="number" min="1" value="10" placeholder="Seconds">
             <button id="remoteSetTiming" data-host-only="true">Apply Timing</button>
           </div>
+          <div class="remote-wide remote-timing-box">
+            <select id="remoteCountdownAlert" data-host-only="true">
+              <option value="off">Alert off</option>
+              <option value="sound">Sound only</option>
+              <option value="voice">Voice count</option>
+              <option value="both">Sound + voice</option>
+            </select>
+            <button id="remoteTestAlert" data-host-only="true">Test Sound/Voice</button>
+          </div>
         </section>
         <section class="remote-section">
           <h3>Timer</h3>
@@ -1799,6 +1848,7 @@
         };
         $('remoteTimingMode').value = data.timingMode || 'global';
         $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
+        if ($('remoteCountdownAlert')) $('remoteCountdownAlert').value = data.countdownAlert || 'off';
         $('remoteOpacity').value = data.timerOpacity ?? 75;
         if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${data.timerOpacity ?? 75}%`;
         $('remoteTimerSize').value = data.timerSize ?? 28;
@@ -1828,6 +1878,14 @@
         const seconds = Number($('remoteTiming').value) || 10;
         const mode = $('remoteTimingMode').value;
         sendRemoteCommand(ref, mode === 'per-slide' ? 'setCurrentSlideTiming' : 'setGlobalTiming', seconds);
+      });
+      if ($('remoteCountdownAlert')) $('remoteCountdownAlert').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setCountdownAlert', $('remoteCountdownAlert').value);
+      });
+      if ($('remoteTestAlert')) $('remoteTestAlert').addEventListener('click', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'testCountdownAlert', $('remoteCountdownAlert') ? $('remoteCountdownAlert').value : 'both');
       });
       $('remoteOpacity').addEventListener('input', () => {
         if (!isHost) return;

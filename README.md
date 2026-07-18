@@ -124,3 +124,6 @@ This version fixes the phone fullscreen preview so the top title bar and bottom 
 - Added a live Timer size slider in desktop Controls.
 - Added a live Timer size slider in the phone Host remote.
 - Opacity slider now updates live in smaller steps.
+
+## Sound/Voice alert note
+If the last-5-second alert does not play, open Controls and press **Test alert** once on the desktop viewer. Browsers require one user action before WebAudio or voice countdown can play, especially when Auto Play is started from a phone remote.
