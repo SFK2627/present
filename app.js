@@ -46,7 +46,7 @@
     autoCurrentDuration: 10,
     autoAdvancing: false,
     countdownAlert: 'off',
-    countdownVoiceGender: 'girl',
+    countdownVoiceGender: 'soft-female',
     countdownVoiceStart: 5,
     countdownPreviewTimers: [],
     lastCountdownAlertSecond: null,
@@ -86,6 +86,59 @@
     publishLock: false,
   };
 
+
+
+  const COUNTDOWN_VOICE_STYLES = {
+    'soft-female': {
+      label: 'Soft Female',
+      hints: ['female', 'woman', 'samantha', 'zira', 'victoria', 'karen', 'moira', 'tessa', 'susan', 'allison', 'ava', 'aria', 'jenny'],
+      pitch: 1.18,
+      rate: 0.95,
+    },
+    'bright-female': {
+      label: 'Bright Female',
+      hints: ['female', 'woman', 'jenny', 'aria', 'ava', 'samantha', 'zira', 'victoria', 'allison', 'susan'],
+      pitch: 1.32,
+      rate: 1.08,
+    },
+    'calm-male': {
+      label: 'Calm Male',
+      hints: ['male', 'man', 'david', 'mark', 'alex', 'daniel', 'tom', 'fred', 'guy', 'ryan', 'george'],
+      pitch: 0.82,
+      rate: 0.94,
+    },
+    'deep-male': {
+      label: 'Deep Male',
+      hints: ['male', 'man', 'david', 'mark', 'daniel', 'george', 'guy', 'ryan', 'alex'],
+      pitch: 0.68,
+      rate: 0.9,
+    },
+    teacher: {
+      label: 'Teacher Voice',
+      hints: ['female', 'woman', 'samantha', 'zira', 'jenny', 'aria', 'victoria', 'karen', 'moira', 'ava', 'alex'],
+      pitch: 1.05,
+      rate: 0.92,
+    },
+    announcer: {
+      label: 'Announcer Voice',
+      hints: ['male', 'man', 'david', 'mark', 'daniel', 'george', 'ryan', 'alex', 'guy'],
+      pitch: 0.9,
+      rate: 1.02,
+    },
+  };
+
+  function normalizeCountdownVoiceStyle(value) {
+    const key = String(value || '').trim().toLowerCase();
+    if (COUNTDOWN_VOICE_STYLES[key]) return key;
+    if (key === 'boy' || key === 'male') return 'calm-male';
+    if (key === 'girl' || key === 'female') return 'soft-female';
+    return 'soft-female';
+  }
+
+  function getCountdownVoiceProfile() {
+    const key = normalizeCountdownVoiceStyle(state.countdownVoiceGender);
+    return COUNTDOWN_VOICE_STYLES[key] || COUNTDOWN_VOICE_STYLES['soft-female'];
+  }
   const els = {};
 
   document.addEventListener('DOMContentLoaded', init);
@@ -221,7 +274,7 @@
       publishSessionState();
     });
     if (els.countdownVoiceSelect) els.countdownVoiceSelect.addEventListener('change', () => {
-      state.countdownVoiceGender = ['girl', 'boy'].includes(els.countdownVoiceSelect.value) ? els.countdownVoiceSelect.value : 'girl';
+      state.countdownVoiceGender = normalizeCountdownVoiceStyle(els.countdownVoiceSelect.value);
       primePresentationAudio();
       publishSessionState();
     });
@@ -1792,7 +1845,7 @@
     if (els.timerSizeInput) els.timerSizeInput.value = timerSize;
     if (els.timerSizeLabel) els.timerSizeLabel.textContent = `${timerSize}px`;
     if (els.countdownAlertSelect) els.countdownAlertSelect.value = state.countdownAlert || 'off';
-    if (els.countdownVoiceSelect) els.countdownVoiceSelect.value = state.countdownVoiceGender || 'girl';
+    if (els.countdownVoiceSelect) els.countdownVoiceSelect.value = normalizeCountdownVoiceStyle(state.countdownVoiceGender);
     if (els.countdownVoiceStartSelect) els.countdownVoiceStartSelect.value = String(getCountdownVoiceStart());
     if (els.slideTransitionSelect) els.slideTransitionSelect.value = state.transitionEffect || 'fade';
   }
@@ -2095,10 +2148,8 @@
       if (!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
       const voices = window.speechSynthesis.getVoices().filter((voice) => /^en/i.test(voice.lang || ''));
       if (!voices.length) return null;
-      const gender = state.countdownVoiceGender === 'boy' ? 'boy' : 'girl';
-      const girlHints = ['female', 'woman', 'girl', 'samantha', 'zira', 'victoria', 'karen', 'moira', 'tessa', 'susan', 'allison', 'ava', 'aria', 'jenny'];
-      const boyHints = ['male', 'man', 'boy', 'david', 'mark', 'alex', 'daniel', 'tom', 'fred', 'guy', 'ryan', 'george'];
-      const hints = gender === 'boy' ? boyHints : girlHints;
+      const profile = getCountdownVoiceProfile();
+      const hints = profile.hints || [];
       const byName = voices.find((voice) => hints.some((hint) => `${voice.name} ${voice.voiceURI}`.toLowerCase().includes(hint)));
       return byName || voices.find((voice) => /en-US/i.test(voice.lang || '')) || voices[0];
     } catch (error) {
@@ -2114,8 +2165,9 @@
       const utterance = new SpeechSynthesisUtterance(words[second] || String(second));
       utterance.lang = 'en-US';
       utterance.voice = getPreferredCountdownVoice();
-      utterance.rate = 1.02;
-      utterance.pitch = state.countdownVoiceGender === 'boy' ? 0.78 : 1.25;
+      const voiceProfile = getCountdownVoiceProfile();
+      utterance.rate = voiceProfile.rate || 1;
+      utterance.pitch = voiceProfile.pitch || 1;
       utterance.volume = 1;
       window.speechSynthesis.speak(utterance);
     } catch (error) {}
@@ -2298,7 +2350,7 @@
         publishSessionState();
         break;
       case 'setCountdownVoiceGender':
-        state.countdownVoiceGender = command.value === 'boy' ? 'boy' : 'girl';
+        state.countdownVoiceGender = normalizeCountdownVoiceStyle(command.value);
         primePresentationAudio();
         applyTimerSettings();
         publishSessionState();
@@ -2457,8 +2509,12 @@
               <option value="both">Sound + voice</option>
             </select>
             <select id="remoteCountdownVoice" data-host-only="true">
-              <option value="girl">Girl voice</option>
-              <option value="boy">Boy voice</option>
+              <option value="soft-female">Soft Female</option>
+              <option value="bright-female">Bright Female</option>
+              <option value="calm-male">Calm Male</option>
+              <option value="deep-male">Deep Male</option>
+              <option value="teacher">Teacher Voice</option>
+              <option value="announcer">Announcer Voice</option>
             </select>
             <select id="remoteCountdownVoiceStart" data-host-only="true">
               <option value="5">Voice from 5 sec</option>
@@ -2498,10 +2554,17 @@
           <button id="remoteBackToControls" class="remote-back-controls">Controls</button>
           <button id="remoteClosePreview">Close</button>
         </div>
-        <div id="remoteFullStage" class="remote-full-stage">
-          <img id="remoteFullImg" alt="Fullscreen current slide preview" />
+        <div id="remoteFullStage" class="remote-full-stage remote-monitor-stage">
+          <div class="remote-monitor-frame" aria-label="Desktop monitor preview">
+            <div class="remote-monitor-camera"></div>
+            <div class="remote-monitor-screen">
+              <img id="remoteFullImg" alt="Desktop monitor preview of current slide" />
+            </div>
+            <div class="remote-monitor-neck"></div>
+            <div class="remote-monitor-base"></div>
+          </div>
         </div>
-        <div class="remote-full-help">Portrait preview. Pinch to zoom, then drag to choose the exact desktop area.</div>
+        <div class="remote-full-help">Portrait preview shows the desktop monitor look. Pinch inside the screen, then drag to choose the exact desktop area.</div>
       </div>
     `;
 
@@ -2544,7 +2607,7 @@
         $('remoteTimingMode').value = data.timingMode || 'global';
         $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
         if ($('remoteCountdownAlert')) $('remoteCountdownAlert').value = data.countdownAlert || 'off';
-        if ($('remoteCountdownVoice')) $('remoteCountdownVoice').value = data.countdownVoiceGender || 'girl';
+        if ($('remoteCountdownVoice')) $('remoteCountdownVoice').value = normalizeCountdownVoiceStyle(data.countdownVoiceGender);
         if ($('remoteCountdownVoiceStart')) $('remoteCountdownVoiceStart').value = String(Number(data.countdownVoiceStart) === 3 ? 3 : 5);
         if ($('remoteTransition')) $('remoteTransition').value = data.transitionEffect || 'fade';
         if ($('remoteTimerPosition')) $('remoteTimerPosition').value = data.timerPosition || 'bottom-right';
@@ -2732,13 +2795,18 @@
       y: ((touches[0].clientY + touches[1].clientY) / 2 - rect.top) / Math.max(1, rect.height),
     });
 
+    const gestureRect = () => {
+      const screen = stage.querySelector('.remote-monitor-screen');
+      return (screen || stage).getBoundingClientRect();
+    };
+
     stage.addEventListener('touchstart', (event) => {
       if (event.touches.length) event.preventDefault();
       beginGesture();
       const current = safeViewport(localViewport || getViewport());
       startZoom = current.zoom;
       startCenter = { centerX: current.centerX, centerY: current.centerY };
-      const rect = stage.getBoundingClientRect();
+      const rect = gestureRect();
       if (event.touches.length === 2) {
         startDistance = Math.max(1, distance(event.touches));
         startMid = midpoint(event.touches, rect);
@@ -2753,7 +2821,7 @@
       if (event.touches.length !== 1 && event.touches.length !== 2) return;
       event.preventDefault();
       beginGesture();
-      const rect = stage.getBoundingClientRect();
+      const rect = gestureRect();
       let next = safeViewport(localViewport || getViewport());
 
       if (event.touches.length === 2 && startDistance) {
@@ -2789,7 +2857,7 @@
       event.preventDefault();
       beginGesture();
       const current = safeViewport(localViewport || getViewport());
-      const rect = stage.getBoundingClientRect();
+      const rect = gestureRect();
       const next = safeViewport({
         zoom: current.zoom + (event.deltaY < 0 ? 0.12 : -0.12),
         centerX: (event.clientX - rect.left) / Math.max(1, rect.width),

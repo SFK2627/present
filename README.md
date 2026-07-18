@@ -181,3 +181,10 @@ This build focuses on stability and polish instead of only adding features.
 - Desktop and phone controls have improved premium spacing, grouping, and readable dropdowns.
 
 For perfect PPTX design fidelity, export PPTX/Canva to PDF first and upload the PDF. A static GitHub Pages site cannot run LibreOffice conversion, so exact PowerPoint conversion needs an optional backend server.
+
+
+## Pro v10.2 voice/monitor preview update
+
+- Added clean countdown voice style choices without exposing browser voice names.
+- Added a desktop-monitor frame inside Portrait Preview so the phone shows a monitor-like representation of the desktop view while pinching and panning.
+- Kept the update targeted to the countdown voice selector and portrait preview layer.
