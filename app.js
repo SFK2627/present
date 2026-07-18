@@ -61,6 +61,7 @@
     },
     toolbarHideTimer: null,
     renderToken: 0,
+    activePdfRenderTask: null,
     lastRemoteThumbKey: '',
     remotePreviewBusy: false,
     firebaseReady: false,
@@ -221,7 +222,8 @@
     if (els.timerHideBtn) els.timerHideBtn.addEventListener('click', hideTimer);
     if (els.timerResetBtn) els.timerResetBtn.addEventListener('click', resetTimer);
 
-    document.addEventListener('keydown', handleKeyboard);
+    document.addEventListener('keydown', handleKeyboard, true);
+    window.addEventListener('keydown', handleKeyboard, true);
     document.addEventListener('fullscreenchange', syncFullscreenState);
     if (els.viewerStage) {
       els.viewerStage.addEventListener('mousemove', revealToolbarTemporarily);
@@ -900,55 +902,69 @@
     if (!state.activeFile) return;
     const token = ++state.renderToken;
     state.currentPage = Math.min(Math.max(1, state.currentPage), state.totalPages);
-    els.jumpInput.value = state.currentPage;
-    els.perSlideTimingInput.value = state.perPageTiming[state.currentPage] || '';
+    if (els.jumpInput) els.jumpInput.value = state.currentPage;
+    if (els.perSlideTimingInput) els.perSlideTimingInput.value = state.perPageTiming[state.currentPage] || '';
     updateTimingModeUI();
     updateActiveThumb();
-
-    if (state.activeFile.type === 'pdf') {
-      els.pptxSlide.classList.add('hidden');
-      els.pdfCanvas.classList.remove('hidden');
-      const page = await getCachedPdfPage(state.currentPage);
-      if (token !== state.renderToken) return;
-      const viewportBase = page.getViewport({ scale: 1 });
-      const available = getAvailableStageSize();
-      const fitScale = Math.min(available.width / viewportBase.width, available.height / viewportBase.height);
-      const cssScale = Math.max(0.15, fitScale * state.zoom);
-      const dpr = Math.min(window.devicePixelRatio || 1, 2.4);
-      const renderViewport = page.getViewport({ scale: cssScale * dpr });
-      const cssViewport = page.getViewport({ scale: cssScale });
-      const canvas = els.pdfCanvas;
-      const ctx = canvas.getContext('2d', { alpha: false });
-      canvas.width = Math.floor(renderViewport.width);
-      canvas.height = Math.floor(renderViewport.height);
-      canvas.style.width = `${Math.floor(cssViewport.width)}px`;
-      canvas.style.height = `${Math.floor(cssViewport.height)}px`;
-      await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
-      warmAdjacentPdfPages();
-      applyViewportScroll();
-    } else {
-      els.pdfCanvas.classList.add('hidden');
-      els.pptxSlide.classList.remove('hidden');
-      if (state.pptxVisualReady) {
-        showOnlyCurrentPptxSlide();
-        applyViewportScroll();
-      } else {
-        els.pptxSlide.classList.remove('visual-pptx');
-        els.pptxSlide.style.transform = '';
-        els.pptxSlide.innerHTML = `
-          <div class="viewer-message viewer-message-warning">
-            <strong>PowerPoint visual render is not available.</strong>
-            <span>For the exact colors, pictures, fonts, and layout, export this PPTX as PDF and upload the PDF here. Static browser PPTX rendering cannot guarantee every PowerPoint element.</span>
-          </div>
-        `;
-      }
-    }
-    if (state.slideChangePending) {
-      playSlideTransition();
-      state.slideChangePending = false;
-    }
     updateZoomLabel();
     publishSessionState();
+
+    if (state.activeFile.type === 'pdf' && state.activePdfRenderTask) {
+      try { state.activePdfRenderTask.cancel(); } catch (error) {}
+      state.activePdfRenderTask = null;
+    }
+
+    try {
+      if (state.activeFile.type === 'pdf') {
+        els.pptxSlide.classList.add('hidden');
+        els.pdfCanvas.classList.remove('hidden');
+        const page = await getCachedPdfPage(state.currentPage);
+        if (token !== state.renderToken) return;
+        const viewportBase = page.getViewport({ scale: 1 });
+        const available = getAvailableStageSize();
+        const fitScale = Math.min(available.width / viewportBase.width, available.height / viewportBase.height);
+        const cssScale = Math.max(0.15, fitScale * state.zoom);
+        const dpr = Math.min(window.devicePixelRatio || 1, 2.4);
+        const renderViewport = page.getViewport({ scale: cssScale * dpr });
+        const cssViewport = page.getViewport({ scale: cssScale });
+        const canvas = els.pdfCanvas;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        canvas.width = Math.floor(renderViewport.width);
+        canvas.height = Math.floor(renderViewport.height);
+        canvas.style.width = `${Math.floor(cssViewport.width)}px`;
+        canvas.style.height = `${Math.floor(cssViewport.height)}px`;
+        const task = page.render({ canvasContext: ctx, viewport: renderViewport });
+        state.activePdfRenderTask = task;
+        await task.promise;
+        if (state.activePdfRenderTask === task) state.activePdfRenderTask = null;
+        if (token !== state.renderToken) return;
+        warmAdjacentPdfPages();
+        applyViewportScroll();
+      } else {
+        els.pdfCanvas.classList.add('hidden');
+        els.pptxSlide.classList.remove('hidden');
+        if (state.pptxVisualReady) {
+          showOnlyCurrentPptxSlide();
+          applyViewportScroll();
+        } else {
+          els.pptxSlide.classList.remove('visual-pptx');
+          els.pptxSlide.style.transform = '';
+          els.pptxSlide.innerHTML = `
+            <div class="viewer-message viewer-message-warning">
+              <strong>PowerPoint visual render is not available.</strong>
+              <span>For the exact colors, pictures, fonts, and layout, export this PPTX as PDF and upload the PDF here. Static browser PPTX rendering cannot guarantee every PowerPoint element.</span>
+            </div>
+          `;
+        }
+      }
+      if (state.slideChangePending && token === state.renderToken) {
+        playSlideTransition();
+        state.slideChangePending = false;
+      }
+    } catch (error) {
+      const cancelled = error && (error.name === 'RenderingCancelledException' || /cancel/i.test(String(error.message || error)));
+      if (!cancelled) console.warn('Slide render failed:', error);
+    }
   }
 
   function renderThumbnailSidebar() {
@@ -1085,31 +1101,70 @@
   }
 
   function handleKeyboard(event) {
-    if (els.viewerView.classList.contains('hidden')) return;
-    const focusedTag = document.activeElement ? document.activeElement.tagName : '';
-    const isTyping = ['INPUT', 'TEXTAREA', 'SELECT'].includes(focusedTag);
+    if (!els.viewerView || els.viewerView.classList.contains('hidden')) return;
 
-    if (event.key === 'Escape' && document.fullscreenElement) {
+    const key = event.key;
+    const isPresentationKey = key === 'ArrowRight' || key === 'PageDown' || key === ' ' || key === 'ArrowLeft' || key === 'PageUp' || key.toLowerCase() === 'f' || key === 'Escape';
+    if (!isPresentationKey) return;
+
+    if (key === 'Escape' && document.fullscreenElement) {
       event.preventDefault();
+      event.stopPropagation();
       document.exitFullscreen().catch(() => {});
       return;
     }
-    if (isTyping) return;
-    if (event.key === 'ArrowRight') {
+
+    if (shouldIgnoreKeyboardForTyping()) return;
+
+    if (key === 'ArrowRight' || key === 'PageDown' || key === ' ') {
       event.preventDefault();
+      event.stopPropagation();
       nextPage();
+      return;
     }
-    if (event.key === 'ArrowLeft') {
+    if (key === 'ArrowLeft' || key === 'PageUp') {
       event.preventDefault();
+      event.stopPropagation();
       previousPage();
+      return;
     }
-    if (event.key.toLowerCase() === 'f') {
+    if (key.toLowerCase() === 'f') {
       event.preventDefault();
+      event.stopPropagation();
       toggleFullscreen();
     }
   }
 
+  function shouldIgnoreKeyboardForTyping() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName || '';
+    const typingTarget = el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag);
+    if (!typingTarget) return false;
+
+    // In fullscreen presentation mode, the last-focused setting input can remain active
+    // even after the controls are hidden. Do not let that hidden input steal arrow keys.
+    if (isPresentationFullscreen()) {
+      const inVisibleControlPanel = els.controlPanel && !els.controlPanel.classList.contains('hidden') && els.controlPanel.contains(el);
+      const inVisibleQrModal = els.qrModal && !els.qrModal.classList.contains('hidden') && els.qrModal.contains(el);
+      const inVisibleSetupModal = els.setupModal && !els.setupModal.classList.contains('hidden') && els.setupModal.contains(el);
+      if (!inVisibleControlPanel && !inVisibleQrModal && !inVisibleSetupModal) return false;
+    }
+
+    return isElementVisible(el);
+  }
+
+  function isElementVisible(el) {
+    if (!el || !document.body.contains(el)) return false;
+    const style = window.getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+  }
+
   async function toggleFullscreen() {
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
     if (!document.fullscreenElement) {
       await els.viewerView.requestFullscreen().catch(() => {});
     } else {
@@ -1123,6 +1178,9 @@
     els.viewerView.classList.toggle('presentation-fullscreen', fullscreen);
     if (els.fullscreenBtn) els.fullscreenBtn.textContent = fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
     if (els.controlPanel && fullscreen) els.controlPanel.classList.add('hidden');
+    if (fullscreen && document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
     revealToolbarTemporarily();
     if (state.activeFile) renderCurrentPage();
   }

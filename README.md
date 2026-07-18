@@ -112,3 +112,8 @@ This build adds:
 - Adjacent PDF page caching to make moving to the next/previous page feel smoother.
 
 PowerPoint note: the browser PPTX renderer has been kept visual-only and improved for sizing, but Microsoft PowerPoint transitions/animations and very complex designs still cannot be guaranteed on GitHub Pages. For exact PPT/PPTX appearance, export to PDF first and present the PDF.
+
+
+## Phone fullscreen preview fix
+
+This version fixes the phone fullscreen preview so the top title bar and bottom hint bar no longer cover the slide. The whole slide is visible first, then pinch zoom and drag can focus an area and sync that viewport to the desktop viewer.

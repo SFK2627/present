@@ -956,3 +956,89 @@ body.remote-fullscreen-open {
     padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* Phone fullscreen preview fix: bars should not cover the slide */
+.remote-full-preview {
+  height: 100dvh !important;
+  min-height: 100svh !important;
+  width: 100vw !important;
+  overflow: hidden !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  background: #000 !important;
+}
+.remote-full-toolbar {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  z-index: 3 !important;
+  min-height: 46px !important;
+  padding: calc(6px + env(safe-area-inset-top, 0px)) 12px 6px !important;
+  box-sizing: border-box !important;
+}
+.remote-full-toolbar button {
+  min-height: 36px !important;
+  padding: .45rem .9rem !important;
+  border-radius: 999px !important;
+  font-size: .95rem !important;
+}
+.remote-full-stage {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: grid !important;
+  place-items: center !important;
+  background: #000 !important;
+}
+.remote-full-stage img {
+  width: auto !important;
+  height: auto !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  object-fit: contain !important;
+  display: block !important;
+  background: #fff !important;
+}
+.remote-full-help {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: 3 !important;
+  box-sizing: border-box !important;
+  padding: 6px 10px calc(6px + env(safe-area-inset-bottom, 0px)) !important;
+  min-height: 28px !important;
+  background: rgba(2, 6, 23, .86) !important;
+  backdrop-filter: blur(16px) !important;
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .remote-full-toolbar {
+    min-height: 38px !important;
+    padding: calc(4px + env(safe-area-inset-top, 0px)) 10px 4px !important;
+  }
+  .remote-full-toolbar span { font-size: .95rem !important; }
+  .remote-full-toolbar button {
+    min-height: 32px !important;
+    padding: .32rem .75rem !important;
+    font-size: .85rem !important;
+  }
+  .remote-full-help {
+    min-height: 22px !important;
+    padding: 3px 8px calc(3px + env(safe-area-inset-bottom, 0px)) !important;
+    font-size: .76rem !important;
+  }
+}
+@media (orientation: landscape) and (max-height: 390px) {
+  .remote-full-toolbar {
+    min-height: 34px !important;
+    padding-top: calc(3px + env(safe-area-inset-top, 0px)) !important;
+    padding-bottom: 3px !important;
+  }
+  .remote-full-help { font-size: .7rem !important; }
+}
