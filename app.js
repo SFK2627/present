@@ -1677,7 +1677,7 @@
       case 'bubbles':
         return `<div class="magic-particles bubbles-full">${makeParticles(240, 'magic-bubble')}</div>`;
       case 'quiet':
-        return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji">🤫</div><span class="magic-shush-wave one"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span></div>`;
+        return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji" role="img" aria-label="Be Quiet">🤫</div></div>`;
       case 'applause':
         return `<div class="magic-particles applause-full">${makeParticles(120, 'magic-symbol', ['👏','👏','👏','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div></div>`;
       case 'spotlight':
@@ -1708,6 +1708,7 @@
     layer.innerHTML = magicEffectMarkup(effect.id);
     void layer.offsetWidth;
     layer.classList.add('show');
+    if (effect.id === 'quiet') speakQuietPrompt();
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
     const durations = { drumroll: 2600, confetti: 2500, micdrop: 2200, curtain: 2700, bubbles: 2600, quiet: 2200, applause: 2400, spotlight: 2400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
@@ -1736,6 +1737,28 @@
   function setMagicEffectIntensity(value, publish = true) {
     state.magicEffectIntensity = ['low', 'normal', 'grand'].includes(value) ? value : 'grand';
     if (publish) publishSessionState();
+  }
+
+  function speakQuietPrompt() {
+    if (!state.magicEffectSound || !('speechSynthesis' in window)) return;
+    const volume = getMagicEffectVolume();
+    if (volume <= 0) return;
+
+    try {
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance('Be quiet.');
+      const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+      const preferred = voices.find((voice) => {
+        const details = `${voice.lang || ''} ${voice.name || ''}`;
+        return /^en/i.test(voice.lang || '') && /female|samantha|zira|aria|jenny|google us english|english/i.test(details);
+      }) || voices.find((voice) => /^en/i.test(voice.lang || '')) || voices[0];
+      if (preferred) utter.voice = preferred;
+      utter.lang = preferred?.lang || 'en-US';
+      utter.rate = 0.78;
+      utter.pitch = 0.88;
+      utter.volume = Math.min(1, Math.max(0.72, volume));
+      window.speechSynthesis.speak(utter);
+    } catch (error) {}
   }
 
   function playMagicEffectSound(effectId) {
@@ -1938,21 +1961,8 @@
         cymbal(now + 0.92, 0.75);
         break;
       case 'quiet':
-        whoosh(now, 0.42, 0.42);
-        noise(now + 0.04, 0.78, 0.09, 'highpass', 2600, 0.46);
-        if ('speechSynthesis' in window) {
-          try {
-            window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance('Shooooshhh...');
-            const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
-            const preferred = voices.find(v => /en|us|uk|ph/i.test((v.lang || '') + ' ' + (v.name || ''))) || voices[0];
-            if (preferred) utter.voice = preferred;
-            utter.rate = 0.54;
-            utter.pitch = 0.52;
-            utter.volume = Math.min(1, 0.82 * volume);
-            window.speechSynthesis.speak(utter);
-          } catch (error) {}
-        }
+        // The SHSS effect uses speech only. The spoken phrase is triggered
+        // independently from Web Audio so it also works when AudioContext is unavailable.
         break;
       case 'micdrop':
         whoosh(now, 0.28, 0.6);

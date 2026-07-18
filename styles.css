@@ -3615,3 +3615,49 @@ body > .magic-effect-layer { position: fixed !important; }
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Pro v10.14 SHSS + foreground particle visibility fix */
+.magic-effect-layer.magic-quiet .magic-center {
+  z-index: 12 !important;
+}
+.magic-effect-layer.magic-quiet .magic-quiet-hero .magic-emoji {
+  animation: quietEmojiEntrance .5s cubic-bezier(.2, 1.55, .35, 1) both,
+             quietEmojiBreathe .72s ease-in-out .5s infinite alternate !important;
+  transform-origin: center;
+  filter: drop-shadow(0 22px 38px rgba(0,0,0,.5)) drop-shadow(0 0 20px rgba(255,255,255,.16)) !important;
+}
+.magic-effect-layer.magic-confetti .confetti-full,
+.magic-effect-layer.magic-bubbles .bubbles-full {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 20 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  mix-blend-mode: normal !important;
+}
+.magic-effect-layer.magic-confetti .magic-confetti {
+  top: -14vh !important;
+  bottom: auto !important;
+  z-index: 21 !important;
+  opacity: 1 !important;
+  filter: drop-shadow(0 7px 8px rgba(0,0,0,.34)) saturate(1.25) !important;
+}
+.magic-effect-layer.magic-bubbles .magic-bubble {
+  top: auto !important;
+  bottom: -16vh !important;
+  z-index: 21 !important;
+  opacity: 1 !important;
+  border: 2px solid rgba(255,255,255,.72) !important;
+  filter: drop-shadow(0 10px 14px rgba(15,23,42,.28)) saturate(1.2) !important;
+  animation-name: magicRise !important;
+  animation-duration: 3.05s !important;
+}
+@keyframes quietEmojiEntrance {
+  0% { transform: scale(.45) rotate(-8deg); opacity: 0; }
+  72% { transform: scale(1.12) rotate(3deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+@keyframes quietEmojiBreathe {
+  from { transform: scale(.96) translateY(2px); }
+  to { transform: scale(1.07) translateY(-5px); }
+}
