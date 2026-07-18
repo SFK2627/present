@@ -3467,3 +3467,75 @@ body > .magic-effect-layer { position: fixed !important; }
 @keyframes floatStar { from { transform: translateY(0); } to { transform: translateY(-10px) scale(1.04); } }
 @keyframes hypePulse { from { transform: scale(.92); } to { transform: scale(1.12); } }
 @keyframes freezePulse { from { transform: scale(.96); filter: drop-shadow(0 16px 24px rgba(0,0,0,.35)); } to { transform: scale(1.05); filter: drop-shadow(0 22px 30px rgba(147,197,253,.36)); } }
+
+
+/* Pro v10.12 magic fixes: true overlay stacking, stronger particles, single spotlight, larger visuals */
+.magic-effect-layer > * {
+  grid-area: 1 / 1 !important;
+  align-self: stretch;
+  justify-self: stretch;
+}
+.magic-effect-layer .magic-center {
+  align-self: center !important;
+  justify-self: center !important;
+  min-width: 0 !important;
+}
+.magic-effect-layer .magic-particles,
+.magic-effect-layer .magic-vignette,
+.magic-effect-layer .magic-stage-flash,
+.magic-effect-layer .magic-freeze,
+.magic-effect-layer .magic-time-rings,
+.magic-effect-layer .magic-moving-spotlight,
+.magic-effect-layer .magic-curtain,
+.magic-effect-layer .magic-reveal-shine,
+.magic-effect-layer .magic-glow-ring {
+  width: 100% !important;
+  height: 100% !important;
+}
+.confetti-full,
+.bubbles-full {
+  z-index: 5 !important;
+}
+.confetti-full .magic-confetti {
+  opacity: .98;
+  width: calc(var(--s) * 1.35) !important;
+  height: calc(var(--s) * 2.1) !important;
+  border-radius: 4px !important;
+  animation-duration: 2.55s !important;
+}
+.bubbles-full .magic-bubble {
+  width: calc(var(--s) * 2.2) !important;
+  height: calc(var(--s) * 2.2) !important;
+  opacity: .98 !important;
+  animation-duration: 3.2s !important;
+  box-shadow: inset 0 0 18px rgba(255,255,255,.45), 0 10px 22px rgba(59,130,246,.22);
+}
+.magic-drum-kit {
+  width: min(88vw, 760px) !important;
+  height: min(48vw, 340px) !important;
+}
+.magic-drum-emoji.main { font-size: clamp(7rem, 22vw, 14rem) !important; }
+.magic-drum-emoji.left, .magic-drum-emoji.right { font-size: clamp(4.2rem, 13vw, 8.5rem) !important; }
+.magic-stick { width: 14px !important; }
+.magic-mic { font-size: clamp(7rem, 22vw, 13rem) !important; }
+.magic-quiet-hero .magic-emoji,
+.magic-applause-hero .magic-emoji,
+.magic-sparkle-hero .magic-emoji,
+.magic-stars-hero .magic-emoji,
+.magic-hype-hero .magic-emoji,
+.magic-freeze-hero .magic-emoji { font-size: clamp(6rem, 20vw, 12rem) !important; }
+.magic-big-mark .magic-mark { font-size: clamp(10rem, 34vw, 22rem) !important; }
+.magic-clock { font-size: clamp(8rem, 26vw, 15rem) !important; }
+.magic-moving-spotlight {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 4 !important;
+  background: radial-gradient(circle at 18% 28%, rgba(255,255,255,.04) 0 10%, rgba(255,255,255,.24) 11%, rgba(255,255,255,.18) 14%, rgba(0,0,0,0) 20%, rgba(0,0,0,.86) 38%, rgba(0,0,0,.95) 100%) !important;
+  animation: singleSpotlightMove 2.2s ease-in-out forwards !important;
+}
+@keyframes singleSpotlightMove {
+  0% { background: radial-gradient(circle at 18% 28%, rgba(255,255,255,.04) 0 10%, rgba(255,255,255,.24) 11%, rgba(255,255,255,.18) 14%, rgba(0,0,0,0) 20%, rgba(0,0,0,.86) 38%, rgba(0,0,0,.95) 100%); }
+  28% { background: radial-gradient(circle at 74% 26%, rgba(255,255,255,.04) 0 10%, rgba(255,255,255,.24) 11%, rgba(255,255,255,.18) 14%, rgba(0,0,0,0) 20%, rgba(0,0,0,.86) 38%, rgba(0,0,0,.95) 100%); }
+  58% { background: radial-gradient(circle at 34% 72%, rgba(255,255,255,.04) 0 10%, rgba(255,255,255,.24) 11%, rgba(255,255,255,.18) 14%, rgba(0,0,0,0) 20%, rgba(0,0,0,.86) 38%, rgba(0,0,0,.95) 100%); }
+  82%, 100% { background: radial-gradient(circle at 62% 54%, rgba(255,255,255,.04) 0 11%, rgba(255,255,255,.26) 12%, rgba(255,255,255,.2) 15%, rgba(0,0,0,0) 22%, rgba(0,0,0,.84) 38%, rgba(0,0,0,.95) 100%); }
+}

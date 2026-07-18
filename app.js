@@ -1669,19 +1669,19 @@
       case 'drumroll':
         return `<div class="magic-stage-flash subtle"></div><div class="magic-center magic-plain magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-stick right"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span></div></div>`;
       case 'confetti':
-        return `<div class="magic-particles confetti-full">${makeParticles(220, 'magic-confetti')}</div>`;
+        return `<div class="magic-particles confetti-full">${makeParticles(280, 'magic-confetti')}</div>`;
       case 'micdrop':
         return `<div class="magic-stage-flash"></div><div class="magic-center magic-plain magic-micdrop-hero"><span class="magic-mic">🎤</span><span class="magic-mic-shadow"></span></div>`;
       case 'curtain':
         return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-reveal-shine"></div>`;
       case 'bubbles':
-        return `<div class="magic-particles bubbles-full">${makeParticles(170, 'magic-bubble')}</div>`;
+        return `<div class="magic-particles bubbles-full">${makeParticles(240, 'magic-bubble')}</div>`;
       case 'quiet':
         return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji">🤫</div><span class="magic-shush-wave one"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span></div>`;
       case 'applause':
         return `<div class="magic-particles applause-full">${makeParticles(120, 'magic-symbol', ['👏','👏','👏','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div></div>`;
       case 'spotlight':
-        return `<div class="magic-moving-spotlight one"></div><div class="magic-moving-spotlight two"></div><div class="magic-moving-spotlight three"></div>`;
+        return `<div class="magic-moving-spotlight"></div>`;
       case 'correct':
         return `<div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct"><div class="magic-mark">✅</div></div><div class="magic-particles">${makeParticles(72, 'magic-symbol', ['✅','✨','★'])}</div>`;
       case 'wrong':
@@ -1924,9 +1924,9 @@
         if ('speechSynthesis' in window) {
           try {
             window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance('Shhhhhhh.');
-            utter.rate = 0.64;
-            utter.pitch = 0.6;
+            const utter = new SpeechSynthesisUtterance('Shooooshhh...');
+            utter.rate = 0.58;
+            utter.pitch = 0.56;
             utter.volume = Math.min(1, 0.9 * volume);
             window.speechSynthesis.speak(utter);
           } catch (error) {}
@@ -1963,7 +1963,7 @@
         break;
     }
 
-    disconnectLater(master, effectId === 'curtain' || effectId === 'drumroll' ? 3.2 : 2.5);
+    disconnectLater(master, ['curtain','drumroll','confetti','bubbles','spotlight'].includes(effectId) ? 3.4 : 2.7);
   }
 
   function handleKeyboard(event) {
