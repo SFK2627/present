@@ -1130,6 +1130,39 @@ body.remote-fullscreen-open {
   gap: 10px;
   align-items: center;
 }
+
+body.is-dragging-card .folder-chip[data-folder-drop],
+body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
+  outline: 2px dashed rgba(101, 87, 255, .46);
+  outline-offset: 3px;
+}
+.folder-chip.drop-ready,
+.folder-chip-wrap.drop-ready {
+  transform: translateY(-2px) scale(1.02);
+  outline: 3px solid rgba(0, 183, 199, .45);
+  outline-offset: 4px;
+  box-shadow: 0 16px 36px rgba(0, 183, 199, .22);
+}
+.folder-chip-wrap.drop-ready .folder-chip {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+}
+.presentation-card {
+  cursor: grab;
+}
+.presentation-card:active {
+  cursor: grabbing;
+}
+.presentation-card.dragging {
+  opacity: .52;
+  transform: scale(.985);
+  border-color: rgba(101, 87, 255, .55);
+}
+.card-folder-row select,
+.card-actions button {
+  cursor: pointer;
+}
+
 .folder-chip,
 .folder-chip-wrap {
   display: inline-flex;
@@ -1246,4 +1279,63 @@ body.remote-fullscreen-open {
   .library-tools { grid-template-columns: 1fr; }
   .canva-add-row { grid-template-columns: 1fr; }
   .card-folder-row { grid-template-columns: 1fr; }
+}
+
+/* Remote controls visibility repair */
+.qr-grid-control-first .qr-primary {
+  position: relative;
+  border-radius: 24px;
+  padding: 12px;
+  background: rgba(99, 102, 241, .12);
+  border: 1px solid rgba(129, 140, 248, .32);
+}
+.qr-grid-control-first .qr-primary h4::after {
+  content: '  • scan this for buttons';
+  color: #a78bfa;
+  font-size: .82rem;
+}
+.qr-grid-control-first .qr-secondary {
+  opacity: .78;
+}
+.remote-control-banner {
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(34, 197, 94, .14);
+  border: 1px solid rgba(74, 222, 128, .24);
+  color: #dcfce7;
+  font-weight: 800;
+  font-size: .9rem;
+  text-align: center;
+}
+.remote-control-banner.viewer {
+  background: rgba(251, 191, 36, .14);
+  border-color: rgba(251, 191, 36, .26);
+  color: #fef3c7;
+}
+.remote-card .remote-grid,
+.remote-card .remote-section,
+.remote-card .remote-control-row,
+.remote-card .remote-wide,
+.remote-card .remote-slider-stack {
+  visibility: visible !important;
+}
+.remote-full-toolbar {
+  position: relative;
+  z-index: 2;
+}
+.remote-back-controls {
+  margin-left: auto;
+  background: rgba(34, 197, 94, .22) !important;
+  border: 1px solid rgba(74, 222, 128, .34) !important;
+}
+@media (max-width: 520px) {
+  .qr-grid-control-first .qr-primary,
+  .qr-grid-control-first .qr-secondary {
+    padding: 8px;
+  }
+  .remote-control-banner {
+    font-size: .82rem;
+    padding: 8px 10px;
+  }
 }

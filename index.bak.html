@@ -44,7 +44,7 @@
       <section class="toolbar-card glass">
         <div class="search-wrap">
           <span>⌕</span>
-          <input id="searchInput" type="search" placeholder="Search presentations, folders, or Canva links..." />
+          <input id="searchInput" type="search" placeholder="Search presentations..." />
         </div>
         <div class="select-wrap">
           <label for="sortSelect">Sort by</label>
@@ -53,33 +53,6 @@
             <option value="date">Date uploaded</option>
             <option value="name">Name</option>
           </select>
-        </div>
-      </section>
-
-      <section class="library-tools glass">
-        <div class="folders-panel">
-          <div class="mini-section-head">
-            <div>
-              <h3>Folders</h3>
-              <p>Organize files and Canva presentation links.</p>
-            </div>
-            <button id="createFolderBtn" type="button">+ Folder</button>
-          </div>
-          <div id="folderList" class="folder-list"></div>
-        </div>
-        <div class="canva-panel">
-          <div class="mini-section-head compact">
-            <div>
-              <h3>Add Canva link</h3>
-              <p>Paste a public view or embed link to open it inside the viewer.</p>
-            </div>
-          </div>
-          <div class="canva-add-row">
-            <input id="canvaTitleInput" type="text" placeholder="Optional title" />
-            <input id="canvaLinkInput" type="url" placeholder="Paste any Canva share, view, present, public, or embed link" />
-            <button id="addCanvaBtn" type="button">Add Canva</button>
-          </div>
-          <p class="help-text small">Tip: accepts Canva share/view/present/embed links or full iframe code. Private links may still ask viewers to log in.</p>
         </div>
       </section>
 
@@ -217,7 +190,6 @@
         <div id="viewerCanvasWrap" class="viewer-canvas-wrap">
           <canvas id="pdfCanvas" class="pdf-canvas hidden"></canvas>
           <div id="pptxSlide" class="pptx-slide hidden"></div>
-          <iframe id="canvaFrame" class="canva-frame hidden" title="Canva presentation viewer" allowfullscreen></iframe>
         </div>
         <div id="timerOverlay" class="timer-overlay bottom-right hidden">00:00:00</div>
       </section>
@@ -227,15 +199,15 @@
       <div class="modal-card glass">
         <button id="closeQrBtn" class="modal-close">×</button>
         <h3>Phone Remote Control</h3>
-        <p><strong>Scan the Control QR</strong> if you want buttons on your phone. Viewer QR is only for view-only preview.</p>
-        <div class="qr-grid qr-grid-control-first">
-          <div class="qr-primary">
-            <h4>Control QR / Host remote</h4>
+        <p>Scan this QR using your phone. Host gives full control. Viewer is view-only.</p>
+        <div class="qr-grid">
+          <div>
+            <h4>Host remote</h4>
             <div id="hostQr" class="qr-box"></div>
             <input id="hostRemoteLink" readonly />
           </div>
-          <div class="qr-secondary">
-            <h4>Viewer QR / Preview only</h4>
+          <div>
+            <h4>Viewer remote</h4>
             <div id="viewerQr" class="qr-box"></div>
             <input id="viewerRemoteLink" readonly />
           </div>

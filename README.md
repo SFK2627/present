@@ -135,3 +135,12 @@ This version adds local folders. Use **+ Folder** on the dashboard, click a fold
 ## Canva link viewer
 
 Use **Add Canva link** and paste a Canva public view link, smart embed link, or embed iframe code. The app will open the Canva design in the viewer with fullscreen support. Because Canva is embedded as an external website, the app cannot reliably control Canva's internal slide transitions or read its private slide thumbnails; use Canva's public view/embed settings for best results.
+
+
+## Folder drag-and-drop
+
+Presentation cards can be dragged directly into any folder chip. You can also drag PDF/PPTX files from your computer onto a folder chip to upload them directly into that folder. Drop onto Unfiled to remove a file from folders.
+
+## Remote controls visibility fix
+
+If the phone opens only the slide preview, scan the **Control QR / Host remote** code. The Viewer QR is intentionally view-only. This build also defaults remote links to host controls when the role is missing and adds a **Controls** button inside fullscreen phone preview so you can always return to the remote dashboard.

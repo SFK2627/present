@@ -527,9 +527,9 @@
     const counts = getFolderCounts();
     const chips = [
       `<button class="folder-chip ${state.activeFolderId === 'all' ? 'active' : ''}" data-folder="all"><span>All</span><b>${counts.all || 0}</b></button>`,
-      `<button class="folder-chip ${state.activeFolderId === 'unfiled' ? 'active' : ''}" data-folder="unfiled"><span>Unfiled</span><b>${counts.unfiled || 0}</b></button>`,
+      `<button class="folder-chip ${state.activeFolderId === 'unfiled' ? 'active' : ''}" data-folder="unfiled" data-folder-drop="unfiled" title="Drop files here to remove from folders"><span>Unfiled</span><b>${counts.unfiled || 0}</b></button>`,
       ...state.folders.map((folder) => `
-        <div class="folder-chip-wrap ${state.activeFolderId === folder.id ? 'active' : ''}">
+        <div class="folder-chip-wrap ${state.activeFolderId === folder.id ? 'active' : ''}" data-folder-drop="${folder.id}" title="Drop presentations here">
           <button class="folder-chip folder-main ${state.activeFolderId === folder.id ? 'active' : ''}" data-folder="${folder.id}">
             <span>${escapeHtml(folder.name)}</span><b>${counts[folder.id] || 0}</b>
           </button>
@@ -547,6 +547,55 @@
     els.folderList.querySelectorAll('[data-delete-folder]').forEach((button) => {
       button.addEventListener('click', () => deleteFolder(button.dataset.deleteFolder));
     });
+    setupFolderDropTargets();
+  }
+
+  function resolveDropFolderId(dropValue) {
+    if (dropValue === 'unfiled') return '';
+    return state.folders.some((folder) => folder.id === dropValue) ? dropValue : null;
+  }
+
+  function setupFolderDropTargets() {
+    if (!els.folderList) return;
+    els.folderList.querySelectorAll('[data-folder-drop]').forEach((target) => {
+      const clearDropState = () => target.classList.remove('drop-ready');
+      target.addEventListener('dragenter', (event) => {
+        if (!isSupportedFolderDrop(event)) return;
+        event.preventDefault();
+        target.classList.add('drop-ready');
+      });
+      target.addEventListener('dragover', (event) => {
+        if (!isSupportedFolderDrop(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        target.classList.add('drop-ready');
+      });
+      target.addEventListener('dragleave', (event) => {
+        if (!target.contains(event.relatedTarget)) clearDropState();
+      });
+      target.addEventListener('drop', async (event) => {
+        if (!isSupportedFolderDrop(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        clearDropState();
+        const folderId = resolveDropFolderId(target.dataset.folderDrop);
+        if (folderId === null) return;
+
+        const droppedFiles = event.dataTransfer.files;
+        if (droppedFiles && droppedFiles.length) {
+          await handleFiles(droppedFiles, folderId);
+          return;
+        }
+
+        const presentationId = event.dataTransfer.getData('application/x-presentation-id') || event.dataTransfer.getData('text/plain');
+        if (presentationId) await movePresentationToFolder(presentationId, folderId);
+      });
+    });
+  }
+
+  function isSupportedFolderDrop(event) {
+    const types = Array.from(event.dataTransfer ? event.dataTransfer.types || [] : []);
+    return types.includes('Files') || types.includes('application/x-presentation-id') || types.includes('text/plain');
   }
 
   function getUploadFolderId() {
@@ -570,17 +619,46 @@
     renderLibrary();
   }
 
+  function decodeLooseHtml(value) {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+  }
+
   function normalizeCanvaUrl(raw) {
-    let value = String(raw || '').trim();
-    const srcMatch = value.match(/src=["']([^"']+)["']/i);
+    let value = decodeLooseHtml(String(raw || '').trim());
+    if (!value) return null;
+
+    // Accept full Canva iframe/embed snippets, normal share links, links copied with
+    // extra text around them, and links where the browser/app escaped ampersands.
+    const srcMatch = value.match(/src\s*=\s*["']([^"']+)["']/i);
     if (srcMatch) value = srcMatch[1];
+    else {
+      const urlMatch = value.match(/https?:\/\/[^\s<>"']+|(?:www\.)?canva\.(?:com|site|cn|me)\/[^\s<>"']+/i);
+      if (urlMatch) value = urlMatch[0];
+    }
+
+    value = decodeLooseHtml(value)
+      .replace(/&amp;/gi, '&')
+      .trim()
+      .replace(/[),.;]+$/g, '');
+
     if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+
     let url;
     try { url = new URL(value); } catch (error) { return null; }
-    const host = url.hostname.toLowerCase();
-    if (!host.endsWith('canva.com') && !host.endsWith('canva.site') && !host.endsWith('canva.cn')) return null;
-    if (host.endsWith('canva.com') || host.endsWith('canva.cn')) {
-      if (!url.searchParams.has('embed')) url.searchParams.set('embed', '');
+
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    const allowed = host === 'canva.com' || host.endsWith('.canva.com') ||
+      host === 'canva.site' || host.endsWith('.canva.site') ||
+      host === 'canva.cn' || host.endsWith('.canva.cn') ||
+      host === 'canva.me' || host.endsWith('.canva.me');
+    if (!allowed) return null;
+
+    // Canva's public design/view links usually embed when ?embed is present.
+    // Keep public canva.site pages as-is because they are already designed for viewing.
+    if ((host === 'canva.com' || host.endsWith('.canva.com') || host === 'canva.cn' || host.endsWith('.canva.cn')) && !url.searchParams.has('embed')) {
+      url.searchParams.set('embed', '');
     }
     return url.toString();
   }
@@ -641,12 +719,12 @@
     return canvas.toDataURL('image/jpeg', 0.86);
   }
 
-  async function handleFiles(fileList) {
+  async function handleFiles(fileList, folderIdOverride) {
     const files = Array.from(fileList || []).filter((file) => /\.(pdf|pptx)$/i.test(file.name));
     if (!files.length) return;
 
     for (const file of files) {
-      const record = await createPresentationRecord(file, getUploadFolderId());
+      const record = await createPresentationRecord(file, typeof folderIdOverride === 'string' ? folderIdOverride : getUploadFolderId());
       state.files.unshift(record);
       await dbPut(record);
       renderLibrary();
@@ -848,6 +926,31 @@
     els.cardsGrid.querySelectorAll('[data-move-folder]').forEach((select) => {
       select.addEventListener('change', () => movePresentationToFolder(select.dataset.moveFolder, select.value));
     });
+    setupCardDragEvents();
+  }
+
+  function setupCardDragEvents() {
+    if (!els.cardsGrid) return;
+    els.cardsGrid.querySelectorAll('[data-card-id]').forEach((card) => {
+      card.addEventListener('dragstart', (event) => {
+        const tag = event.target && event.target.tagName ? event.target.tagName.toUpperCase() : '';
+        if (['BUTTON', 'SELECT', 'OPTION', 'INPUT', 'TEXTAREA', 'A'].includes(tag)) {
+          event.preventDefault();
+          return;
+        }
+        const id = card.dataset.cardId;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('application/x-presentation-id', id);
+        event.dataTransfer.setData('text/plain', id);
+        card.classList.add('dragging');
+        document.body.classList.add('is-dragging-card');
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        document.body.classList.remove('is-dragging-card');
+        document.querySelectorAll('.drop-ready').forEach((item) => item.classList.remove('drop-ready'));
+      });
+    });
   }
 
   function cardTemplate(file) {
@@ -855,7 +958,7 @@
     const typeLabel = file.type === 'pdf' ? 'PDF' : file.type === 'pptx' ? 'PPTX' : 'CANVA';
     const countLabel = file.type === 'pdf' ? `${file.pageCount} pages` : file.type === 'pptx' ? `${file.pageCount} slides` : 'Canva link';
     return `
-      <article class="presentation-card glass">
+      <article class="presentation-card glass" data-card-id="${file.id}" draggable="true" title="Drag this card to a folder">
         <span class="file-badge ${file.type === 'canva' ? 'canva-badge' : ''}">${typeLabel}</span>
         <div class="card-thumb"><img src="${file.thumbnail || createGenericThumbDataUrl(file.name, file.type)}" alt="${escapeHtml(file.name)} thumbnail"></div>
         <div class="card-body">
@@ -1960,13 +2063,13 @@
       els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
     } else {
       await setupRemoteSessionIfPossible();
-      els.qrHelp.textContent = `Session ${state.sessionId} is live. Multiple phones can connect. Host can control; Viewer is view-only.`;
+      els.qrHelp.textContent = `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
     }
 
     const session = state.sessionId || 'NO-FIREBASE';
     const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host`;
-    const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer`;
+    const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls`;
+    const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview`;
 
     els.hostRemoteLink.value = hostUrl;
     els.viewerRemoteLink.value = viewerUrl;
@@ -1978,16 +2081,19 @@
   }
 
   function renderRemoteApp() {
+    document.body.classList.remove('remote-fullscreen-open');
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (error) {} }
     els.app.classList.add('hidden');
     els.remoteApp.classList.remove('hidden');
     const sessionId = qs.get('session') || '';
-    const role = qs.get('role') || 'viewer';
+    const requestedRole = (qs.get('role') || 'host').toLowerCase();
+    const role = requestedRole === 'viewer' ? 'viewer' : 'host';
     const isHost = role === 'host';
     let remoteViewport = { zoom: 1, centerX: 0.5, centerY: 0.5 };
     let latestThumb = '';
 
     els.remoteApp.innerHTML = `
-      <main class="remote-card ${isHost ? '' : 'remote-viewer-only'}">
+      <main id="remoteControlDashboard" class="remote-card ${isHost ? '' : 'remote-viewer-only'}">
         <div class="remote-head">
           <div>
             <h1>Presentation Remote</h1>
@@ -1999,6 +2105,7 @@
           <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
           <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Fullscreen Preview</button>
         </div>
+        <div class="remote-control-banner ${isHost ? '' : 'viewer'}">${isHost ? 'Control dashboard active. Buttons below should be visible after scanning.' : 'Viewer mode: preview is visible, but controls are disabled.'}</div>
         <p class="remote-hint">Open fullscreen, rotate your phone landscape, then pinch and drag the preview. The desktop follows the same zoomed area.</p>
         <h2 id="remoteSlideLabel">Slide -- / --</h2>
         <p id="remoteFileLabel" class="remote-sub">Connect to an active desktop session.</p>
@@ -2062,6 +2169,7 @@
       <div id="remoteFullPreview" class="remote-full-preview hidden">
         <div class="remote-full-toolbar">
           <span id="remoteFullLabel">Slide Preview</span>
+          <button id="remoteBackToControls" class="remote-back-controls">Controls</button>
           <button id="remoteClosePreview">Close</button>
         </div>
         <div id="remoteFullStage" class="remote-full-stage">
@@ -2177,6 +2285,7 @@
   function attachRemotePreviewControls(ref, isHost, getViewport, setLocalViewport) {
     const openBtn = $('remotePreviewFullBtn');
     const closeBtn = $('remoteClosePreview');
+    const backBtn = $('remoteBackToControls');
     const full = $('remoteFullPreview');
     const stage = $('remoteFullStage');
     if (!openBtn || !full || !stage) return;
@@ -2211,6 +2320,7 @@
 
     openBtn.addEventListener('click', openFullPreview);
     if (closeBtn) closeBtn.addEventListener('click', closeFullPreview);
+    if (backBtn) backBtn.addEventListener('click', closeFullPreview);
     document.addEventListener('fullscreenchange', () => {
       if (!document.fullscreenElement && !full.classList.contains('hidden')) closeFullPreview();
     });
