@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111827" />
+  <title>Presentation Hub</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
+  <link rel="preconnect" href="https://www.gstatic.com" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar glass">
+      <div class="brand-group">
+        <div class="brand-mark">PH</div>
+        <div>
+          <h1>Presentation Hub</h1>
+          <p>Premium PDF viewer, presentation kiosk, and remote controller.</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="themeToggle" class="icon-button" title="Toggle dark mode">🌙</button>
+        <button id="firebaseStatus" class="pill-button muted">Remote setup</button>
+      </div>
+    </header>
+
+    <main id="homeView" class="home-view">
+      <section class="hero glass">
+        <div class="hero-copy">
+          <span class="eyebrow">Production-ready static website</span>
+          <h2>Open, present, auto-play, and control slides from your phone.</h2>
+          <p>Upload PDF or PPTX files, organize your presentations, and launch a clean fullscreen viewer with timer and remote controls.</p>
+        </div>
+        <label class="upload-zone" id="uploadZone">
+          <input id="fileInput" type="file" multiple accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+          <span class="upload-icon">⬆</span>
+          <strong>Upload presentations</strong>
+          <small>Drop or select multiple PDF/PPTX files</small>
+        </label>
+      </section>
+
+      <section class="toolbar-card glass">
+        <div class="search-wrap">
+          <span>⌕</span>
+          <input id="searchInput" type="search" placeholder="Search presentations..." />
+        </div>
+        <div class="select-wrap">
+          <label for="sortSelect">Sort by</label>
+          <select id="sortSelect">
+            <option value="recent">Recently viewed</option>
+            <option value="date">Date uploaded</option>
+            <option value="name">Name</option>
+          </select>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div>
+            <h3>Your presentations</h3>
+            <p id="libraryCount">No files yet</p>
+          </div>
+          <button id="clearLibraryBtn" class="text-button">Clear local library</button>
+        </div>
+        <div id="cardsGrid" class="cards-grid"></div>
+        <div id="emptyState" class="empty-state glass">
+          <div>📁</div>
+          <h3>No presentations yet</h3>
+          <p>Upload a PDF or PPTX to start presenting. Files are cached locally in this browser.</p>
+        </div>
+      </section>
+    </main>
+
+    <main id="viewerView" class="viewer-view hidden">
+      <aside id="thumbnailSidebar" class="thumb-sidebar glass"></aside>
+
+      <section id="viewerStage" class="viewer-stage">
+        <div id="viewerToolbar" class="viewer-toolbar glass">
+          <button id="backHomeBtn">← Home</button>
+          <button id="prevBtn">Previous</button>
+          <button id="nextBtn">Next</button>
+          <label class="jump-control">Page
+            <input id="jumpInput" type="number" min="1" value="1" />
+            <span id="pageTotalLabel">/ 1</span>
+          </label>
+          <button id="zoomOutBtn">−</button>
+          <span id="zoomLabel">100%</span>
+          <button id="zoomInBtn">+</button>
+          <button id="resetZoomBtn">Reset</button>
+          <button id="fullscreenBtn">Fullscreen</button>
+          <button id="qrBtn">Remote QR</button>
+          <button id="settingsBtn">Controls</button>
+        </div>
+
+        <div id="controlPanel" class="control-panel glass hidden">
+          <div class="panel-section">
+            <h4>Auto Slide</h4>
+            <div class="field-grid">
+              <label>Global timing
+                <select id="globalTimingSelect">
+                  <option value="5">5 seconds</option>
+                  <option value="10" selected>10 seconds</option>
+                  <option value="15">15 seconds</option>
+                  <option value="20">20 seconds</option>
+                  <option value="30">30 seconds</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </label>
+              <label id="customTimingWrap" class="hidden">Custom sec
+                <input id="customTimingInput" type="number" min="1" value="12" />
+              </label>
+              <label>Current page timing
+                <input id="perSlideTimingInput" type="number" min="1" placeholder="Use global" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="autoStartBtn">Start</button>
+              <button id="autoPauseBtn">Pause</button>
+              <button id="autoResumeBtn">Resume</button>
+              <button id="autoStopBtn">Stop</button>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h4>Timer Overlay</h4>
+            <div class="field-grid">
+              <label>Mode
+                <select id="timerModeSelect">
+                  <option value="up">Count Up</option>
+                  <option value="down">Countdown</option>
+                </select>
+              </label>
+              <label>Countdown minutes
+                <input id="countdownMinutesInput" type="number" min="1" value="10" />
+              </label>
+              <label>Position
+                <select id="timerPositionSelect">
+                  <option value="bottom-right">Bottom Right</option>
+                  <option value="bottom-left">Bottom Left</option>
+                  <option value="top-right">Top Right</option>
+                  <option value="top-left">Top Left</option>
+                </select>
+              </label>
+              <label>Opacity
+                <input id="timerOpacityInput" type="range" min="0" max="100" step="25" value="75" />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="timerShowBtn">Show Timer</button>
+              <button id="timerHideBtn">Hide Timer</button>
+              <button id="timerResetBtn">Reset Timer</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="viewerCanvasWrap" class="viewer-canvas-wrap">
+          <canvas id="pdfCanvas" class="pdf-canvas hidden"></canvas>
+          <div id="pptxSlide" class="pptx-slide hidden"></div>
+        </div>
+        <div id="timerOverlay" class="timer-overlay bottom-right hidden">00:00:00</div>
+      </section>
+    </main>
+
+    <div id="qrModal" class="modal hidden">
+      <div class="modal-card glass">
+        <button id="closeQrBtn" class="modal-close">×</button>
+        <h3>Phone Remote Control</h3>
+        <p>Scan this QR using your phone. Host gives full control. Viewer is view-only.</p>
+        <div class="qr-grid">
+          <div>
+            <h4>Host remote</h4>
+            <div id="hostQr" class="qr-box"></div>
+            <input id="hostRemoteLink" readonly />
+          </div>
+          <div>
+            <h4>Viewer remote</h4>
+            <div id="viewerQr" class="qr-box"></div>
+            <input id="viewerRemoteLink" readonly />
+          </div>
+        </div>
+        <p id="qrHelp" class="help-text"></p>
+      </div>
+    </div>
+
+    <div id="setupModal" class="modal hidden">
+      <div class="modal-card glass narrow">
+        <button id="closeSetupBtn" class="modal-close">×</button>
+        <h3>Remote setup</h3>
+        <p>For phone remote control across devices, edit <strong>firebase-config.js</strong> and add your Firebase web app config. The app still works offline for local presenting without Firebase.</p>
+        <pre class="code-note">window.PRESENTATION_HUB_FIREBASE_CONFIG = {
+  apiKey: "...",
+  authDomain: "...",
+  projectId: "...",
+  storageBucket: "...",
+  messagingSenderId: "...",
+  appId: "..."
+};</pre>
+      </div>
+    </div>
+  </div>
+
+  <div id="remoteApp" class="remote-app hidden"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
