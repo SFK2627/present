@@ -229,7 +229,7 @@
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
-      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'pickNameBtn', 'rollGroupBtn', 'pickRollBtn', 'resetPicksBtn', 'classroomResult', 'classroomRoster'
+      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'classListFileInput', 'importClassListBtn', 'classImportStatus', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'pickNameBtn', 'rollGroupBtn', 'pickRollBtn', 'resetPicksBtn', 'presentClassroomBtn', 'classroomResult', 'classroomRoster'
     ].forEach((id) => { els[id] = $(id); });
   }
 
@@ -368,10 +368,13 @@
 
     if (els.classroomBtn) els.classroomBtn.addEventListener('click', openClassroomTools);
     if (els.closeClassroomBtn) els.closeClassroomBtn.addEventListener('click', () => hideModal(els.classroomModal));
+    if (els.presentClassroomBtn) els.presentClassroomBtn.addEventListener('click', openClassroomPresentationMode);
     if (els.classroomAuthBtn) els.classroomAuthBtn.addEventListener('click', signInClassroomAccount);
     if (els.addSectionBtn) els.addSectionBtn.addEventListener('click', addClassroomSection);
     if (els.sectionSelect) els.sectionSelect.addEventListener('change', () => { state.classroom.activeSectionId = els.sectionSelect.value; state.classroom.pickedIds = []; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); });
     if (els.saveNamesBtn) els.saveNamesBtn.addEventListener('click', saveClassroomNames);
+    if (els.importClassListBtn) els.importClassListBtn.addEventListener('click', () => els.classListFileInput && els.classListFileInput.click());
+    if (els.classListFileInput) els.classListFileInput.addEventListener('change', importClassListFile);
     if (els.groupCountInput) els.groupCountInput.addEventListener('change', () => { state.classroom.groupCount = Math.max(2, Math.min(20, Number(els.groupCountInput.value) || 6)); scheduleClassroomSave(); publishSessionState(true); });
     if (els.removePickedInput) els.removePickedInput.addEventListener('change', () => { state.classroom.removePicked = els.removePickedInput.checked; scheduleClassroomSave(); });
     if (els.balancedGroupsInput) els.balancedGroupsInput.addEventListener('change', () => { state.classroom.balanced = els.balancedGroupsInput.checked; scheduleClassroomSave(); });
@@ -4189,6 +4192,105 @@
     state.classroom.sections.push({ id, name, students: [] }); state.classroom.activeSectionId = id; els.newSectionName.value = '';
     renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
   }
+  function normalizeClassHeader(value) {
+    return String(value || '').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+  }
+  function findClassColumn(row, aliases) {
+    const keys = Object.keys(row || {});
+    return keys.find((key) => aliases.includes(normalizeClassHeader(key))) || '';
+  }
+  function makeStudentId(sectionId, studentId, name, index) {
+    const source = String(studentId || name || index).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return `${sectionId}-${source || index}`;
+  }
+  async function importClassListFile(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    if (els.classImportStatus) els.classImportStatus.textContent = 'Reading class list...';
+    try {
+      let rows = [];
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith('.csv')) {
+        const text = await file.text();
+        if (window.XLSX) {
+          const workbook = XLSX.read(text, { type: 'string' });
+          rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+        } else {
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          const headers = (lines.shift() || '').split(',').map(x => x.trim());
+          rows = lines.map(line => Object.fromEntries(line.split(',').map((v, i) => [headers[i] || `Column${i+1}`, v.trim()])));
+        }
+      } else {
+        if (!window.XLSX) throw new Error('Excel reader is not available. Connect to the internet once, then reload the app.');
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        for (const sheetName of workbook.SheetNames) {
+          const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '', raw: false });
+          rows.push(...sheetRows);
+        }
+      }
+      rows = rows.filter(row => Object.values(row || {}).some(value => String(value || '').trim()));
+      if (!rows.length) throw new Error('No student rows were found.');
+      const sample = rows[0] || {};
+      const idKey = findClassColumn(sample, ['studentid','studentnumber','id','lrn']);
+      const nameKey = findClassColumn(sample, ['name','studentname','fullname','learnername']);
+      const genderKey = findClassColumn(sample, ['gender','sex']);
+      const sectionKey = findClassColumn(sample, ['section','class','classname','gradeandsection']);
+      if (!nameKey) throw new Error('A Name column is required. Use: Student ID | Name | Gender | Section');
+      const grouped = new Map();
+      for (const row of rows) {
+        const name = String(row[nameKey] || '').trim();
+        if (!name) continue;
+        const sectionName = String((sectionKey && row[sectionKey]) || 'Imported Section').trim() || 'Imported Section';
+        if (!grouped.has(sectionName)) grouped.set(sectionName, []);
+        grouped.get(sectionName).push({
+          studentId: idKey ? String(row[idKey] || '').trim() : '',
+          name,
+          gender: genderKey ? String(row[genderKey] || '').trim() : ''
+        });
+      }
+      let importedStudents = 0;
+      let importedSections = 0;
+      for (const [sectionName, students] of grouped.entries()) {
+        let section = state.classroom.sections.find(s => s.name.trim().toLowerCase() === sectionName.toLowerCase());
+        if (!section) {
+          section = { id: `sec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`, name: sectionName, students: [] };
+          state.classroom.sections.push(section);
+          importedSections++;
+        }
+        const byKey = new Map(section.students.map(s => [String(s.studentId || s.name).trim().toLowerCase(), s]));
+        for (const student of students) {
+          const key = String(student.studentId || student.name).trim().toLowerCase();
+          const existing = byKey.get(key);
+          if (existing) {
+            existing.name = student.name;
+            existing.studentId = student.studentId;
+            existing.gender = student.gender;
+          } else {
+            const record = { id: makeStudentId(section.id, student.studentId, student.name, section.students.length), ...student };
+            section.students.push(record);
+            byKey.set(key, record);
+            importedStudents++;
+          }
+        }
+        if (!state.classroom.activeSectionId) state.classroom.activeSectionId = section.id;
+      }
+      const firstImported = state.classroom.sections.find(s => grouped.has(s.name));
+      if (firstImported) state.classroom.activeSectionId = firstImported.id;
+      state.classroom.pickedIds = [];
+      state.classroom.assignments = {};
+      renderClassroomTools();
+      scheduleClassroomSave();
+      publishSessionState(true);
+      if (els.classImportStatus) els.classImportStatus.textContent = `Imported ${importedStudents} student${importedStudents === 1 ? '' : 's'} across ${grouped.size} section${grouped.size === 1 ? '' : 's'}. Existing matches were updated.`;
+    } catch (error) {
+      console.warn('Class list import failed', error);
+      if (els.classImportStatus) els.classImportStatus.textContent = error.message || 'Could not import this file.';
+      alert(error.message || 'Could not import this class list.');
+    } finally {
+      event.target.value = '';
+    }
+  }
   function saveClassroomNames() {
     const sec = activeClassSection(); if (!sec) return alert('Create or select a section first.');
     const names = (els.studentNamesInput.value || '').split(/\n|,/).map(x => x.trim()).filter(Boolean);
@@ -4206,6 +4308,7 @@
     els.removePickedInput.checked = state.classroom.removePicked;
     els.balancedGroupsInput.checked = state.classroom.balanced;
     els.classroomResult.innerHTML = state.classroom.lastStudent ? `<strong>${escapeHtml(state.classroom.lastStudent.name)}</strong>${state.classroom.lastGroup ? `<span>GROUP ${state.classroom.lastGroup}</span>` : ''}` : '<span>Ready to pick</span>';
+    renderClassroomPresentation();
     els.classroomRoster.innerHTML = sec ? sec.students.map(s => `<div><span>${escapeHtml(s.name)}</span><b>${state.classroom.assignments[s.id] ? 'G'+state.classroom.assignments[s.id] : ''}</b></div>`).join('') : '';
   }
   function classroomRemoteSnapshot() {
@@ -4234,10 +4337,84 @@
   }
   function pickAndRoll() { const student = pickRandomStudent(); if (student) setTimeout(rollGroupDice, 850); }
   function resetClassroomRound() { state.classroom.pickedIds=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
+  function getClassroomPresentationLayer() {
+    let layer = document.getElementById('classroomPresentationLayer');
+    if (layer) return layer;
+    layer = document.createElement('div');
+    layer.id = 'classroomPresentationLayer';
+    layer.className = 'classroom-presentation-layer hidden';
+    layer.innerHTML = `
+      <div class="classroom-stage-aurora aurora-a"></div>
+      <div class="classroom-stage-aurora aurora-b"></div>
+      <div class="classroom-stage-grid"></div>
+      <div class="classroom-stage-stars"></div>
+      <button class="classroom-stage-close" type="button" aria-label="Exit classroom presentation">×</button>
+      <div class="classroom-stage-content">
+        <div class="classroom-stage-kicker">CLASSROOM RANDOMIZER</div>
+        <div class="classroom-stage-section">Select a section</div>
+        <div class="classroom-stage-main">
+          <div class="classroom-stage-icon">✦</div>
+          <h1>Ready for the next pick</h1>
+          <p>Use the phone remote or the classroom controls.</p>
+        </div>
+      </div>`;
+    document.body.appendChild(layer);
+    layer.querySelector('.classroom-stage-close').addEventListener('click', closeClassroomPresentationMode);
+    return layer;
+  }
+  function renderClassroomPresentation() {
+    const layer = document.getElementById('classroomPresentationLayer');
+    if (!layer) return;
+    const sec = activeClassSection();
+    const sectionEl = layer.querySelector('.classroom-stage-section');
+    const main = layer.querySelector('.classroom-stage-main');
+    if (sectionEl) sectionEl.textContent = sec ? sec.name : 'Select a section';
+    if (!main) return;
+    if (state.classroom.lastStudent || state.classroom.lastGroup) {
+      main.innerHTML = `${state.classroom.lastStudent ? `<div class="classroom-stage-label">SELECTED STUDENT</div><h1>${escapeHtml(state.classroom.lastStudent.name)}</h1>` : ''}${state.classroom.lastGroup ? `<div class="classroom-stage-final-die">${state.classroom.lastGroup}</div><h2>GROUP ${state.classroom.lastGroup}</h2>` : '<p>Ready to roll a group.</p>'}`;
+    } else {
+      main.innerHTML = '<div class="classroom-stage-icon">✦</div><h1>Ready for the next pick</h1><p>Use the phone remote or the classroom controls.</p>';
+    }
+  }
+  async function openClassroomPresentationMode() {
+    const layer = getClassroomPresentationLayer();
+    renderClassroomPresentation();
+    layer.classList.remove('hidden');
+    hideModal(els.classroomModal);
+    try { if (!document.fullscreenElement && layer.requestFullscreen) await layer.requestFullscreen(); } catch (e) { console.warn('Classroom fullscreen was blocked', e); }
+  }
+  function closeClassroomPresentationMode() {
+    const layer = document.getElementById('classroomPresentationLayer');
+    if (document.fullscreenElement === layer) document.exitFullscreen().catch(() => {});
+    if (layer) layer.classList.add('hidden');
+  }
+  document.addEventListener('fullscreenchange', () => {
+    const layer = document.getElementById('classroomPresentationLayer');
+    if (layer && !document.fullscreenElement && !layer.classList.contains('hidden')) layer.classList.add('hidden');
+  });
   function showClassroomReveal(name, group) {
-    let layer=document.getElementById('classroomRevealLayer'); if(!layer){ layer=document.createElement('div'); layer.id='classroomRevealLayer'; document.body.appendChild(layer); }
-    layer.className='classroom-reveal-layer show'; layer.innerHTML=`<div class="classroom-reveal-card"><small>${group ? 'GROUP DICE' : 'RANDOM NAME'}</small>${name?`<h2>${escapeHtml(name)}</h2>`:''}${group?`<div class="classroom-die">${group}</div><h3>GROUP ${group}</h3>`:''}</div>`;
-    setTimeout(()=>layer.classList.remove('show'), group ? 2500 : 1700);
+    const fullscreenHost = document.fullscreenElement || document.body;
+    let layer = document.getElementById('classroomRevealLayer');
+    if (!layer) { layer = document.createElement('div'); layer.id = 'classroomRevealLayer'; }
+    if (layer.parentElement !== fullscreenHost) fullscreenHost.appendChild(layer);
+    const sparkles = Array.from({length:18}, (_,i)=>`<i style="--i:${i};--x:${8+Math.random()*84}%;--y:${8+Math.random()*80}%;--d:${(Math.random()*1.3).toFixed(2)}s"></i>`).join('');
+    layer.className = `classroom-reveal-layer show ${group ? 'group-reveal' : 'name-reveal'}`;
+    layer.innerHTML = `<div class="classroom-reveal-bg"></div><div class="classroom-reveal-orbit orbit-one"></div><div class="classroom-reveal-orbit orbit-two"></div><div class="classroom-reveal-sparkles">${sparkles}</div><canvas class="classroom-reveal-confetti"></canvas><div class="classroom-reveal-card"><div class="classroom-reveal-badge">${group ? 'GROUP DICE' : 'RANDOM NAME'}</div>${name?`<h2 data-text="${escapeHtml(name)}">${escapeHtml(name)}</h2>`:''}${group?`<div class="classroom-die"><span>${group}</span></div><h3>GROUP ${group}</h3>`:'<div class="classroom-reveal-line"></div><p>Selected!</p>'}</div>`;
+    startClassroomRevealConfetti(layer, !!group);
+    const duration = group ? 3900 : 3200;
+    clearTimeout(layer._hideTimer);
+    layer._hideTimer = setTimeout(() => { layer.classList.remove('show'); renderClassroomPresentation(); }, duration);
+  }
+  function startClassroomRevealConfetti(layer, groupMode) {
+    const canvas = layer.querySelector('.classroom-reveal-confetti'); if (!canvas) return;
+    const ctx = canvas.getContext('2d'); const host = layer.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2); canvas.width = host.width*dpr; canvas.height = host.height*dpr; ctx.scale(dpr,dpr);
+    const colors=['#fde047','#fb7185','#60a5fa','#34d399','#c084fc','#ffffff'];
+    const count = groupMode ? 150 : 100;
+    const particles=Array.from({length:count},(_,i)=>({x:host.width/2+(Math.random()-.5)*100,y:host.height*.48,vx:(Math.random()-.5)*12,vy:-5-Math.random()*10,g:.16+Math.random()*.12,w:5+Math.random()*8,h:7+Math.random()*13,r:Math.random()*6.28,vr:(Math.random()-.5)*.3,c:colors[i%colors.length],life:1}));
+    const start=performance.now();
+    function frame(now){ const elapsed=now-start; ctx.clearRect(0,0,host.width,host.height); particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=p.g;p.r+=p.vr;p.life=Math.max(0,1-elapsed/3000);ctx.save();ctx.globalAlpha=p.life;ctx.translate(p.x,p.y);ctx.rotate(p.r);ctx.fillStyle=p.c;ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore();}); if(elapsed<3000 && layer.classList.contains('show')) requestAnimationFrame(frame); }
+    requestAnimationFrame(frame);
   }
   function startCanvasMagicEffect(layer, type) {
     const canvas=layer.querySelector('canvas'); if(!canvas) return; const ctx=canvas.getContext('2d'); let raf=0; const start=performance.now();
