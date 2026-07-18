@@ -201,3 +201,37 @@ For perfect PPTX design fidelity, export PPTX/Canva to PDF first and upload the 
 - Rebalanced per-effect sound mix levels for more consistent loudness.
 - Added smoother, more premium overlay polish and richer curtain/confetti/bubbles styling.
 - Fine-tuned quiet/shoosh voice delivery and mix.
+
+## Version 11 - Classroom Randomizer
+
+New features:
+- Google account sign-in for syncing classroom sections and student names.
+- Local-first saving: data remains usable offline and syncs when signed in.
+- Random name picker with optional remove-after-picked.
+- Group dice from 2 to 20 groups.
+- Balanced grouping assigns among the currently smallest groups.
+- Phone remote section selector and Pick / Roll / Pick + Roll controls.
+- Revised curtain reveal, canvas confetti/bubbles, and readable moving spotlight.
+
+### Firebase Authentication setup
+1. Open Firebase Console > Authentication > Sign-in method.
+2. Enable Google.
+3. Add the deployed GitHub Pages domain to Authentication > Settings > Authorized domains.
+4. Keep Anonymous enabled because the phone remote uses an anonymous session before an optional Google sign-in.
+
+### Recommended Firestore rules
+Replace PROJECT_OWNER_EMAIL with the Google account that owns the classroom data if you want stricter access. The general rules below allow authenticated users to access only their own classroom document while preserving remote sessions.
+
+```rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /presentationHubSessions/{sessionId} {
+      allow read, write: if request.auth != null;
+    }
+    match /presentationHubUsers/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
+```

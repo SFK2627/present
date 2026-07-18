@@ -93,6 +93,9 @@
     magicEffectVolume: 200,
     magicEffectSound: true,
     magicEffectIntensity: 'grand',
+    classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null },
+    classroomSyncTimer: null,
+    firebaseUser: null,
   };
 
 
@@ -201,6 +204,7 @@
     }
 
     await loadLibrary();
+    loadClassroomLocal();
     loadFolders();
     renderFolderList();
     renderLibrary();
@@ -225,7 +229,7 @@
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
-      'qrHelp', 'setupModal', 'closeSetupBtn'
+      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'pickNameBtn', 'rollGroupBtn', 'pickRollBtn', 'resetPicksBtn', 'classroomResult', 'classroomRoster'
     ].forEach((id) => { els[id] = $(id); });
   }
 
@@ -362,6 +366,20 @@
     if (els.timerHideBtn) els.timerHideBtn.addEventListener('click', hideTimer);
     if (els.timerResetBtn) els.timerResetBtn.addEventListener('click', resetTimer);
 
+    if (els.classroomBtn) els.classroomBtn.addEventListener('click', openClassroomTools);
+    if (els.closeClassroomBtn) els.closeClassroomBtn.addEventListener('click', () => hideModal(els.classroomModal));
+    if (els.classroomAuthBtn) els.classroomAuthBtn.addEventListener('click', signInClassroomAccount);
+    if (els.addSectionBtn) els.addSectionBtn.addEventListener('click', addClassroomSection);
+    if (els.sectionSelect) els.sectionSelect.addEventListener('change', () => { state.classroom.activeSectionId = els.sectionSelect.value; state.classroom.pickedIds = []; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); });
+    if (els.saveNamesBtn) els.saveNamesBtn.addEventListener('click', saveClassroomNames);
+    if (els.groupCountInput) els.groupCountInput.addEventListener('change', () => { state.classroom.groupCount = Math.max(2, Math.min(20, Number(els.groupCountInput.value) || 6)); scheduleClassroomSave(); publishSessionState(true); });
+    if (els.removePickedInput) els.removePickedInput.addEventListener('change', () => { state.classroom.removePicked = els.removePickedInput.checked; scheduleClassroomSave(); });
+    if (els.balancedGroupsInput) els.balancedGroupsInput.addEventListener('change', () => { state.classroom.balanced = els.balancedGroupsInput.checked; scheduleClassroomSave(); });
+    if (els.pickNameBtn) els.pickNameBtn.addEventListener('click', pickRandomStudent);
+    if (els.rollGroupBtn) els.rollGroupBtn.addEventListener('click', rollGroupDice);
+    if (els.pickRollBtn) els.pickRollBtn.addEventListener('click', pickAndRoll);
+    if (els.resetPicksBtn) els.resetPicksBtn.addEventListener('click', resetClassroomRound);
+
     document.addEventListener('keydown', handleKeyboard, true);
     window.addEventListener('keydown', handleKeyboard, true);
     document.addEventListener('fullscreenchange', syncFullscreenState);
@@ -403,9 +421,20 @@
     try {
       if (!firebase.apps.length) firebase.initializeApp(window.PRESENTATION_HUB_FIREBASE_CONFIG);
       state.firebaseDb = firebase.firestore();
-      await firebase.auth().signInAnonymously();
+      let user = firebase.auth().currentUser;
+      if (!user) {
+        const cred = await firebase.auth().signInAnonymously();
+        user = cred.user;
+      }
+      state.firebaseUser = user;
       state.firebaseAuthReady = true;
       state.firebaseReady = true;
+      firebase.auth().onAuthStateChanged(async (nextUser) => {
+        state.firebaseUser = nextUser || null;
+        updateFirebaseStatus();
+        updateClassroomAuthUI();
+        if (nextUser && !nextUser.isAnonymous) await loadClassroomCloud();
+      });
       updateFirebaseStatus();
       return true;
     } catch (error) {
@@ -419,7 +448,7 @@
   function updateFirebaseStatus(customText) {
     if (!els.firebaseStatus) return;
     if (state.firebaseReady) {
-      els.firebaseStatus.textContent = 'Remote ready';
+      els.firebaseStatus.textContent = state.firebaseUser && !state.firebaseUser.isAnonymous ? 'Account synced' : 'Remote ready';
       els.firebaseStatus.classList.add('ready');
       els.firebaseStatus.classList.remove('muted');
     } else {
@@ -1640,7 +1669,7 @@
 
   function createMagicLayer() {
     let layer = document.getElementById('magicEffectLayer');
-    const host = document.fullscreenElement || document.body;
+    const host = document.fullscreenElement || els.viewerView || document.body;
     if (!layer) {
       layer = document.createElement('div');
       layer.id = 'magicEffectLayer';
@@ -1652,31 +1681,13 @@
 
   function makeParticles(count, className, symbols = []) {
     const items = [];
-    const isConfetti = className === 'magic-confetti';
-    const isBubble = className === 'magic-bubble';
-
     for (let i = 0; i < count; i++) {
       const x = Math.round(Math.random() * 100);
-      const driftRange = isBubble ? 90 : 140;
-      const drift = Math.round((Math.random() - 0.5) * driftRange);
-      const driftMid = Math.round(drift * 0.42 + (Math.random() - 0.5) * 34);
-      const size = isBubble
-        ? Math.round(12 + Math.random() * 22)
-        : Math.round(10 + Math.random() * 18);
-      const delay = isBubble
-        ? `-${(Math.random() * 3.4).toFixed(2)}`
-        : isConfetti
-          ? `-${(Math.random() * 1.65).toFixed(2)}`
-          : (Math.random() * 0.85).toFixed(2);
-      const duration = isBubble
-        ? (4.4 + Math.random() * 1.5).toFixed(2)
-        : isConfetti
-          ? (2.65 + Math.random() * 0.85).toFixed(2)
-          : '2.15';
-      const hue = Math.round(Math.random() * 360);
-      const rotation = Math.round(520 + Math.random() * 720) * (Math.random() > 0.5 ? 1 : -1);
+      const delay = (Math.random() * 0.85).toFixed(2);
+      const drift = Math.round((Math.random() - 0.5) * 140);
+      const size = Math.round(10 + Math.random() * 18);
       const symbol = symbols.length ? symbols[i % symbols.length] : '';
-      items.push(`<i class="${className}" style="--x:${x}%;--d:${delay}s;--drift:${drift}px;--drift-mid:${driftMid}px;--s:${size}px;--dur:${duration}s;--h:${hue};--rot:${rotation}deg">${symbol}</i>`);
+      items.push(`<i class="${className}" style="--x:${x}%;--d:${delay}s;--drift:${drift}px;--s:${size}px">${symbol}</i>`);
     }
     return items.join('');
   }
@@ -1687,19 +1698,19 @@
       case 'drumroll':
         return `<div class="magic-stage-flash subtle"></div><div class="magic-center magic-plain magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-stick right"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span></div></div>`;
       case 'confetti':
-        return `<canvas class="magic-fx-canvas magic-confetti-canvas" aria-hidden="true"></canvas>`;
+        return `<canvas class="magic-fx-canvas magic-confetti-canvas"></canvas>`;
       case 'micdrop':
         return `<div class="magic-stage-flash"></div><div class="magic-center magic-plain magic-micdrop-hero"><span class="magic-mic">🎤</span><span class="magic-mic-shadow"></span></div>`;
       case 'curtain':
-        return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-reveal-shine"></div>`;
+        return `<div class="magic-curtain-stage"><div class="magic-curtain valance"></div><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain-tie left"></div><div class="magic-curtain-tie right"></div><div class="magic-reveal-shine"></div></div>`;
       case 'bubbles':
-        return `<canvas class="magic-fx-canvas magic-bubbles-canvas" aria-hidden="true"></canvas>`;
+        return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas>`;
       case 'quiet':
-        return `<div class="magic-quiet-screen"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji" role="img" aria-label="Be Quiet">🤫</div></div>`;
+        return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji">🤫</div><span class="magic-shush-wave one"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span></div>`;
       case 'applause':
         return `<div class="magic-particles applause-full">${makeParticles(120, 'magic-symbol', ['👏','👏','👏','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div></div>`;
       case 'spotlight':
-        return `<div class="magic-spotlight-dark"></div><div class="magic-moving-spotlight"></div>`;
+        return `<div class="magic-spotlight-dimmer"></div><div class="magic-moving-spotlight"></div>`;
       case 'correct':
         return `<div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct"><div class="magic-mark">✅</div></div><div class="magic-particles">${makeParticles(72, 'magic-symbol', ['✅','✨','★'])}</div>`;
       case 'wrong':
@@ -1719,115 +1730,6 @@
     }
   }
 
-  function startMagicCanvas(effectId, layer) {
-    const canvas = layer.querySelector('.magic-fx-canvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: true });
-    if (!ctx) return;
-
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    let width = 0;
-    let height = 0;
-    const resize = () => {
-      const rect = layer.getBoundingClientRect();
-      width = Math.max(1, rect.width);
-      height = Math.max(1, rect.height);
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    resize();
-
-    const colors = ['#ff375f', '#ffcc00', '#34c759', '#0a84ff', '#bf5af2', '#ff9f0a', '#64d2ff'];
-    const isConfetti = effectId === 'confetti';
-    const count = isConfetti ? Math.min(190, Math.max(120, Math.round(width / 7))) : Math.min(64, Math.max(38, Math.round(width / 22)));
-    const particles = Array.from({ length: count }, (_, i) => {
-      if (isConfetti) {
-        return {
-          x: Math.random() * width,
-          y: -20 - Math.random() * height * .48,
-          vx: (Math.random() - .5) * 2.3,
-          vy: 3.2 + Math.random() * 4.7,
-          gravity: .035 + Math.random() * .045,
-          w: 7 + Math.random() * 10,
-          h: 4 + Math.random() * 9,
-          rotation: Math.random() * Math.PI * 2,
-          spin: (Math.random() - .5) * .22,
-          color: colors[i % colors.length],
-          wave: Math.random() * Math.PI * 2,
-          waveSpeed: .025 + Math.random() * .035
-        };
-      }
-      const radius = 9 + Math.random() * 18;
-      return {
-        x: radius + Math.random() * Math.max(1, width - radius * 2),
-        y: height + radius + Math.random() * height * .8,
-        radius,
-        speed: .75 + Math.random() * 1.45,
-        drift: (Math.random() - .5) * .38,
-        phase: Math.random() * Math.PI * 2,
-        alpha: .34 + Math.random() * .38
-      };
-    });
-
-    const started = performance.now();
-    const maxLife = isConfetti ? 3800 : 5000;
-    const draw = (now) => {
-      if (!canvas.isConnected || !layer.classList.contains('show')) return;
-      const elapsed = now - started;
-      ctx.clearRect(0, 0, width, height);
-
-      if (isConfetti) {
-        for (const p of particles) {
-          p.vy += p.gravity;
-          p.wave += p.waveSpeed;
-          p.x += p.vx + Math.sin(p.wave) * .7;
-          p.y += p.vy;
-          p.rotation += p.spin;
-          if (p.x < -30) p.x = width + 20;
-          if (p.x > width + 30) p.x = -20;
-          ctx.save();
-          ctx.translate(p.x, p.y);
-          ctx.rotate(p.rotation);
-          ctx.fillStyle = p.color;
-          ctx.globalAlpha = Math.min(1, Math.max(0, (maxLife - elapsed) / 450));
-          ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
-          ctx.restore();
-        }
-      } else {
-        for (const p of particles) {
-          p.phase += .018;
-          p.y -= p.speed;
-          p.x += p.drift + Math.sin(p.phase) * .22;
-          if (p.y < -p.radius * 2) {
-            p.y = height + p.radius + Math.random() * height * .22;
-            p.x = p.radius + Math.random() * Math.max(1, width - p.radius * 2);
-          }
-          const gradient = ctx.createRadialGradient(
-            p.x - p.radius * .34, p.y - p.radius * .38, p.radius * .08,
-            p.x, p.y, p.radius
-          );
-          gradient.addColorStop(0, `rgba(255,255,255,${Math.min(.95, p.alpha + .35)})`);
-          gradient.addColorStop(.2, `rgba(255,255,255,${p.alpha * .38})`);
-          gradient.addColorStop(.68, `rgba(96,165,250,${p.alpha * .38})`);
-          gradient.addColorStop(1, 'rgba(59,130,246,0)');
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-          ctx.fillStyle = gradient;
-          ctx.fill();
-          ctx.strokeStyle = `rgba(255,255,255,${p.alpha * .72})`;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        }
-      }
-
-      if (elapsed < maxLife) requestAnimationFrame(draw);
-    };
-    requestAnimationFrame(draw);
-  }
-
   function triggerMagicEffect(effectId) {
     const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
     const layer = createMagicLayer();
@@ -1835,11 +1737,10 @@
     layer.innerHTML = magicEffectMarkup(effect.id);
     void layer.offsetWidth;
     layer.classList.add('show');
-    if (effect.id === 'confetti' || effect.id === 'bubbles') startMagicCanvas(effect.id, layer);
-    if (effect.id === 'quiet') speakQuietPrompt();
+    if (effect.id === 'confetti' || effect.id === 'bubbles') startCanvasMagicEffect(layer, effect.id);
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 2600, confetti: 3800, micdrop: 2200, curtain: 2700, bubbles: 5000, quiet: 2400, applause: 2400, spotlight: 6000, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 2600, confetti: 3200, micdrop: 2200, curtain: 3400, bubbles: 3400, quiet: 2200, applause: 2400, spotlight: 4200, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       layer.classList.remove('show');
       layer.classList.add('hidden');
@@ -1865,28 +1766,6 @@
   function setMagicEffectIntensity(value, publish = true) {
     state.magicEffectIntensity = ['low', 'normal', 'grand'].includes(value) ? value : 'grand';
     if (publish) publishSessionState();
-  }
-
-  function speakQuietPrompt() {
-    if (!state.magicEffectSound || !('speechSynthesis' in window)) return;
-    const volume = getMagicEffectVolume();
-    if (volume <= 0) return;
-
-    try {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance('Be quiet.');
-      const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
-      const preferred = voices.find((voice) => {
-        const details = `${voice.lang || ''} ${voice.name || ''}`;
-        return /^en/i.test(voice.lang || '') && /female|samantha|zira|aria|jenny|google us english|english/i.test(details);
-      }) || voices.find((voice) => /^en/i.test(voice.lang || '')) || voices[0];
-      if (preferred) utter.voice = preferred;
-      utter.lang = preferred?.lang || 'en-US';
-      utter.rate = 0.78;
-      utter.pitch = 0.88;
-      utter.volume = Math.min(1, Math.max(0.72, volume));
-      window.speechSynthesis.speak(utter);
-    } catch (error) {}
   }
 
   function playMagicEffectSound(effectId) {
@@ -2089,8 +1968,21 @@
         cymbal(now + 0.92, 0.75);
         break;
       case 'quiet':
-        // The SHSS effect uses speech only. The spoken phrase is triggered
-        // independently from Web Audio so it also works when AudioContext is unavailable.
+        whoosh(now, 0.42, 0.42);
+        noise(now + 0.04, 0.78, 0.09, 'highpass', 2600, 0.46);
+        if ('speechSynthesis' in window) {
+          try {
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance('Shooooshhh...');
+            const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+            const preferred = voices.find(v => /en|us|uk|ph/i.test((v.lang || '') + ' ' + (v.name || ''))) || voices[0];
+            if (preferred) utter.voice = preferred;
+            utter.rate = 0.54;
+            utter.pitch = 0.52;
+            utter.volume = Math.min(1, 0.82 * volume);
+            window.speechSynthesis.speak(utter);
+          } catch (error) {}
+        }
         break;
       case 'micdrop':
         whoosh(now, 0.28, 0.6);
@@ -2836,6 +2728,7 @@
       magicEffectVolume: state.magicEffectVolume,
       magicEffectSound: !!state.magicEffectSound,
       magicEffectIntensity: state.magicEffectIntensity || 'grand',
+      classroom: classroomRemoteSnapshot(),
       updatedAt: Date.now(),
     };
 
@@ -3047,6 +2940,15 @@
       case 'testMagicEffect':
         triggerMagicEffect(command.value || 'confetti');
         break;
+      case 'classroomSetSection':
+        state.classroom.activeSectionId = String(command.value || '');
+        state.classroom.pickedIds = [];
+        renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
+        break;
+      case 'classroomPick': pickRandomStudent(); break;
+      case 'classroomRoll': rollGroupDice(); break;
+      case 'classroomPickRoll': pickAndRoll(); break;
+      case 'classroomReset': resetClassroomRound(); break;
       case 'setTransitionEffect':
         state.transitionEffect = command.value || 'fade';
         applyTimerSettings();
@@ -3320,6 +3222,18 @@
           </div>
         </section>
 
+        <section class="remote-section remote-premium-section remote-classroom-section" data-host-only="true">
+          <div class="remote-section-title"><span>Classroom Randomizer</span><small>Choose section, pick name, then roll group</small></div>
+          <select id="remoteClassSection" data-host-only="true"><option value="">No saved section</option></select>
+          <div id="remoteClassResult" class="remote-class-result">Ready</div>
+          <div class="remote-class-actions">
+            <button id="remotePickName" data-host-only="true">Pick Name</button>
+            <button id="remoteRollGroup" data-host-only="true">Roll Group</button>
+            <button id="remotePickRoll" class="remote-class-primary" data-host-only="true">Pick + Roll</button>
+            <button id="remoteClassReset" data-host-only="true">Reset</button>
+          </div>
+        </section>
+
         <section class="remote-section remote-premium-section">
           <div class="remote-section-title"><span>Presentation</span><small>Desktop screen</small></div>
           <div class="remote-control-row remote-segment-row">
@@ -3464,6 +3378,15 @@
       });
     }
 
+    const remoteClassSection = $('remoteClassSection');
+    const remoteRef = () => state.firebaseDb && sessionId ? state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId) : null;
+    if (remoteClassSection) remoteClassSection.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetSection', remoteClassSection.value); });
+    const bindClassCommand = (id, action) => { const node = $(id); if (node) node.addEventListener('click', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, action); }); };
+    bindClassCommand('remotePickName', 'classroomPick');
+    bindClassCommand('remoteRollGroup', 'classroomRoll');
+    bindClassCommand('remotePickRoll', 'classroomPickRoll');
+    bindClassCommand('remoteClassReset', 'classroomReset');
+
     if (!hasFirebaseConfig()) {
       $('remoteFileLabel').textContent = 'Remote needs firebase-config.js because phones need realtime sync across devices.';
       $('remoteStatusPill').textContent = 'Setup needed';
@@ -3485,6 +3408,15 @@
         }
         const data = snap.data();
         latestRemoteData = data;
+        if ($('remoteClassSection') && data.classroom) {
+          const cs = data.classroom;
+          $('remoteClassSection').innerHTML = (cs.sections || []).map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.count})</option>`).join('') || '<option value="">No saved section</option>';
+          $('remoteClassSection').value = cs.activeSectionId || '';
+          const bits = [];
+          if (cs.lastStudent) bits.push(cs.lastStudent);
+          if (cs.lastGroup) bits.push(`Group ${cs.lastGroup}`);
+          $('remoteClassResult').textContent = bits.join(' • ') || 'Ready';
+        }
         window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
         window.__phRemoteInkStrokes = Array.isArray(data.inkStrokes) ? data.inkStrokes : [];
         $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
@@ -4196,6 +4128,125 @@
         v: 10,
       }
     }, { merge: true });
+  }
+
+
+  function loadClassroomLocal() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('presentationHubClassroom') || 'null');
+      if (saved && Array.isArray(saved.sections)) state.classroom = { ...state.classroom, ...saved };
+    } catch (_) {}
+  }
+
+  function saveClassroomLocal() { localStorage.setItem('presentationHubClassroom', JSON.stringify(state.classroom)); }
+  function scheduleClassroomSave() {
+    saveClassroomLocal();
+    clearTimeout(state.classroomSyncTimer);
+    state.classroomSyncTimer = setTimeout(saveClassroomCloud, 350);
+  }
+  async function saveClassroomCloud() {
+    const user = state.firebaseUser;
+    if (!state.firebaseReady || !user || user.isAnonymous) return;
+    try { await state.firebaseDb.collection('presentationHubUsers').doc(user.uid).collection('data').doc('classroom').set({ ...state.classroom, updatedAt: Date.now() }); } catch (e) { console.warn('Classroom cloud save failed', e); }
+  }
+  async function loadClassroomCloud() {
+    const user = state.firebaseUser;
+    if (!state.firebaseReady || !user || user.isAnonymous) return;
+    try {
+      const snap = await state.firebaseDb.collection('presentationHubUsers').doc(user.uid).collection('data').doc('classroom').get();
+      if (snap.exists) state.classroom = { ...state.classroom, ...snap.data() };
+      else await saveClassroomCloud();
+      saveClassroomLocal(); renderClassroomTools(); publishSessionState(true);
+    } catch (e) { console.warn('Classroom cloud load failed', e); }
+  }
+  async function signInClassroomAccount() {
+    if (!window.firebase || !hasFirebaseConfig()) return alert('Firebase config is needed first.');
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      const current = firebase.auth().currentUser;
+      let result;
+      if (current && current.isAnonymous) {
+        try { result = await current.linkWithPopup(provider); }
+        catch (e) { if (e.code === 'auth/credential-already-in-use') result = await firebase.auth().signInWithCredential(e.credential); else throw e; }
+      } else result = await firebase.auth().signInWithPopup(provider);
+      state.firebaseUser = result.user;
+      await loadClassroomCloud(); updateClassroomAuthUI();
+    } catch (e) { console.warn(e); alert('Google sign-in did not finish. Check Firebase Authentication > Google provider and authorized domains.'); }
+  }
+  function updateClassroomAuthUI() {
+    if (!els.classroomAuthStatus || !els.classroomAuthBtn) return;
+    const user = state.firebaseUser;
+    const signed = user && !user.isAnonymous;
+    els.classroomAuthStatus.textContent = signed ? `Synced as ${user.displayName || user.email || 'Google account'}` : 'Local save active. Sign in to sync across devices.';
+    els.classroomAuthBtn.textContent = signed ? 'Account Synced' : 'Sign in with Google';
+    els.classroomAuthBtn.disabled = !!signed;
+  }
+  function openClassroomTools() { renderClassroomTools(); updateClassroomAuthUI(); showModal(els.classroomModal); }
+  function activeClassSection() { return state.classroom.sections.find(s => s.id === state.classroom.activeSectionId) || null; }
+  function addClassroomSection() {
+    const name = (els.newSectionName.value || '').trim(); if (!name) return;
+    const id = `sec-${Date.now().toString(36)}`;
+    state.classroom.sections.push({ id, name, students: [] }); state.classroom.activeSectionId = id; els.newSectionName.value = '';
+    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
+  }
+  function saveClassroomNames() {
+    const sec = activeClassSection(); if (!sec) return alert('Create or select a section first.');
+    const names = (els.studentNamesInput.value || '').split(/\n|,/).map(x => x.trim()).filter(Boolean);
+    sec.students = names.map((name, i) => ({ id: `${sec.id}-${i}-${name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`, name }));
+    state.classroom.pickedIds = []; state.classroom.assignments = {}; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
+  }
+  function renderClassroomTools() {
+    if (!els.sectionSelect) return;
+    els.sectionSelect.innerHTML = state.classroom.sections.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.students.length})</option>`).join('') || '<option value="">Create a section</option>';
+    if (!state.classroom.activeSectionId && state.classroom.sections[0]) state.classroom.activeSectionId = state.classroom.sections[0].id;
+    els.sectionSelect.value = state.classroom.activeSectionId || '';
+    const sec = activeClassSection();
+    els.studentNamesInput.value = sec ? sec.students.map(s => s.name).join('\n') : '';
+    els.groupCountInput.value = state.classroom.groupCount;
+    els.removePickedInput.checked = state.classroom.removePicked;
+    els.balancedGroupsInput.checked = state.classroom.balanced;
+    els.classroomResult.innerHTML = state.classroom.lastStudent ? `<strong>${escapeHtml(state.classroom.lastStudent.name)}</strong>${state.classroom.lastGroup ? `<span>GROUP ${state.classroom.lastGroup}</span>` : ''}` : '<span>Ready to pick</span>';
+    els.classroomRoster.innerHTML = sec ? sec.students.map(s => `<div><span>${escapeHtml(s.name)}</span><b>${state.classroom.assignments[s.id] ? 'G'+state.classroom.assignments[s.id] : ''}</b></div>`).join('') : '';
+  }
+  function classroomRemoteSnapshot() {
+    const sec = activeClassSection();
+    return { sections: state.classroom.sections.map(s => ({ id:s.id, name:s.name, count:s.students.length })), activeSectionId: state.classroom.activeSectionId, groupCount: state.classroom.groupCount, lastStudent: state.classroom.lastStudent && state.classroom.lastStudent.name, lastGroup: state.classroom.lastGroup, available: sec ? sec.students.length - state.classroom.pickedIds.length : 0 };
+  }
+  function pickRandomStudent() {
+    const sec = activeClassSection(); if (!sec || !sec.students.length) return alert('Add student names first.');
+    let pool = sec.students.filter(s => !state.classroom.removePicked || !state.classroom.pickedIds.includes(s.id));
+    if (!pool.length) { state.classroom.pickedIds = []; pool = sec.students.slice(); }
+    const chosen = pool[Math.floor(Math.random()*pool.length)];
+    state.classroom.lastStudent = chosen; state.classroom.lastGroup = state.classroom.assignments[chosen.id] || null;
+    if (state.classroom.removePicked && !state.classroom.pickedIds.includes(chosen.id)) state.classroom.pickedIds.push(chosen.id);
+    showClassroomReveal(chosen.name, null); renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return chosen;
+  }
+  function chooseBalancedGroup() {
+    const n = state.classroom.groupCount; if (!state.classroom.balanced) return 1 + Math.floor(Math.random()*n);
+    const counts = Array(n).fill(0); Object.values(state.classroom.assignments).forEach(g => { if (g>=1 && g<=n) counts[g-1]++; });
+    const min = Math.min(...counts); const choices = counts.map((c,i)=>c===min?i+1:null).filter(Boolean);
+    return choices[Math.floor(Math.random()*choices.length)];
+  }
+  function rollGroupDice() {
+    const student = state.classroom.lastStudent; const group = chooseBalancedGroup(); state.classroom.lastGroup = group;
+    if (student) state.classroom.assignments[student.id] = group;
+    showClassroomReveal(student ? student.name : '', group); renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return group;
+  }
+  function pickAndRoll() { const student = pickRandomStudent(); if (student) setTimeout(rollGroupDice, 850); }
+  function resetClassroomRound() { state.classroom.pickedIds=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
+  function showClassroomReveal(name, group) {
+    let layer=document.getElementById('classroomRevealLayer'); if(!layer){ layer=document.createElement('div'); layer.id='classroomRevealLayer'; document.body.appendChild(layer); }
+    layer.className='classroom-reveal-layer show'; layer.innerHTML=`<div class="classroom-reveal-card"><small>${group ? 'GROUP DICE' : 'RANDOM NAME'}</small>${name?`<h2>${escapeHtml(name)}</h2>`:''}${group?`<div class="classroom-die">${group}</div><h3>GROUP ${group}</h3>`:''}</div>`;
+    setTimeout(()=>layer.classList.remove('show'), group ? 2500 : 1700);
+  }
+  function startCanvasMagicEffect(layer, type) {
+    const canvas=layer.querySelector('canvas'); if(!canvas) return; const ctx=canvas.getContext('2d'); let raf=0; const start=performance.now();
+    const resize=()=>{ const d=Math.min(devicePixelRatio||1,2); canvas.width=innerWidth*d; canvas.height=innerHeight*d; canvas.style.width=innerWidth+'px'; canvas.style.height=innerHeight+'px'; ctx.setTransform(d,0,0,d,0,0); }; resize();
+    const count=type==='confetti'?150:48; const colors=['#ff4d6d','#ffd166','#06d6a0','#4cc9f0','#8338ec','#ffffff'];
+    const parts=Array.from({length:count},(_,i)=> type==='confetti' ? {x:Math.random()*innerWidth,y:-20-Math.random()*innerHeight*.35,vx:(Math.random()-.5)*4,vy:3+Math.random()*5,r:3+Math.random()*6,h:7+Math.random()*12,rot:Math.random()*6,vr:(Math.random()-.5)*.25,c:colors[i%colors.length]} : {x:Math.random()*innerWidth,y:innerHeight+Math.random()*300,r:10+Math.random()*25,vx:(Math.random()-.5)*.5,vy:.7+Math.random()*1.5,a:.5+Math.random()*.4});
+    function frame(now){ const t=now-start; ctx.clearRect(0,0,innerWidth,innerHeight); for(const p of parts){ if(type==='confetti'){p.x+=p.vx;p.y+=p.vy;p.vy+=.035;p.rot+=p.vr;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.fillStyle=p.c;ctx.fillRect(-p.r,-p.h/2,p.r*2,p.h);ctx.restore();}else{p.x+=p.vx+Math.sin((t+p.y)*.002)*.18;p.y-=p.vy;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);const g=ctx.createRadialGradient(p.x-p.r*.35,p.y-p.r*.35,1,p.x,p.y,p.r);g.addColorStop(0,'rgba(255,255,255,.9)');g.addColorStop(.25,'rgba(255,255,255,.25)');g.addColorStop(.7,'rgba(96,165,250,.18)');g.addColorStop(1,'rgba(59,130,246,.04)');ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=`rgba(255,255,255,${p.a})`;ctx.lineWidth=1.2;ctx.stroke();}}
+      if(t<(type==='confetti'?3100:3350) && layer.classList.contains('show')) raf=requestAnimationFrame(frame); }
+    raf=requestAnimationFrame(frame);
   }
 
   function registerServiceWorker() {
