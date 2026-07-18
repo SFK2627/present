@@ -2947,6 +2947,14 @@
         state.classroom.pickedIds = [];
         renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
         break;
+      case 'classroomSetRepeatMode':
+        state.classroom.removePicked = String(command.value || '') !== 'allow-repeat';
+        renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
+        break;
+      case 'classroomSetGroupMode':
+        state.classroom.balanced = String(command.value || '') !== 'free';
+        renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
+        break;
       case 'classroomPick': pickRandomStudent(); break;
       case 'classroomRoll': rollGroupDice(); break;
       case 'classroomReset': resetClassroomRound(); break;
@@ -3226,6 +3234,20 @@
         <section class="remote-section remote-premium-section remote-classroom-section" data-host-only="true">
           <div class="remote-section-title"><span>Classroom Randomizer</span><small>Choose section, pick name, then roll group</small></div>
           <select id="remoteClassSection" data-host-only="true"><option value="">No saved section</option></select>
+          <div class="remote-class-options">
+            <label>Name picks
+              <select id="remoteNameRepeat" data-host-only="true">
+                <option value="no-repeat">No repeat</option>
+                <option value="allow-repeat">Allow repeat</option>
+              </select>
+            </label>
+            <label>Group rolls
+              <select id="remoteGroupMode" data-host-only="true">
+                <option value="balanced">Balanced</option>
+                <option value="free">Free repeat</option>
+              </select>
+            </label>
+          </div>
           <div id="remoteClassResult" class="remote-class-result">Ready</div>
           <div class="remote-class-actions">
             <button id="remotePickName" data-host-only="true">Pick Name</button>
@@ -3379,8 +3401,12 @@
     }
 
     const remoteClassSection = $('remoteClassSection');
+    const remoteNameRepeat = $('remoteNameRepeat');
+    const remoteGroupMode = $('remoteGroupMode');
     const remoteRef = () => state.firebaseDb && sessionId ? state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId) : null;
     if (remoteClassSection) remoteClassSection.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetSection', remoteClassSection.value); });
+    if (remoteNameRepeat) remoteNameRepeat.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetRepeatMode', remoteNameRepeat.value); });
+    if (remoteGroupMode) remoteGroupMode.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetGroupMode', remoteGroupMode.value); });
     const bindClassCommand = (id, action) => { const node = $(id); if (node) node.addEventListener('click', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, action); }); };
     bindClassCommand('remotePickName', 'classroomPick');
     bindClassCommand('remoteRollGroup', 'classroomRoll');
@@ -3411,10 +3437,17 @@
           const cs = data.classroom;
           $('remoteClassSection').innerHTML = (cs.sections || []).map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.count})</option>`).join('') || '<option value="">No saved section</option>';
           $('remoteClassSection').value = cs.activeSectionId || '';
+          if ($('remoteNameRepeat')) $('remoteNameRepeat').value = cs.removePicked === false ? 'allow-repeat' : 'no-repeat';
+          if ($('remoteGroupMode')) $('remoteGroupMode').value = cs.balanced === false ? 'free' : 'balanced';
           const bits = [];
           if (cs.revealMode === 'name' && cs.lastStudent) bits.push(cs.lastStudent);
           if (cs.revealMode === 'group' && cs.lastGroup) bits.push(`Group ${cs.lastGroup}`);
+          if (!bits.length && Number.isFinite(cs.available)) bits.push(`${cs.available} available`);
           $('remoteClassResult').textContent = bits.join(' • ') || 'Ready';
+          const classBusy = !!cs.busy;
+          if ($('remotePickName')) $('remotePickName').disabled = !isHost || classBusy;
+          if ($('remoteRollGroup')) $('remoteRollGroup').disabled = !isHost || classBusy || !cs.lastStudent || cs.revealMode === 'group';
+          if ($('remoteClassReset')) $('remoteClassReset').disabled = !isHost || classBusy;
         }
         window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
         window.__phRemoteInkStrokes = Array.isArray(data.inkStrokes) ? data.inkStrokes : [];
@@ -4215,7 +4248,12 @@
     let headerIndex = matrix.findIndex((row) => Array.isArray(row) && row.some((cell) => aliases.has(normalizeClassHeader(cell))));
     if (headerIndex < 0) headerIndex = matrix.findIndex((row) => Array.isArray(row) && row.some((cell) => cleanClassValue(cell)));
     if (headerIndex < 0) return [];
-    const headers = matrix[headerIndex].map((cell, i) => cleanClassValue(cell) || `Column${i + 1}`);
+    const headerCounts = {};
+    const headers = matrix[headerIndex].map((cell, i) => {
+      const base = cleanClassValue(cell) || `Column${i + 1}`;
+      headerCounts[base] = (headerCounts[base] || 0) + 1;
+      return headerCounts[base] === 1 ? base : `${base}__${headerCounts[base]}`;
+    });
     return matrix.slice(headerIndex + 1).map((cells) => {
       const row = {};
       headers.forEach((header, i) => { row[header] = cells[i] == null ? '' : cells[i]; });
@@ -4347,7 +4385,65 @@
   }
   function classroomRemoteSnapshot() {
     const sec = activeClassSection();
-    return { sections: state.classroom.sections.map(s => ({ id:s.id, name:s.name, count:s.students.length })), activeSectionId: state.classroom.activeSectionId, groupCount: state.classroom.groupCount, revealMode: state.classroom.revealMode || '', lastStudent: state.classroom.lastStudent && state.classroom.lastStudent.name, lastGroup: state.classroom.lastGroup, available: sec ? sec.students.length - state.classroom.pickedIds.length : 0 };
+    return {
+      sections: state.classroom.sections.map(s => ({ id:s.id, name:s.name, count:s.students.length })),
+      activeSectionId: state.classroom.activeSectionId,
+      groupCount: state.classroom.groupCount,
+      removePicked: !!state.classroom.removePicked,
+      balanced: !!state.classroom.balanced,
+      revealMode: state.classroom.revealMode || '',
+      lastStudent: state.classroom.lastStudent && state.classroom.lastStudent.name,
+      lastGroup: state.classroom.lastGroup,
+      busy: !!state.classroom.busy,
+      available: sec ? Math.max(0, sec.students.length - state.classroom.pickedIds.length) : 0
+    };
+  }
+  function classroomNameSize(name, mode = 'roulette') {
+    const length = cleanStudentName(name).length;
+    if (mode === 'stage') {
+      if (length > 42) return 'clamp(1.15rem, 2.7vw, 2.7rem)';
+      if (length > 34) return 'clamp(1.35rem, 3vw, 3.2rem)';
+      if (length > 26) return 'clamp(1.65rem, 3.6vw, 4rem)';
+      return 'clamp(2rem, 5vw, 5.6rem)';
+    }
+    if (mode === 'final') {
+      if (length > 42) return 'clamp(1.25rem, 3.2vw, 3.2rem)';
+      if (length > 34) return 'clamp(1.45rem, 3.8vw, 4rem)';
+      if (length > 26) return 'clamp(1.7rem, 4.8vw, 4.9rem)';
+      return 'clamp(2rem, 6vw, 6.2rem)';
+    }
+    if (length > 42) return 'clamp(1.1rem, 2.9vw, 2.7rem)';
+    if (length > 34) return 'clamp(1.25rem, 3.5vw, 3.4rem)';
+    if (length > 26) return 'clamp(1.45rem, 4.2vw, 4.2rem)';
+    return 'clamp(1.8rem, 5.2vw, 5.4rem)';
+  }
+  function classroomNameStyle(name, mode = 'roulette') {
+    return `--name-size:${classroomNameSize(name, mode)}`;
+  }
+  function pickRoulettePoolName(pool, exclude = []) {
+    const blocked = new Set((exclude || []).filter(Boolean));
+    const filtered = pool.filter((entry) => entry && !blocked.has(entry));
+    const source = filtered.length ? filtered : pool;
+    return source[Math.floor(Math.random() * source.length)] || pool[0] || '';
+  }
+  function renderRouletteMovingStrip(track, pool, currentName, nextName) {
+    const prevTwo = pickRoulettePoolName(pool, [currentName, nextName]);
+    const prevOne = pickRoulettePoolName(pool, [currentName, nextName, prevTwo]);
+    const afterOne = nextName || pickRoulettePoolName(pool, [currentName, prevTwo, prevOne]);
+    const afterTwo = pickRoulettePoolName(pool, [currentName, nextName, prevTwo, prevOne, afterOne]);
+    const afterThree = pickRoulettePoolName(pool, [currentName, nextName, prevTwo, prevOne, afterOne, afterTwo]);
+    const rows = [prevTwo, prevOne, currentName, afterOne, afterTwo, afterThree];
+    track.innerHTML = `<div class="roulette-strip">${rows.map((name, index) => `<div class="roulette-row ${index === 2 ? 'row-current' : index === 3 ? 'row-next' : ''}"><div class="roulette-name" style="${classroomNameStyle(name, 'roulette')}">${escapeHtml(name)}</div></div>`).join('')}</div>`;
+    return track.firstElementChild;
+  }
+  function renderRouletteFinalStrip(track, pool, finalName) {
+    const aboveTwo = pickRoulettePoolName(pool, [finalName]);
+    const aboveOne = pickRoulettePoolName(pool, [finalName, aboveTwo]);
+    const belowOne = pickRoulettePoolName(pool, [finalName, aboveTwo, aboveOne]);
+    const belowTwo = pickRoulettePoolName(pool, [finalName, aboveTwo, aboveOne, belowOne]);
+    const rows = [aboveTwo, aboveOne, finalName, belowOne, belowTwo];
+    track.innerHTML = `<div class="roulette-strip final-strip">${rows.map((name, index) => `<div class="roulette-row ${index === 2 ? 'row-final-center' : ''}"><div class="roulette-name ${index === 2 ? 'roulette-final' : ''}" style="${classroomNameStyle(name, index === 2 ? 'final' : 'roulette')}">${escapeHtml(name)}</div></div>`).join('')}</div>`;
+    return track.firstElementChild;
   }
   async function pickRandomStudent() {
     if (state.classroom.busy) return;
@@ -4421,7 +4517,8 @@
     if (sectionEl) sectionEl.textContent = sec ? sec.name : 'Select a section';
     if (!main) return;
     if (state.classroom.revealMode === 'name' && state.classroom.lastStudent) {
-      main.innerHTML = `<div class="classroom-stage-label">SELECTED STUDENT</div><h1 class="classroom-single-line-name">${escapeHtml(cleanStudentName(state.classroom.lastStudent.name))}</h1><p>Ready to roll a group.</p>`;
+      const shownName = cleanStudentName(state.classroom.lastStudent.name);
+      main.innerHTML = `<div class="classroom-stage-label">SELECTED STUDENT</div><h1 class="classroom-single-line-name" style="${classroomNameStyle(shownName, 'stage')}">${escapeHtml(shownName)}</h1><p>Ready to roll a group.</p>`;
     } else if (state.classroom.revealMode === 'group' && state.classroom.lastGroup) {
       main.innerHTML = `<div class="classroom-stage-label">GROUP RESULT</div><div class="classroom-stage-final-die">${state.classroom.lastGroup}</div><h2>GROUP ${state.classroom.lastGroup}</h2>`;
     } else {
@@ -4458,21 +4555,36 @@
   async function showNameRoulette(allNames, finalName) {
     const layer = getClassroomRevealLayer('name');
     const card = layer.querySelector('.classroom-reveal-card');
-    card.innerHTML = `<div class="classroom-reveal-badge">RANDOM NAME</div><div class="name-roulette-window"><div class="name-roulette-track"></div></div><div class="classroom-reveal-line"></div><p>Choosing...</p>`;
+    card.innerHTML = `<div class="classroom-reveal-badge">RANDOM NAME</div><div class="name-roulette-window"><div class="roulette-window-sheen"></div><div class="roulette-window-fade top"></div><div class="roulette-window-fade bottom"></div><div class="roulette-center-band"></div><div class="name-roulette-track"></div></div><div class="classroom-reveal-line"></div><p>Choosing...</p>`;
     const track = card.querySelector('.name-roulette-track');
     const status = card.querySelector('p');
-    const safeNames = allNames.length ? allNames : [finalName];
-    const steps = 26;
-    for (let i=0;i<steps;i++) {
-      const progress = i/(steps-1);
-      const delay = 45 + Math.round(progress*progress*250);
-      const shown = i === steps-1 ? finalName : safeNames[Math.floor(Math.random()*safeNames.length)];
-      track.innerHTML = `<div class="roulette-name ${i === steps-1 ? 'roulette-final' : ''}">${escapeHtml(shown)}</div>`;
-      await wait(delay);
+    const safePool = Array.from(new Set((allNames.length ? allNames : [finalName]).map(cleanStudentName).filter(Boolean)));
+    if (!safePool.includes(finalName)) safePool.push(finalName);
+    const stepCount = Math.max(12, Math.min(18, safePool.length + 6));
+    const sequence = [];
+    let previous = '';
+    for (let i = 0; i < stepCount - 1; i++) {
+      const candidate = pickRoulettePoolName(safePool, [previous, finalName]);
+      sequence.push(candidate);
+      previous = candidate;
     }
+    sequence.push(finalName);
+    let current = sequence[0] || finalName;
+    for (let i = 0; i < sequence.length - 1; i++) {
+      const next = sequence[i + 1] || finalName;
+      const progress = i / Math.max(1, sequence.length - 2);
+      const delay = 110 + Math.round(progress * progress * 210);
+      const strip = renderRouletteMovingStrip(track, safePool, current, next);
+      strip.style.setProperty('--roulette-duration', `${Math.max(120, Math.round(delay * 0.8))}ms`);
+      void strip.offsetHeight;
+      strip.classList.add('spinning');
+      await wait(delay);
+      current = next;
+    }
+    renderRouletteFinalStrip(track, safePool, finalName);
     status.textContent = 'Selected!';
     startClassroomRevealConfetti(layer, false);
-    await wait(1800);
+    await wait(1900);
     layer.classList.remove('show');
     renderClassroomPresentation();
   }
