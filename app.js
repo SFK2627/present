@@ -2450,11 +2450,13 @@
         preview.innerHTML = latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>';
         const fullImg = $('remoteFullImg');
         if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
-        remoteViewport = {
-          zoom: Number(data.zoom) || 1,
-          centerX: Number.isFinite(Number(data.viewportCenterX)) ? Number(data.viewportCenterX) : 0.5,
-          centerY: Number.isFinite(Number(data.viewportCenterY)) ? Number(data.viewportCenterY) : 0.5,
-        };
+        if (!window.__presentationHubRemoteGestureActive) {
+          remoteViewport = {
+            zoom: Number(data.zoom) || 1,
+            centerX: Number.isFinite(Number(data.viewportCenterX)) ? Number(data.viewportCenterX) : 0.5,
+            centerY: Number.isFinite(Number(data.viewportCenterY)) ? Number(data.viewportCenterY) : 0.5,
+          };
+        }
         $('remoteTimingMode').value = data.timingMode || 'global';
         $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
         if ($('remoteCountdownAlert')) $('remoteCountdownAlert').value = data.countdownAlert || 'off';
@@ -2553,19 +2555,48 @@
       centerY: Math.max(0, Math.min(1, Number(value.centerY) || 0.5)),
     });
 
+    let localViewport = safeViewport(getViewport());
+    let rafId = 0;
+    let gestureSettleTimer = null;
+
     const sendViewport = throttle((viewport) => {
       if (!isHost) return;
       sendRemoteCommand(ref, 'setViewport', safeViewport(viewport));
-    }, 90);
+    }, 140);
+
+    function renderLocal(viewport) {
+      localViewport = safeViewport(viewport);
+      setLocalViewport(localViewport);
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        applyRemoteFullPreviewTransform(localViewport);
+      });
+    }
+
+    function beginGesture() {
+      window.__presentationHubRemoteGestureActive = true;
+      clearTimeout(gestureSettleTimer);
+    }
+
+    function endGesture() {
+      clearTimeout(gestureSettleTimer);
+      gestureSettleTimer = setTimeout(() => {
+        window.__presentationHubRemoteGestureActive = false;
+        sendViewport(localViewport);
+      }, 220);
+    }
 
     function openFullPreview() {
+      localViewport = safeViewport(getViewport());
+      renderLocal(localViewport);
       full.classList.remove('hidden');
       document.body.classList.add('remote-fullscreen-open');
-      applyRemoteFullPreviewTransform(getViewport());
       if (full.requestFullscreen) full.requestFullscreen().catch(() => {});
     }
 
     function closeFullPreview() {
+      window.__presentationHubRemoteGestureActive = false;
       full.classList.add('hidden');
       document.body.classList.remove('remote-fullscreen-open');
       if (document.fullscreenElement === full) document.exitFullscreen().catch(() => {});
@@ -2583,6 +2614,7 @@
     let startDistance = 0;
     let startZoom = 1;
     let startCenter = { centerX: 0.5, centerY: 0.5 };
+    let startMid = { x: 0.5, y: 0.5 };
     let startPoint = null;
 
     const distance = (touches) => {
@@ -2592,17 +2624,20 @@
     };
 
     const midpoint = (touches, rect) => ({
-      x: ((touches[0].clientX + touches[1].clientX) / 2 - rect.left) / rect.width,
-      y: ((touches[0].clientY + touches[1].clientY) / 2 - rect.top) / rect.height,
+      x: ((touches[0].clientX + touches[1].clientX) / 2 - rect.left) / Math.max(1, rect.width),
+      y: ((touches[0].clientY + touches[1].clientY) / 2 - rect.top) / Math.max(1, rect.height),
     });
 
     stage.addEventListener('touchstart', (event) => {
       if (event.touches.length) event.preventDefault();
-      const current = safeViewport(getViewport());
+      beginGesture();
+      const current = safeViewport(localViewport || getViewport());
       startZoom = current.zoom;
       startCenter = { centerX: current.centerX, centerY: current.centerY };
+      const rect = stage.getBoundingClientRect();
       if (event.touches.length === 2) {
-        startDistance = distance(event.touches);
+        startDistance = Math.max(1, distance(event.touches));
+        startMid = midpoint(event.touches, rect);
         startPoint = null;
       } else if (event.touches.length === 1) {
         startPoint = { x: event.touches[0].clientX, y: event.touches[0].clientY };
@@ -2613,16 +2648,20 @@
     stage.addEventListener('touchmove', (event) => {
       if (event.touches.length !== 1 && event.touches.length !== 2) return;
       event.preventDefault();
+      beginGesture();
       const rect = stage.getBoundingClientRect();
-      let next = safeViewport(getViewport());
+      let next = safeViewport(localViewport || getViewport());
 
       if (event.touches.length === 2 && startDistance) {
         const ratio = distance(event.touches) / startDistance;
         const mid = midpoint(event.touches, rect);
+        const nextZoom = Math.min(4, Math.max(1, startZoom * ratio));
+        const dragX = (mid.x - startMid.x) / Math.max(1, nextZoom);
+        const dragY = (mid.y - startMid.y) / Math.max(1, nextZoom);
         next = safeViewport({
-          zoom: startZoom * ratio,
-          centerX: mid.x,
-          centerY: mid.y,
+          zoom: nextZoom,
+          centerX: startCenter.centerX - dragX,
+          centerY: startCenter.centerY - dragY,
         });
       } else if (event.touches.length === 1 && startPoint) {
         const dx = event.touches[0].clientX - startPoint.x;
@@ -2630,26 +2669,31 @@
         const divisor = Math.max(1, startZoom);
         next = safeViewport({
           zoom: startZoom,
-          centerX: startCenter.centerX - dx / (rect.width * divisor),
-          centerY: startCenter.centerY - dy / (rect.height * divisor),
+          centerX: startCenter.centerX - dx / (Math.max(1, rect.width) * divisor),
+          centerY: startCenter.centerY - dy / (Math.max(1, rect.height) * divisor),
         });
       }
 
-      setLocalViewport(next);
+      renderLocal(next);
       sendViewport(next);
     }, { passive: false });
 
+    stage.addEventListener('touchend', endGesture, { passive: true });
+    stage.addEventListener('touchcancel', endGesture, { passive: true });
+
     stage.addEventListener('wheel', (event) => {
       event.preventDefault();
-      const current = safeViewport(getViewport());
+      beginGesture();
+      const current = safeViewport(localViewport || getViewport());
       const rect = stage.getBoundingClientRect();
       const next = safeViewport({
         zoom: current.zoom + (event.deltaY < 0 ? 0.12 : -0.12),
-        centerX: (event.clientX - rect.left) / rect.width,
-        centerY: (event.clientY - rect.top) / rect.height,
+        centerX: (event.clientX - rect.left) / Math.max(1, rect.width),
+        centerY: (event.clientY - rect.top) / Math.max(1, rect.height),
       });
-      setLocalViewport(next);
+      renderLocal(next);
       sendViewport(next);
+      endGesture();
     }, { passive: false });
   }
 

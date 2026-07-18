@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-stable-1';
+const CACHE_NAME = 'presentation-hub-pro-v10-mobile-smooth-1';
 const APP_SHELL = [
   './',
   './index.html',
