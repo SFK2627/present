@@ -2478,3 +2478,145 @@ body.remote-fullscreen-open .remote-portrait-preview .remote-full-stage img {
 .viewer-view { position: relative; }
 .remote-slides-panel { z-index: 100001; }
 .remote-full-preview { z-index: 100002; }
+
+/* Pro v10.6 stability repair: desktop fit + low-latency remote.
+   Keep the normal viewer below the floating toolbar and leave fullscreen untouched. */
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-stage {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  align-content: start !important;
+  padding-top: 74px !important;
+  box-sizing: border-box !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-canvas-wrap {
+  width: min(100%, calc(100vw - 330px)) !important;
+  max-width: min(100%, calc(100vw - 330px)) !important;
+  height: calc(100vh - 150px) !important;
+  max-height: calc(100vh - 150px) !important;
+  padding: 18px !important;
+  border-radius: 18px !important;
+  background: rgba(2, 6, 23, .38) !important;
+  overflow: auto !important;
+  box-sizing: border-box !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .pdf-page-layer,
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .pdf-canvas {
+  max-width: none !important;
+  max-height: none !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .ink-canvas {
+  pointer-events: none !important;
+}
+@media (max-width: 1050px) {
+  .viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-canvas-wrap {
+    width: min(100%, calc(100vw - 230px)) !important;
+    max-width: min(100%, calc(100vw - 230px)) !important;
+  }
+}
+@media (max-width: 780px) {
+  .viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-stage {
+    padding-top: 78px !important;
+  }
+  .viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-canvas-wrap {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: calc(100vh - 150px) !important;
+    max-height: calc(100vh - 150px) !important;
+  }
+}
+
+/* Pro v10.6: host slide picker and preview buttons should always be tappable. */
+#remotePreviewFullBtn,
+#remoteAllSlidesBtn,
+#remoteCloseSlides,
+.remote-slide-choice {
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+  cursor: pointer !important;
+}
+.remote-slides-panel {
+  overscroll-behavior: contain !important;
+}
+.remote-slides-grid {
+  touch-action: pan-y !important;
+}
+
+/* Pro v10.6: keep the portrait preview overlay isolated from the dashboard. */
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteFullPreview.hidden {
+  display: none !important;
+  pointer-events: none !important;
+}
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteControlDashboard {
+  touch-action: pan-y !important;
+}
+
+/* Pro v10.6 stability repair: desktop fit + low-latency remote.
+   Keep the normal viewer below the floating toolbar and leave fullscreen untouched. */
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-stage {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  align-content: start !important;
+  padding-top: 74px !important;
+  box-sizing: border-box !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-canvas-wrap {
+  width: min(100%, calc(100vw - 330px)) !important;
+  max-width: min(100%, calc(100vw - 330px)) !important;
+  height: calc(100vh - 150px) !important;
+  max-height: calc(100vh - 150px) !important;
+  padding: 18px !important;
+  border-radius: 18px !important;
+  background: rgba(2, 6, 23, .38) !important;
+  overflow: auto !important;
+  box-sizing: border-box !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .pdf-page-layer,
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .pdf-canvas {
+  max-width: none !important;
+  max-height: none !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .ink-canvas {
+  pointer-events: none !important;
+}
+@media (max-width: 1050px) {
+  .viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-canvas-wrap {
+    width: min(100%, calc(100vw - 230px)) !important;
+    max-width: min(100%, calc(100vw - 230px)) !important;
+  }
+}
+@media (max-width: 780px) {
+  .viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-stage {
+    padding-top: 78px !important;
+  }
+  .viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-canvas-wrap {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: calc(100vh - 150px) !important;
+    max-height: calc(100vh - 150px) !important;
+  }
+}
+
+/* Pro v10.6: host slide picker and preview buttons should always be tappable. */
+#remotePreviewFullBtn,
+#remoteAllSlidesBtn,
+#remoteCloseSlides,
+.remote-slide-choice {
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+  cursor: pointer !important;
+}
+.remote-slides-panel {
+  overscroll-behavior: contain !important;
+}
+.remote-slides-grid {
+  touch-action: pan-y !important;
+}
+
+/* Pro v10.6: keep the portrait preview overlay isolated from the dashboard. */
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteFullPreview.hidden {
+  display: none !important;
+  pointer-events: none !important;
+}
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteControlDashboard {
+  touch-action: pan-y !important;
+}

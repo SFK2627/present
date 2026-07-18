@@ -1312,14 +1312,25 @@
 
   function getAvailableStageSize() {
     const fullscreen = isPresentationFullscreen();
-    const rect = fullscreen
-      ? { width: window.innerWidth, height: window.innerHeight }
-      : (els.viewerStage ? els.viewerStage.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight });
-    const horizontalPadding = fullscreen ? 0 : 64;
-    const verticalPadding = fullscreen ? 0 : 46;
+    if (fullscreen) {
+      return { width: Math.max(320, window.innerWidth), height: Math.max(240, window.innerHeight) };
+    }
+
+    // Normal desktop view has a floating toolbar. Use the actual canvas well,
+    // not the full stage, so the PDF fits below the toolbar instead of looking
+    // cropped or oversized.
+    const wrapRect = els.viewerCanvasWrap ? els.viewerCanvasWrap.getBoundingClientRect() : null;
+    if (wrapRect && wrapRect.width > 120 && wrapRect.height > 120) {
+      return {
+        width: Math.max(320, wrapRect.width - 40),
+        height: Math.max(240, wrapRect.height - 40),
+      };
+    }
+
+    const rect = els.viewerStage ? els.viewerStage.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
     return {
-      width: Math.max(320, rect.width - horizontalPadding),
-      height: Math.max(240, rect.height - verticalPadding),
+      width: Math.max(320, rect.width - 96),
+      height: Math.max(240, rect.height - 150),
     };
   }
 
@@ -2234,6 +2245,14 @@
     state.sessionId = state.sessionId || makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
     state.lastCommandId = null;
+    // v10.6 cleanup: old builds stored every slide thumbnail inside the live
+    // session document. That made every phone command feel delayed. Remove it
+    // once, then keep thumbnails in a lightweight subcollection instead.
+    try {
+      if (window.firebase && window.firebase.firestore && window.firebase.firestore.FieldValue) {
+        await state.sessionRef.set({ slideThumbs: window.firebase.firestore.FieldValue.delete() }, { merge: true });
+      }
+    } catch (error) {}
     await publishSessionState(true);
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
@@ -2280,9 +2299,9 @@
       countdownVoiceGender: state.countdownVoiceGender,
       countdownVoiceStart: getCountdownVoiceStart(),
       transitionEffect: state.transitionEffect,
-      inkStrokes: state.inkStrokes.slice(-350),
-      slideThumbs: state.remoteSlideThumbs || {},
+      inkStrokes: state.inkStrokes.slice(-220),
       slideThumbsCount: state.remoteSlideThumbsCount || 0,
+      slideThumbsReadyAt: state.remoteSlideThumbsReadyAt || 0,
       updatedAt: Date.now(),
     };
 
@@ -2308,7 +2327,7 @@
   }
 
   async function getCurrentThumbForRemote() {
-    const key = `${state.activeFile ? state.activeFile.id : ''}:${state.currentPage}:${Math.round(state.zoom * 100)}:${Math.round(state.viewportCenterX * 100)}:${Math.round(state.viewportCenterY * 100)}:${state.timer.visible ? 1 : 0}`;
+    const key = `${state.activeFile ? state.activeFile.id : ''}:${state.currentPage}:base`;
     if (!state.remotePreviewBusy && state.lastRemoteThumbKey === key && !isPresentationFullscreen()) return '';
     state.remotePreviewBusy = true;
     try {
@@ -2601,22 +2620,30 @@
   async function generateRemoteSlideThumbs() {
     if (!state.sessionRef || !state.activeFile || state.remoteSlideThumbsBusy) return;
     state.remoteSlideThumbsBusy = true;
-    const thumbs = { ...(state.remoteSlideThumbs || {}) };
-    const maxPages = Math.min(state.totalPages || 1, 80);
+    const maxPages = Math.min(state.totalPages || 1, 160);
     try {
+      const thumbsRef = state.sessionRef.collection('slideThumbs');
       for (let page = 1; page <= maxPages; page++) {
-        if (thumbs[page]) continue;
+        let src = '';
         if (state.activeFile.type === 'pdf' && state.activePdf) {
-          thumbs[page] = await renderPdfPageToDataUrl(state.activePdf, page, 170, 0.45);
+          // Tiny thumbnails are stored separately from the live session document
+          // so normal host commands stay low-latency.
+          src = await renderPdfPageToDataUrl(state.activePdf, page, 150, 0.46);
         } else if (state.activeFile.type === 'pptx') {
-          thumbs[page] = createPptxThumbDataUrl(`Slide ${page}`, page);
+          src = createPptxThumbDataUrl(`Slide ${page}`, page);
         } else if (state.activeFile.type === 'canva') {
-          thumbs[page] = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
+          src = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
         }
-        if (page % 6 === 0 || page === maxPages) {
-          state.remoteSlideThumbs = thumbs;
-          state.remoteSlideThumbsCount = maxPages;
-          await state.sessionRef.set({ slideThumbs: thumbs, slideThumbsCount: maxPages, slideThumbsUpdatedAt: Date.now() }, { merge: true });
+        if (!src) continue;
+        await thumbsRef.doc(String(page)).set({ page, src, updatedAt: Date.now() }, { merge: true });
+        if (page === 1 || page % 8 === 0 || page === maxPages) {
+          state.remoteSlideThumbsCount = page;
+          state.remoteSlideThumbsReadyAt = Date.now();
+          await state.sessionRef.set({
+            slideThumbsCount: page,
+            slideThumbsTotal: maxPages,
+            slideThumbsReadyAt: state.remoteSlideThumbsReadyAt
+          }, { merge: true });
         }
       }
     } catch (error) {
@@ -2663,6 +2690,9 @@
     let remoteViewport = { zoom: 1, centerX: 0.5, centerY: 0.5 };
     let latestThumb = '';
     let latestRemoteData = null;
+    let remoteSlideThumbs = {};
+    let remoteSlideThumbsLoading = false;
+    let remoteLastThumbsReadyAt = 0;
 
     els.remoteApp.innerHTML = `
       <main id="remoteControlDashboard" class="remote-card remote-premium-card ${isHost ? '' : 'remote-viewer-only'}">
@@ -2903,7 +2933,16 @@
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
         applyRemoteFullPreviewTransform(remoteViewport);
-        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost);
+        if (data.slideThumbsReadyAt && data.slideThumbsReadyAt !== remoteLastThumbsReadyAt) {
+          remoteLastThumbsReadyAt = data.slideThumbsReadyAt;
+          if ($('remoteSlidesPanel') && !$('remoteSlidesPanel').classList.contains('hidden')) {
+            loadRemoteSlideThumbs(ref, true).then((thumbs) => {
+              remoteSlideThumbs = thumbs;
+              renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+            });
+          }
+        }
+        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
         renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
       });
 
@@ -2921,8 +2960,16 @@
         allSlidesBtn.addEventListener('click', () => {
           if (!isHost) return;
           slidesPanel.classList.remove('hidden');
-          renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost);
+          renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+          loadRemoteSlideThumbs(ref).then((thumbs) => {
+            remoteSlideThumbs = thumbs;
+            renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+          });
           sendRemoteCommand(ref, 'requestSlideThumbs');
+          window.setTimeout(() => loadRemoteSlideThumbs(ref, true).then((thumbs) => {
+            remoteSlideThumbs = thumbs;
+            renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+          }), 1400);
         });
       }
       if (closeSlidesBtn && slidesPanel) {
@@ -2931,10 +2978,13 @@
         });
       }
 
+      // Keep button handlers direct and single-fire. Heavy All Slides data is loaded separately
+      // so normal host commands stay fast.
+
       attachRemotePreviewControls(ref, isHost, () => remoteViewport, (next) => {
         remoteViewport = next;
         applyRemoteFullPreviewTransform(remoteViewport);
-        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost);
+        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
         renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
       });
       $('remoteTimingMode').addEventListener('change', () => {
@@ -2991,14 +3041,34 @@
   }
 
 
-  function renderRemoteSlidesGrid(data = {}, ref, isHost) {
+  async function loadRemoteSlideThumbs(ref, force = false) {
+    if (!ref || remoteSlideThumbsLoading) return remoteSlideThumbs || {};
+    if (!force && remoteSlideThumbs && Object.keys(remoteSlideThumbs).length) return remoteSlideThumbs;
+    remoteSlideThumbsLoading = true;
+    try {
+      const snap = await ref.collection('slideThumbs').orderBy('page').limit(180).get();
+      const next = {};
+      snap.forEach((doc) => {
+        const item = doc.data() || {};
+        if (item.page && item.src) next[item.page] = item.src;
+      });
+      return next;
+    } catch (error) {
+      console.warn('Could not load slide thumbnails:', error);
+      return remoteSlideThumbs || {};
+    } finally {
+      remoteSlideThumbsLoading = false;
+    }
+  }
+
+  function renderRemoteSlidesGrid(data = {}, ref, isHost, localThumbs = {}) {
     const grid = $('remoteSlidesGrid');
     const panel = $('remoteSlidesPanel');
     if (!grid || !panel || panel.classList.contains('hidden')) return;
     const total = Math.max(1, Number(data.totalPages) || 1);
     const current = Math.max(1, Number(data.currentPage) || 1);
-    const thumbs = data.slideThumbs || {};
-    const availableCount = Number(data.slideThumbsCount) || Object.keys(thumbs).length || 0;
+    const thumbs = localThumbs || {};
+    const availableCount = Object.keys(thumbs).length || Number(data.slideThumbsCount) || 0;
     const help = $('remoteSlidesHelp');
     if (help) help.textContent = availableCount ? `Tap any slide. Thumbnails loaded: ${Math.min(availableCount, total)} / ${total}.` : 'Loading thumbnails from desktop... tap numbers while waiting.';
     const limit = Math.min(total, 180);
