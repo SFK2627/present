@@ -3446,7 +3446,7 @@
           $('remoteClassResult').textContent = bits.join(' • ') || 'Ready';
           const classBusy = !!cs.busy;
           if ($('remotePickName')) $('remotePickName').disabled = !isHost || classBusy;
-          if ($('remoteRollGroup')) $('remoteRollGroup').disabled = !isHost || classBusy || !cs.lastStudent || cs.revealMode === 'group';
+          if ($('remoteRollGroup')) $('remoteRollGroup').disabled = !isHost || classBusy;
           if ($('remoteClassReset')) $('remoteClassReset').disabled = !isHost || classBusy;
         }
         window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
@@ -4469,8 +4469,7 @@
   }
   async function rollGroupDice() {
     if (state.classroom.busy) return;
-    const student = state.classroom.lastStudent;
-    if (!student) return alert('Pick a student first before rolling a group.');
+    const student = state.classroom.lastStudent || null;
     const group = chooseBalancedGroup();
     state.classroom.busy = true;
     state.classroom.revealMode = 'group';
@@ -4478,7 +4477,7 @@
     renderClassroomTools(); publishSessionState(true);
     await showRollingGroupDice(group);
     state.classroom.lastGroup = group;
-    state.classroom.assignments[student.id] = group;
+    if (student) state.classroom.assignments[student.id] = group;
     state.classroom.busy = false;
     renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return group;
   }
@@ -4552,6 +4551,48 @@
     return layer;
   }
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  function playClassroomTone(kind = 'tick', step = 0) {
+    try {
+      primePresentationAudio();
+      const ctx = state.audioContext;
+      if (!ctx) return;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      const now = ctx.currentTime + 0.01;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(kind === 'dice' ? 1800 : 2600, now);
+      osc.type = kind === 'dice' ? 'square' : 'sine';
+      const base = kind === 'select' ? 660 : kind === 'land' ? 220 : kind === 'dice' ? 120 + (step % 5) * 24 : 420 + (step % 7) * 26;
+      osc.frequency.setValueAtTime(base, now);
+      if (kind === 'select') osc.frequency.exponentialRampToValueAtTime(980, now + 0.22);
+      if (kind === 'land') osc.frequency.exponentialRampToValueAtTime(110, now + 0.28);
+      const peak = kind === 'select' ? 0.12 : kind === 'land' ? 0.14 : kind === 'dice' ? 0.045 : 0.035;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(peak, now + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === 'select' ? 0.28 : kind === 'land' ? 0.34 : 0.07));
+      osc.connect(filter).connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + (kind === 'select' ? 0.3 : kind === 'land' ? 0.36 : 0.09));
+    } catch (error) {}
+  }
+  function fitClassroomNames(root) {
+    if (!root) return;
+    root.querySelectorAll('.roulette-name,.classroom-single-line-name').forEach((node) => {
+      const holder = node.closest('.roulette-row') || node.parentElement;
+      if (!holder) return;
+      const available = Math.max(80, holder.clientWidth - 14);
+      let size = parseFloat(getComputedStyle(node).fontSize) || 32;
+      node.style.fontSize = `${size}px`;
+      let guard = 0;
+      while (node.scrollWidth > available && size > 10 && guard < 80) {
+        size -= 1;
+        node.style.fontSize = `${size}px`;
+        guard++;
+      }
+    });
+  }
   async function showNameRoulette(allNames, finalName) {
     const layer = getClassroomRevealLayer('name');
     const card = layer.querySelector('.classroom-reveal-card');
@@ -4575,6 +4616,8 @@
       const progress = i / Math.max(1, sequence.length - 2);
       const delay = 110 + Math.round(progress * progress * 210);
       const strip = renderRouletteMovingStrip(track, safePool, current, next);
+      fitClassroomNames(track);
+      playClassroomTone('tick', i);
       strip.style.setProperty('--roulette-duration', `${Math.max(120, Math.round(delay * 0.8))}ms`);
       void strip.offsetHeight;
       strip.classList.add('spinning');
@@ -4582,9 +4625,11 @@
       current = next;
     }
     renderRouletteFinalStrip(track, safePool, finalName);
+    fitClassroomNames(track);
     status.textContent = 'Selected!';
+    playClassroomTone('select');
     startClassroomRevealConfetti(layer, false);
-    await wait(1900);
+    await wait(5000);
     layer.classList.remove('show');
     renderClassroomPresentation();
   }
@@ -4601,10 +4646,12 @@
       face.textContent = String(1 + Math.floor(Math.random()*max));
       die.style.setProperty('--rx', `${360 + tick*71}deg`);
       die.style.setProperty('--ry', `${540 + tick*53}deg`);
+      playClassroomTone('dice', tick);
       tick++;
       await wait(Math.min(170, 55 + tick*7));
     }
     face.textContent = String(finalGroup);
+    playClassroomTone('land');
     die.classList.add('landed');
     card.querySelector('.rolling-group-label').textContent = `GROUP ${finalGroup}`;
     startClassroomRevealConfetti(layer, true);
