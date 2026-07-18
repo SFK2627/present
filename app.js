@@ -2859,8 +2859,7 @@
           <button id="remoteBackToControls" class="remote-back-controls">Controls</button>
           <button id="remoteClosePreview">Close</button>
         </div>
-        <div class="remote-draw-toolbar" data-host-only="true">
-          <button class="active" id="remoteToolMove" type="button">Move</button>
+        <div class="remote-draw-toolbar" data-host-only="true" aria-label="Drawing tools. Pinch and drag always zooms/pans unless Pen, Highlight, or Erase is active.">
           <button id="remoteToolPen" type="button">Pen</button>
           <button id="remoteToolHighlighter" type="button">Highlight</button>
           <button id="remoteToolErase" type="button">Erase</button>
@@ -2878,7 +2877,7 @@
             <div class="remote-monitor-base"></div>
           </div>
         </div>
-        <div class="remote-full-help">Portrait preview shows the desktop monitor look. Pinch inside the screen, then drag to choose the exact desktop area.</div>
+        <div class="remote-full-help">Pinch to zoom. Drag to pan when zoomed. Tap Pen/Highlight/Erase only when you want to draw.</div>
       </div>
     `;
 
@@ -3372,22 +3371,27 @@
       return { rect, fitW, fitH, contentW: fitW * zoomValue, contentH: fitH * zoomValue };
     };
 
-    let activeTool = 'move';
+    // No separate Move tool: the normal state is zoom/pan.
+    // Tap Pen/Highlight/Erase to draw; tap the same tool again to return to zoom/pan.
+    let activeTool = null;
     let currentStroke = null;
     const toolButtons = {
-      move: $('remoteToolMove'),
       pen: $('remoteToolPen'),
       highlighter: $('remoteToolHighlighter'),
       erase: $('remoteToolErase'),
     };
+    const isDrawingTool = (tool) => tool === 'pen' || tool === 'highlighter' || tool === 'erase';
 
     function setActiveTool(tool) {
-      activeTool = tool;
+      activeTool = activeTool === tool ? null : tool;
       Object.entries(toolButtons).forEach(([name, button]) => {
-        if (button) button.classList.toggle('active', name === tool);
+        if (button) button.classList.toggle('active', name === activeTool);
       });
       const screen = stage.querySelector('.remote-monitor-screen');
-      if (screen) screen.dataset.tool = tool;
+      if (screen) {
+        if (activeTool) screen.dataset.tool = activeTool;
+        else delete screen.dataset.tool;
+      }
     }
 
     Object.entries(toolButtons).forEach(([tool, button]) => {
@@ -3409,7 +3413,7 @@
 
     stage.addEventListener('touchstart', (event) => {
       if (event.touches.length) event.preventDefault();
-      if (activeTool !== 'move' && event.touches.length === 1) {
+      if (isDrawingTool(activeTool) && event.touches.length === 1) {
         const point = remoteScreenPointToSlide(event.touches[0].clientX, event.touches[0].clientY);
         if (activeTool === 'erase') {
           sendErase(point);
@@ -3446,7 +3450,7 @@
     stage.addEventListener('touchmove', (event) => {
       if (event.touches.length !== 1 && event.touches.length !== 2) return;
       event.preventDefault();
-      if (activeTool !== 'move' && event.touches.length === 1) {
+      if (isDrawingTool(activeTool) && event.touches.length === 1) {
         const point = remoteScreenPointToSlide(event.touches[0].clientX, event.touches[0].clientY);
         if (activeTool === 'erase') {
           sendErase(point);

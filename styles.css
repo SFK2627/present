@@ -2784,3 +2784,85 @@ body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteControlDas
   place-items: center !important;
   background: linear-gradient(135deg, rgba(30,41,59,.92), rgba(49,46,129,.74)) !important;
 }
+
+/* v10 pinch-first repair: Portrait Preview is always a zoom/pan surface.
+   Drawing tools stay compact and never become giant action tiles. */
+.remote-portrait-preview .remote-draw-toolbar {
+  position: absolute !important;
+  top: calc(54px + env(safe-area-inset-top, 0px)) !important;
+  left: 10px !important;
+  right: 10px !important;
+  z-index: 40 !important;
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 6px !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: 42px !important;
+  min-height: 0 !important;
+  padding: 5px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  border-radius: 999px !important;
+  background: rgba(2, 6, 23, .62) !important;
+  border: 1px solid rgba(255,255,255,.13) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  box-shadow: 0 10px 28px rgba(0,0,0,.30) !important;
+}
+.remote-portrait-preview .remote-draw-toolbar button {
+  flex: 0 0 auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
+  padding: 0 .62rem !important;
+  border-radius: 999px !important;
+  font-size: .70rem !important;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+  white-space: nowrap !important;
+  background: rgba(15, 23, 42, .72) !important;
+  color: #f8fafc !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+.remote-portrait-preview .remote-draw-toolbar button.active {
+  background: linear-gradient(135deg, #8b5cf6, #14b8a6) !important;
+  color: #fff !important;
+  border-color: rgba(255,255,255,.32) !important;
+}
+.remote-portrait-preview .remote-full-stage.remote-monitor-stage {
+  padding-top: 42px !important;
+  touch-action: none !important;
+}
+.remote-portrait-preview .remote-monitor-screen:not([data-tool]) {
+  cursor: grab;
+}
+.remote-portrait-preview .remote-monitor-screen:not([data-tool]) .remote-ink-preview {
+  pointer-events: none !important;
+}
+@media (max-height: 700px) {
+  .remote-portrait-preview .remote-draw-toolbar {
+    top: calc(48px + env(safe-area-inset-top, 0px)) !important;
+    max-height: 34px !important;
+  }
+  .remote-portrait-preview .remote-draw-toolbar button {
+    height: 26px !important;
+    min-height: 26px !important;
+    max-height: 26px !important;
+    font-size: .64rem !important;
+    padding: 0 .52rem !important;
+  }
+  .remote-portrait-preview .remote-full-stage.remote-monitor-stage {
+    padding-top: 34px !important;
+  }
+}
