@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v11-excel-import-v1';
+const CACHE_NAME = 'presentation-hub-v11-4';
 const CORE_ASSETS = [
   './',
   './index.html',

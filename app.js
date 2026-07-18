@@ -93,7 +93,7 @@
     magicEffectVolume: 200,
     magicEffectSound: true,
     magicEffectIntensity: 'grand',
-    classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null },
+    classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null, revealMode: '', busy: false },
     classroomSyncTimer: null,
     firebaseUser: null,
   };
@@ -229,7 +229,7 @@
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
-      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'classListFileInput', 'importClassListBtn', 'classImportStatus', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'pickNameBtn', 'rollGroupBtn', 'pickRollBtn', 'resetPicksBtn', 'presentClassroomBtn', 'classroomResult', 'classroomRoster'
+      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'classListFileInput', 'importClassListBtn', 'classImportStatus', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'pickNameBtn', 'rollGroupBtn', 'resetPicksBtn', 'presentClassroomBtn', 'classroomResult', 'classroomRoster'
     ].forEach((id) => { els[id] = $(id); });
   }
 
@@ -380,7 +380,6 @@
     if (els.balancedGroupsInput) els.balancedGroupsInput.addEventListener('change', () => { state.classroom.balanced = els.balancedGroupsInput.checked; scheduleClassroomSave(); });
     if (els.pickNameBtn) els.pickNameBtn.addEventListener('click', pickRandomStudent);
     if (els.rollGroupBtn) els.rollGroupBtn.addEventListener('click', rollGroupDice);
-    if (els.pickRollBtn) els.pickRollBtn.addEventListener('click', pickAndRoll);
     if (els.resetPicksBtn) els.resetPicksBtn.addEventListener('click', resetClassroomRound);
 
     document.addEventListener('keydown', handleKeyboard, true);
@@ -2950,7 +2949,6 @@
         break;
       case 'classroomPick': pickRandomStudent(); break;
       case 'classroomRoll': rollGroupDice(); break;
-      case 'classroomPickRoll': pickAndRoll(); break;
       case 'classroomReset': resetClassroomRound(); break;
       case 'setTransitionEffect':
         state.transitionEffect = command.value || 'fade';
@@ -3232,7 +3230,6 @@
           <div class="remote-class-actions">
             <button id="remotePickName" data-host-only="true">Pick Name</button>
             <button id="remoteRollGroup" data-host-only="true">Roll Group</button>
-            <button id="remotePickRoll" class="remote-class-primary" data-host-only="true">Pick + Roll</button>
             <button id="remoteClassReset" data-host-only="true">Reset</button>
           </div>
         </section>
@@ -3387,7 +3384,6 @@
     const bindClassCommand = (id, action) => { const node = $(id); if (node) node.addEventListener('click', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, action); }); };
     bindClassCommand('remotePickName', 'classroomPick');
     bindClassCommand('remoteRollGroup', 'classroomRoll');
-    bindClassCommand('remotePickRoll', 'classroomPickRoll');
     bindClassCommand('remoteClassReset', 'classroomReset');
 
     if (!hasFirebaseConfig()) {
@@ -3416,8 +3412,8 @@
           $('remoteClassSection').innerHTML = (cs.sections || []).map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.count})</option>`).join('') || '<option value="">No saved section</option>';
           $('remoteClassSection').value = cs.activeSectionId || '';
           const bits = [];
-          if (cs.lastStudent) bits.push(cs.lastStudent);
-          if (cs.lastGroup) bits.push(`Group ${cs.lastGroup}`);
+          if (cs.revealMode === 'name' && cs.lastStudent) bits.push(cs.lastStudent);
+          if (cs.revealMode === 'group' && cs.lastGroup) bits.push(`Group ${cs.lastGroup}`);
           $('remoteClassResult').textContent = bits.join(' • ') || 'Ready';
         }
         window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
@@ -4254,18 +4250,27 @@
       const sectionKey = findClassColumn(sample, ['section','class','class name','grade and section']);
       if (!nameKey && !firstNameKey && !lastNameKey) throw new Error('A Name column is required. Use: Student ID | Name | Gender | Section');
       const grouped = new Map();
+      const importedRowKeys = new Set();
       for (const row of rows) {
+        // When a dedicated Name/Full Name column exists, read that cell only.
+        // Never join neighboring generic columns because that can merge two learners.
         let name = nameKey ? cleanStudentName(row[nameKey]) : '';
-        if (!name) name = [firstNameKey && row[firstNameKey], middleNameKey && row[middleNameKey], lastNameKey && row[lastNameKey]].map(cleanStudentName).filter(Boolean).join(' ');
+        if (!name && !nameKey) {
+          name = [firstNameKey && row[firstNameKey], middleNameKey && row[middleNameKey], lastNameKey && row[lastNameKey]]
+            .map(cleanStudentName).filter(Boolean).join(' ');
+        }
         name = cleanStudentName(name);
         if (!name) continue;
         const sectionName = cleanClassValue((sectionKey && row[sectionKey]) || 'Imported Section') || 'Imported Section';
+        const studentId = idKey ? cleanClassValue(row[idKey]) : '';
+        const dedupeKey = studentId
+          ? `${sectionName.toLowerCase()}|id:${studentId.toLowerCase()}`
+          : `${sectionName.toLowerCase()}|name:${name.toLowerCase()}`;
+        // Some school workbooks repeat the same class list on multiple sheets.
+        if (importedRowKeys.has(dedupeKey)) continue;
+        importedRowKeys.add(dedupeKey);
         if (!grouped.has(sectionName)) grouped.set(sectionName, []);
-        grouped.get(sectionName).push({
-          studentId: idKey ? cleanClassValue(row[idKey]) : '',
-          name,
-          gender: genderKey ? cleanClassValue(row[genderKey]) : ''
-        });
+        grouped.get(sectionName).push({ studentId, name, gender: genderKey ? cleanClassValue(row[genderKey]) : '' });
       }
       if (!grouped.size) throw new Error('No complete student names were found in the file.');
       let importedStudents = 0;
@@ -4335,22 +4340,30 @@
     els.groupCountInput.value = state.classroom.groupCount;
     els.removePickedInput.checked = state.classroom.removePicked;
     els.balancedGroupsInput.checked = state.classroom.balanced;
-    els.classroomResult.innerHTML = state.classroom.lastStudent ? `<strong>${escapeHtml(state.classroom.lastStudent.name)}</strong>${state.classroom.lastGroup ? `<span>GROUP ${state.classroom.lastGroup}</span>` : ''}` : '<span>Ready to pick</span>';
+    els.classroomResult.innerHTML = state.classroom.revealMode === 'name' && state.classroom.lastStudent ? `<strong>${escapeHtml(state.classroom.lastStudent.name)}</strong>` : state.classroom.revealMode === 'group' && state.classroom.lastGroup ? `<span>GROUP ${state.classroom.lastGroup}</span>` : '<span>Ready to pick</span>';
+    [els.pickNameBtn, els.rollGroupBtn, els.resetPicksBtn].filter(Boolean).forEach(btn => { btn.disabled = !!state.classroom.busy; });
     renderClassroomPresentation();
     els.classroomRoster.innerHTML = sec ? sec.students.map(s => `<div><span title="${escapeHtml(cleanStudentName(s.name))}">${escapeHtml(cleanStudentName(s.name))}</span><b>${state.classroom.assignments[s.id] ? 'G'+state.classroom.assignments[s.id] : ''}</b></div>`).join('') : '';
   }
   function classroomRemoteSnapshot() {
     const sec = activeClassSection();
-    return { sections: state.classroom.sections.map(s => ({ id:s.id, name:s.name, count:s.students.length })), activeSectionId: state.classroom.activeSectionId, groupCount: state.classroom.groupCount, lastStudent: state.classroom.lastStudent && state.classroom.lastStudent.name, lastGroup: state.classroom.lastGroup, available: sec ? sec.students.length - state.classroom.pickedIds.length : 0 };
+    return { sections: state.classroom.sections.map(s => ({ id:s.id, name:s.name, count:s.students.length })), activeSectionId: state.classroom.activeSectionId, groupCount: state.classroom.groupCount, revealMode: state.classroom.revealMode || '', lastStudent: state.classroom.lastStudent && state.classroom.lastStudent.name, lastGroup: state.classroom.lastGroup, available: sec ? sec.students.length - state.classroom.pickedIds.length : 0 };
   }
-  function pickRandomStudent() {
+  async function pickRandomStudent() {
+    if (state.classroom.busy) return;
     const sec = activeClassSection(); if (!sec || !sec.students.length) return alert('Add student names first.');
     let pool = sec.students.filter(s => !state.classroom.removePicked || !state.classroom.pickedIds.includes(s.id));
     if (!pool.length) { state.classroom.pickedIds = []; pool = sec.students.slice(); }
     const chosen = pool[Math.floor(Math.random()*pool.length)];
-    state.classroom.lastStudent = chosen; state.classroom.lastGroup = state.classroom.assignments[chosen.id] || null;
+    state.classroom.busy = true;
+    state.classroom.revealMode = 'name';
+    state.classroom.lastGroup = null;
+    renderClassroomTools(); publishSessionState(true);
+    await showNameRoulette(sec.students.map(s => cleanStudentName(s.name)), cleanStudentName(chosen.name));
+    state.classroom.lastStudent = chosen;
     if (state.classroom.removePicked && !state.classroom.pickedIds.includes(chosen.id)) state.classroom.pickedIds.push(chosen.id);
-    showClassroomReveal(chosen.name, null); renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return chosen;
+    state.classroom.busy = false;
+    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return chosen;
   }
   function chooseBalancedGroup() {
     const n = state.classroom.groupCount; if (!state.classroom.balanced) return 1 + Math.floor(Math.random()*n);
@@ -4358,13 +4371,22 @@
     const min = Math.min(...counts); const choices = counts.map((c,i)=>c===min?i+1:null).filter(Boolean);
     return choices[Math.floor(Math.random()*choices.length)];
   }
-  function rollGroupDice() {
-    const student = state.classroom.lastStudent; const group = chooseBalancedGroup(); state.classroom.lastGroup = group;
-    if (student) state.classroom.assignments[student.id] = group;
-    showClassroomReveal(student ? student.name : '', group); renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return group;
+  async function rollGroupDice() {
+    if (state.classroom.busy) return;
+    const student = state.classroom.lastStudent;
+    if (!student) return alert('Pick a student first before rolling a group.');
+    const group = chooseBalancedGroup();
+    state.classroom.busy = true;
+    state.classroom.revealMode = 'group';
+    state.classroom.lastGroup = null;
+    renderClassroomTools(); publishSessionState(true);
+    await showRollingGroupDice(group);
+    state.classroom.lastGroup = group;
+    state.classroom.assignments[student.id] = group;
+    state.classroom.busy = false;
+    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return group;
   }
-  function pickAndRoll() { const student = pickRandomStudent(); if (student) setTimeout(rollGroupDice, 850); }
-  function resetClassroomRound() { state.classroom.pickedIds=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
+  function resetClassroomRound() { if (state.classroom.busy) return; state.classroom.pickedIds=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; state.classroom.revealMode=''; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
   function getClassroomPresentationLayer() {
     let layer = document.getElementById('classroomPresentationLayer');
     if (layer) return layer;
@@ -4398,8 +4420,10 @@
     const main = layer.querySelector('.classroom-stage-main');
     if (sectionEl) sectionEl.textContent = sec ? sec.name : 'Select a section';
     if (!main) return;
-    if (state.classroom.lastStudent || state.classroom.lastGroup) {
-      main.innerHTML = `${state.classroom.lastStudent ? `<div class="classroom-stage-label">SELECTED STUDENT</div><h1 class="classroom-single-line-name">${escapeHtml(cleanStudentName(state.classroom.lastStudent.name))}</h1>` : ''}${state.classroom.lastGroup ? `<div class="classroom-stage-final-die">${state.classroom.lastGroup}</div><h2>GROUP ${state.classroom.lastGroup}</h2>` : '<p>Ready to roll a group.</p>'}`;
+    if (state.classroom.revealMode === 'name' && state.classroom.lastStudent) {
+      main.innerHTML = `<div class="classroom-stage-label">SELECTED STUDENT</div><h1 class="classroom-single-line-name">${escapeHtml(cleanStudentName(state.classroom.lastStudent.name))}</h1><p>Ready to roll a group.</p>`;
+    } else if (state.classroom.revealMode === 'group' && state.classroom.lastGroup) {
+      main.innerHTML = `<div class="classroom-stage-label">GROUP RESULT</div><div class="classroom-stage-final-die">${state.classroom.lastGroup}</div><h2>GROUP ${state.classroom.lastGroup}</h2>`;
     } else {
       main.innerHTML = '<div class="classroom-stage-icon">✦</div><h1>Ready for the next pick</h1><p>Use the phone remote or the classroom controls.</p>';
     }
@@ -4420,18 +4444,61 @@
     const layer = document.getElementById('classroomPresentationLayer');
     if (layer && !document.fullscreenElement && !layer.classList.contains('hidden')) layer.classList.add('hidden');
   });
-  function showClassroomReveal(name, group) {
+  function getClassroomRevealLayer(mode) {
     const fullscreenHost = document.fullscreenElement || document.body;
     let layer = document.getElementById('classroomRevealLayer');
     if (!layer) { layer = document.createElement('div'); layer.id = 'classroomRevealLayer'; }
     if (layer.parentElement !== fullscreenHost) fullscreenHost.appendChild(layer);
     const sparkles = Array.from({length:18}, (_,i)=>`<i style="--i:${i};--x:${8+Math.random()*84}%;--y:${8+Math.random()*80}%;--d:${(Math.random()*1.3).toFixed(2)}s"></i>`).join('');
-    layer.className = `classroom-reveal-layer show ${group ? 'group-reveal' : 'name-reveal'}`;
-    layer.innerHTML = `<div class="classroom-reveal-bg"></div><div class="classroom-reveal-orbit orbit-one"></div><div class="classroom-reveal-orbit orbit-two"></div><div class="classroom-reveal-sparkles">${sparkles}</div><canvas class="classroom-reveal-confetti"></canvas><div class="classroom-reveal-card"><div class="classroom-reveal-badge">${group ? 'GROUP DICE' : 'RANDOM NAME'}</div>${name?`<h2 class="classroom-single-line-name" data-text="${escapeHtml(cleanStudentName(name))}">${escapeHtml(cleanStudentName(name))}</h2>`:''}${group?`<div class="classroom-die"><span>${group}</span></div><h3>GROUP ${group}</h3>`:'<div class="classroom-reveal-line"></div><p>Selected!</p>'}</div>`;
-    startClassroomRevealConfetti(layer, !!group);
-    const duration = group ? 3900 : 3200;
-    clearTimeout(layer._hideTimer);
-    layer._hideTimer = setTimeout(() => { layer.classList.remove('show'); renderClassroomPresentation(); }, duration);
+    layer.className = `classroom-reveal-layer show ${mode}-reveal`;
+    layer.innerHTML = `<div class="classroom-reveal-bg"></div><div class="classroom-reveal-orbit orbit-one"></div><div class="classroom-reveal-orbit orbit-two"></div><div class="classroom-reveal-sparkles">${sparkles}</div><canvas class="classroom-reveal-confetti"></canvas><div class="classroom-reveal-card"></div>`;
+    return layer;
+  }
+  function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  async function showNameRoulette(allNames, finalName) {
+    const layer = getClassroomRevealLayer('name');
+    const card = layer.querySelector('.classroom-reveal-card');
+    card.innerHTML = `<div class="classroom-reveal-badge">RANDOM NAME</div><div class="name-roulette-window"><div class="name-roulette-track"></div></div><div class="classroom-reveal-line"></div><p>Choosing...</p>`;
+    const track = card.querySelector('.name-roulette-track');
+    const status = card.querySelector('p');
+    const safeNames = allNames.length ? allNames : [finalName];
+    const steps = 26;
+    for (let i=0;i<steps;i++) {
+      const progress = i/(steps-1);
+      const delay = 45 + Math.round(progress*progress*250);
+      const shown = i === steps-1 ? finalName : safeNames[Math.floor(Math.random()*safeNames.length)];
+      track.innerHTML = `<div class="roulette-name ${i === steps-1 ? 'roulette-final' : ''}">${escapeHtml(shown)}</div>`;
+      await wait(delay);
+    }
+    status.textContent = 'Selected!';
+    startClassroomRevealConfetti(layer, false);
+    await wait(1800);
+    layer.classList.remove('show');
+    renderClassroomPresentation();
+  }
+  async function showRollingGroupDice(finalGroup) {
+    const layer = getClassroomRevealLayer('group');
+    const card = layer.querySelector('.classroom-reveal-card');
+    card.innerHTML = `<div class="classroom-reveal-badge">GROUP DICE</div><div class="rolling-dice-scene"><div class="rolling-die"><span>?</span></div></div><h3 class="rolling-group-label">ROLLING...</h3>`;
+    const die = card.querySelector('.rolling-die');
+    const face = die.querySelector('span');
+    const max = Math.max(2, Number(state.classroom.groupCount) || 6);
+    const started = performance.now();
+    let tick = 0;
+    while (performance.now() - started < 1900) {
+      face.textContent = String(1 + Math.floor(Math.random()*max));
+      die.style.setProperty('--rx', `${360 + tick*71}deg`);
+      die.style.setProperty('--ry', `${540 + tick*53}deg`);
+      tick++;
+      await wait(Math.min(170, 55 + tick*7));
+    }
+    face.textContent = String(finalGroup);
+    die.classList.add('landed');
+    card.querySelector('.rolling-group-label').textContent = `GROUP ${finalGroup}`;
+    startClassroomRevealConfetti(layer, true);
+    await wait(2100);
+    layer.classList.remove('show');
+    renderClassroomPresentation();
   }
   function startClassroomRevealConfetti(layer, groupMode) {
     const canvas = layer.querySelector('.classroom-reveal-confetti'); if (!canvas) return;
