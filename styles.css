@@ -1339,3 +1339,17 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
     padding: 8px 10px;
   }
 }
+
+/* Emergency fix: the phone fullscreen preview must stay hidden until the user taps Fullscreen Preview. */
+.remote-full-preview.hidden,
+body .remote-full-preview.hidden,
+.remote-app .remote-full-preview.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+.remote-full-preview:not(.hidden) {
+  display: grid !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
