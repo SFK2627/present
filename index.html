@@ -98,6 +98,12 @@
           <div class="panel-section">
             <h4>Auto Slide</h4>
             <div class="field-grid">
+              <label>Timing mode
+                <select id="timingModeSelect">
+                  <option value="global" selected>Global - same for all slides</option>
+                  <option value="per-slide">Per-slide - manual each slide</option>
+                </select>
+              </label>
               <label>Global timing
                 <select id="globalTimingSelect">
                   <option value="5">5 seconds</option>
@@ -111,8 +117,8 @@
               <label id="customTimingWrap" class="hidden">Custom sec
                 <input id="customTimingInput" type="number" min="1" value="12" />
               </label>
-              <label>Current page timing
-                <input id="perSlideTimingInput" type="number" min="1" placeholder="Use global" />
+              <label id="perSlideTimingWrap">This slide timing
+                <input id="perSlideTimingInput" type="number" min="1" placeholder="Use global fallback" />
               </label>
             </div>
             <div class="button-row">

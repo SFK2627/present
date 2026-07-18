@@ -747,3 +747,125 @@ input:focus, select:focus {
   .remote-preview { min-height: 205px; border-radius: 18px; }
   .remote-grid button, .remote-wide button { min-height: 58px; }
 }
+
+/* Auto timing controls */
+.timing-disabled {
+  opacity: .55;
+}
+.timing-disabled input {
+  cursor: not-allowed;
+}
+.remote-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.remote-status-pill {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: .38rem .68rem;
+  background: rgba(34, 211, 238, .16);
+  border: 1px solid rgba(34, 211, 238, .28);
+  color: #cffafe;
+  font-weight: 800;
+  font-size: .78rem;
+}
+.remote-preview-shell {
+  display: grid;
+  gap: 10px;
+}
+.remote-preview-full-btn {
+  width: 100%;
+  min-height: 48px;
+  box-shadow: none;
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.16);
+}
+.remote-auto-label {
+  margin-top: -6px;
+  color: #bae6fd;
+}
+.remote-timing-box select,
+.remote-timing-box input {
+  width: 100%;
+  background: rgba(255,255,255,.1);
+  color: white;
+  border-color: rgba(255,255,255,.18);
+}
+.remote-viewer-only [data-host-only="true"] {
+  opacity: .45;
+  pointer-events: none;
+}
+.remote-full-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  color: #fff;
+}
+.remote-full-toolbar {
+  min-height: 52px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(2, 6, 23, .82);
+  border-bottom: 1px solid rgba(255,255,255,.1);
+  font-weight: 900;
+}
+.remote-full-toolbar button {
+  box-shadow: none;
+  min-height: 38px;
+  padding: .45rem .85rem;
+}
+.remote-full-stage {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  background: #000;
+}
+.remote-full-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  background: #fff;
+  will-change: transform;
+  transition: transform .06s linear;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.remote-full-help {
+  padding: 7px 10px 10px;
+  text-align: center;
+  font-size: .85rem;
+  color: #cbd5e1;
+  background: rgba(2, 6, 23, .82);
+}
+body.remote-fullscreen-open {
+  overflow: hidden;
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .remote-full-toolbar {
+    min-height: 42px;
+    padding: 5px 10px;
+  }
+  .remote-full-help {
+    padding: 4px 8px;
+    font-size: .78rem;
+  }
+}
+@media (max-width: 520px) {
+  .remote-card h1 { font-size: 1.35rem; }
+  .remote-sub { font-size: .9rem; }
+  .remote-preview { min-height: 180px; max-height: 34svh; }
+  .remote-section { margin-top: 14px; padding-top: 14px; }
+  .remote-control-row { gap: 8px; }
+  .remote-control-row button { padding-inline: .55rem; }
+}

@@ -71,3 +71,19 @@ This build improves the presentation behavior requested for GitHub Pages:
 - PPTX no longer falls back to a plain text-only slide view when visual rendering fails. It shows a clear warning instead, because exact PPTX rendering needs visual rendering or PDF export.
 
 For PowerPoint files that must look exactly like the original, use PowerPoint/WPS/Canva export to PDF first, then upload the PDF into Presentation Hub. That is the recommended exact mode.
+
+## Timer, autoplay, and phone preview update
+
+This build adds the requested production presentation controls:
+
+- Auto Play now has a clear **Timing Mode**:
+  - **Global**: every page/slide uses the same interval.
+  - **Per-slide**: manually set the timing for the current page/slide; slides without custom timing fall back to the global interval.
+- The slide timer resets every time Auto Play moves to a new page/slide.
+- Pause freezes both Auto Play and the visible timer.
+- Resume continues from the paused time.
+- Stop fully stops Auto Play and resets the visible timer.
+- Phone remote layout has been tightened so the preview no longer overlaps or pushes past the control sections.
+- The phone remote now has **Fullscreen Preview**. Open it, rotate the phone landscape, then pinch and drag the preview. The desktop viewer receives the same zoom and focus area.
+
+Reminder: for exact PowerPoint colors, pictures, fonts, and layouts, the most reliable workflow is still to export PPTX to PDF first, then upload the PDF.

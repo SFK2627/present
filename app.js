@@ -32,9 +32,17 @@
     currentPage: 1,
     totalPages: 1,
     zoom: 1,
+    viewportCenterX: 0.5,
+    viewportCenterY: 0.5,
+    timingMode: 'global',
     perPageTiming: {},
     autoTimer: null,
+    autoPlaying: false,
     autoPaused: false,
+    autoStartedAt: null,
+    autoElapsedBeforePause: 0,
+    autoCurrentDuration: 10,
+    autoAdvancing: false,
     timerTick: null,
     timerStartedAt: null,
     timerElapsedBeforePause: 0,
@@ -95,7 +103,7 @@
       'thumbnailSidebar', 'viewerStage', 'viewerToolbar', 'controlPanel', 'settingsBtn', 'backHomeBtn',
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
       'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide',
-      'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingInput',
+      'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
@@ -136,15 +144,35 @@
     if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => hideModal(els.qrModal));
     if (els.settingsBtn) els.settingsBtn.addEventListener('click', () => els.controlPanel.classList.toggle('hidden'));
 
-    if (els.globalTimingSelect) els.globalTimingSelect.addEventListener('change', () => {
-      els.customTimingWrap.classList.toggle('hidden', els.globalTimingSelect.value !== 'custom');
+    if (els.timingModeSelect) els.timingModeSelect.addEventListener('change', () => {
+      state.timingMode = els.timingModeSelect.value === 'per-slide' ? 'per-slide' : 'global';
+      updateTimingModeUI();
+      resetAutoClockForCurrentSlide();
+      renderThumbnailSidebar();
+      updateTimerText();
       publishSessionState();
     });
-    if (els.customTimingInput) els.customTimingInput.addEventListener('input', publishSessionState);
+    if (els.globalTimingSelect) els.globalTimingSelect.addEventListener('change', () => {
+      els.customTimingWrap.classList.toggle('hidden', els.globalTimingSelect.value !== 'custom');
+      resetAutoClockForCurrentSlide();
+      updateTimerText();
+      publishSessionState();
+    });
+    if (els.customTimingInput) els.customTimingInput.addEventListener('input', () => {
+      resetAutoClockForCurrentSlide();
+      updateTimerText();
+      publishSessionState();
+    });
     if (els.perSlideTimingInput) els.perSlideTimingInput.addEventListener('change', () => {
       const val = Number(els.perSlideTimingInput.value);
       if (val > 0) state.perPageTiming[state.currentPage] = val;
       else delete state.perPageTiming[state.currentPage];
+      state.timingMode = 'per-slide';
+      if (els.timingModeSelect) els.timingModeSelect.value = 'per-slide';
+      updateTimingModeUI();
+      resetAutoClockForCurrentSlide();
+      renderThumbnailSidebar();
+      updateTimerText();
       publishSessionState();
     });
     if (els.autoStartBtn) els.autoStartBtn.addEventListener('click', startAutoPlay);
@@ -400,7 +428,7 @@
         const result = await inspectPptx(buffer.slice(0));
         pageCount = result.count;
         thumbnail = createPptxThumbDataUrl(file.name, pageCount);
-        note = 'Static PPTX preview extracts slide text. Convert to PDF for exact PowerPoint layout.';
+        note = 'PowerPoint opens with the visual renderer when possible. For exact layout, export PPTX as PDF and upload the PDF.';
       }
     } catch (error) {
       console.warn('Could not inspect file:', error);
@@ -612,7 +640,13 @@
     state.currentPage = 1;
     state.totalPages = file.pageCount || 1;
     state.zoom = 1;
+    state.viewportCenterX = 0.5;
+    state.viewportCenterY = 0.5;
+    state.timingMode = 'global';
     state.perPageTiming = {};
+    state.autoStartedAt = null;
+    state.autoElapsedBeforePause = 0;
+    state.autoCurrentDuration = getCurrentTimingSeconds();
     state.activePdf = null;
     state.activePptxSlides = [];
     state.pptxVisualReady = false;
@@ -633,6 +667,7 @@
     els.jumpInput.max = state.totalPages;
     els.jumpInput.value = '1';
     updateZoomLabel();
+    updateTimingModeUI();
 
     try {
       if (file.type === 'pdf') {
@@ -695,12 +730,12 @@
     try {
       await ensurePptxRendererAssets();
     } catch (error) {
-      console.warn('PPTXjs assets could not be loaded. Falling back to text preview.', error);
+      console.warn('PPTXjs assets could not be loaded. Visual PPTX render is unavailable.', error);
       return;
     }
 
     if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.pptxToHtml) {
-      console.warn('PPTXjs visual renderer is not available. Falling back to text preview.');
+      console.warn('PPTXjs visual renderer is not available.');
       return;
     }
 
@@ -844,6 +879,7 @@
     state.currentPage = Math.min(Math.max(1, state.currentPage), state.totalPages);
     els.jumpInput.value = state.currentPage;
     els.perSlideTimingInput.value = state.perPageTiming[state.currentPage] || '';
+    updateTimingModeUI();
     updateActiveThumb();
 
     if (state.activeFile.type === 'pdf') {
@@ -865,11 +901,13 @@
       canvas.style.width = `${Math.floor(cssViewport.width)}px`;
       canvas.style.height = `${Math.floor(cssViewport.height)}px`;
       await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+      applyViewportScroll();
     } else {
       els.pdfCanvas.classList.add('hidden');
       els.pptxSlide.classList.remove('hidden');
       if (state.pptxVisualReady) {
         showOnlyCurrentPptxSlide();
+        applyViewportScroll();
       } else {
         els.pptxSlide.classList.remove('visual-pptx');
         els.pptxSlide.style.transform = '';
@@ -960,12 +998,14 @@
   function previousPage() {
     if (state.currentPage <= 1) return;
     state.currentPage--;
+    handleSlideChanged();
     renderCurrentPage();
   }
 
   function nextPage() {
     if (state.currentPage >= state.totalPages) return;
     state.currentPage++;
+    handleSlideChanged();
     renderCurrentPage();
   }
 
@@ -973,12 +1013,41 @@
     const target = Math.min(Math.max(1, Number(page) || 1), state.totalPages);
     if (target === state.currentPage) return;
     state.currentPage = target;
+    handleSlideChanged();
     renderCurrentPage();
   }
 
-  function setZoom(value) {
+  function handleSlideChanged() {
+    state.viewportCenterX = 0.5;
+    state.viewportCenterY = 0.5;
+    resetAutoClockForCurrentSlide();
+    if (isAutoClockActive()) resetTimer({ publish: false, start: state.autoPlaying });
+  }
+
+  function setZoom(value, options = {}) {
     state.zoom = Math.min(4, Math.max(0.25, Number(value)));
+    if (Number.isFinite(Number(options.centerX))) state.viewportCenterX = clamp01(Number(options.centerX));
+    if (Number.isFinite(Number(options.centerY))) state.viewportCenterY = clamp01(Number(options.centerY));
     renderCurrentPage();
+  }
+
+  function setViewportTransform(value = {}) {
+    setZoom(value.zoom ?? state.zoom, { centerX: value.centerX ?? state.viewportCenterX, centerY: value.centerY ?? state.viewportCenterY });
+  }
+
+  function clamp01(value) {
+    return Math.max(0, Math.min(1, Number(value) || 0));
+  }
+
+  function applyViewportScroll() {
+    requestAnimationFrame(() => {
+      const wrap = els.viewerCanvasWrap;
+      if (!wrap) return;
+      const maxLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+      const maxTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
+      wrap.scrollLeft = Math.max(0, Math.min(maxLeft, (wrap.scrollWidth * state.viewportCenterX) - (wrap.clientWidth / 2)));
+      wrap.scrollTop = Math.max(0, Math.min(maxTop, (wrap.scrollHeight * state.viewportCenterY) - (wrap.clientHeight / 2)));
+    });
   }
 
   function updateZoomLabel() {
@@ -1040,6 +1109,16 @@
     }, 2400);
   }
 
+  function updateTimingModeUI() {
+    if (els.timingModeSelect) els.timingModeSelect.value = state.timingMode;
+    const perSlideMode = state.timingMode === 'per-slide';
+    if (els.perSlideTimingWrap) els.perSlideTimingWrap.classList.toggle('timing-disabled', !perSlideMode);
+    if (els.perSlideTimingInput) {
+      els.perSlideTimingInput.disabled = !perSlideMode;
+      els.perSlideTimingInput.placeholder = perSlideMode ? 'Use global fallback' : 'Disabled in global mode';
+    }
+  }
+
   function getGlobalTimingSeconds() {
     const selected = els.globalTimingSelect.value;
     if (selected === 'custom') return Math.max(1, Number(els.customTimingInput.value) || 10);
@@ -1047,54 +1126,117 @@
   }
 
   function getCurrentTimingSeconds() {
+    if (state.timingMode !== 'per-slide') return getGlobalTimingSeconds();
     return state.perPageTiming[state.currentPage] || getGlobalTimingSeconds();
+  }
+
+  function setGlobalTimingSeconds(seconds) {
+    const safe = Math.max(1, Number(seconds) || 10);
+    const preset = ['5', '10', '15', '20', '30'].includes(String(safe)) ? String(safe) : 'custom';
+    els.globalTimingSelect.value = preset;
+    els.customTimingWrap.classList.toggle('hidden', preset !== 'custom');
+    els.customTimingInput.value = safe;
+    resetAutoClockForCurrentSlide();
+    updateTimerText();
+  }
+
+  function setCurrentSlideTimingSeconds(seconds) {
+    const safe = Math.max(1, Number(seconds) || getGlobalTimingSeconds());
+    state.perPageTiming[state.currentPage] = safe;
+    state.timingMode = 'per-slide';
+    updateTimingModeUI();
+    renderThumbnailSidebar();
+    resetAutoClockForCurrentSlide();
+    updateTimerText();
+  }
+
+  function isAutoClockActive() {
+    return state.autoPlaying || state.autoPaused || Boolean(state.autoTimer);
+  }
+
+  function getAutoElapsedSeconds(raw = false) {
+    const running = state.autoPlaying && state.autoStartedAt ? (Date.now() - state.autoStartedAt) / 1000 : 0;
+    const total = state.autoElapsedBeforePause + running;
+    return raw ? total : Math.floor(total);
+  }
+
+  function resetAutoClockForCurrentSlide() {
+    state.autoCurrentDuration = getCurrentTimingSeconds();
+    state.autoElapsedBeforePause = 0;
+    state.autoStartedAt = state.autoPlaying ? Date.now() : null;
   }
 
   function startAutoPlay() {
     stopAutoPlay(false);
+    state.autoPlaying = true;
     state.autoPaused = false;
-    scheduleNextAutoSlide();
+    resetAutoClockForCurrentSlide();
+    startAutoLoop();
+    if (state.timer.visible) resetTimer({ publish: false, start: true });
     publishSessionState();
   }
 
-  function scheduleNextAutoSlide() {
-    clearTimeout(state.autoTimer);
-    state.autoTimer = setTimeout(() => {
-      if (state.autoPaused) return;
+  function startAutoLoop() {
+    clearInterval(state.autoTimer);
+    state.autoTimer = setInterval(() => {
+      if (!state.autoPlaying || state.autoPaused) return;
+      updateTimerText();
+      if (getAutoElapsedSeconds(true) < state.autoCurrentDuration || state.autoAdvancing) return;
       if (state.currentPage >= state.totalPages) {
         stopAutoPlay();
         return;
       }
-      state.currentPage++;
-      renderCurrentPage().then(scheduleNextAutoSlide);
-    }, getCurrentTimingSeconds() * 1000);
+      state.autoAdvancing = true;
+      state.currentPage += 1;
+      handleSlideChanged();
+      renderCurrentPage().finally(() => { state.autoAdvancing = false; });
+    }, 120);
   }
 
   function pauseAutoPlay() {
+    if (!state.autoPlaying && !state.autoTimer) return;
+    state.autoElapsedBeforePause = getAutoElapsedSeconds(true);
+    state.autoStartedAt = null;
+    state.autoPlaying = false;
     state.autoPaused = true;
-    clearTimeout(state.autoTimer);
+    clearInterval(state.autoTimer);
+    state.autoTimer = null;
+    updateTimerText();
     publishSessionState();
   }
 
   function resumeAutoPlay() {
     if (!state.activeFile) return;
+    state.autoPlaying = true;
     state.autoPaused = false;
-    scheduleNextAutoSlide();
+    state.autoStartedAt = Date.now();
+    startAutoLoop();
+    if (state.timer.visible) startTimerInterval();
     publishSessionState();
   }
 
   function stopAutoPlay(publish = true) {
-    clearTimeout(state.autoTimer);
+    clearInterval(state.autoTimer);
     state.autoTimer = null;
+    state.autoPlaying = false;
     state.autoPaused = false;
+    state.autoStartedAt = null;
+    state.autoElapsedBeforePause = 0;
+    state.autoAdvancing = false;
+    state.autoCurrentDuration = getCurrentTimingSeconds();
+    resetTimer({ publish: false, start: false });
     if (publish) publishSessionState();
   }
 
   function showTimer() {
     state.timer.visible = true;
     els.timerOverlay.classList.remove('hidden');
-    if (!state.timerStartedAt) state.timerStartedAt = Date.now();
-    startTimerInterval();
+    if (isAutoClockActive()) {
+      updateTimerText();
+    } else if (!state.timerStartedAt) {
+      state.timerStartedAt = Date.now();
+    }
+    if (!state.autoPaused) startTimerInterval();
     applyTimerSettings();
     publishSessionState();
   }
@@ -1106,12 +1248,15 @@
     publishSessionState();
   }
 
-  function resetTimer() {
+  function resetTimer(options = {}) {
+    const publish = options.publish !== false;
+    const shouldStart = options.start !== false && state.timer.visible && !state.autoPaused;
     state.timerElapsedBeforePause = 0;
-    state.timerStartedAt = Date.now();
+    state.timerStartedAt = shouldStart && !isAutoClockActive() ? Date.now() : null;
+    if (shouldStart) startTimerInterval();
+    else stopTimerInterval(true);
     updateTimerText();
-    if (state.timer.visible) startTimerInterval();
-    publishSessionState();
+    if (publish) publishSessionState();
   }
 
   function startTimerInterval() {
@@ -1127,20 +1272,28 @@
   }
 
   function elapsedSeconds() {
+    if (isAutoClockActive()) return getAutoElapsedSeconds(false);
     if (!state.timerStartedAt) return 0;
     return Math.floor((Date.now() - state.timerStartedAt) / 1000) + state.timerElapsedBeforePause;
   }
 
+  function timerCountdownTargetSeconds() {
+    if (isAutoClockActive()) return state.autoCurrentDuration || getCurrentTimingSeconds();
+    return state.timer.countdownSeconds;
+  }
+
   function updateTimerText() {
+    if (!els.timerOverlay) return;
     let seconds = elapsedSeconds();
-    if (state.timer.mode === 'down') seconds = Math.max(0, state.timer.countdownSeconds - seconds);
+    if (state.timer.mode === 'down') seconds = Math.max(0, timerCountdownTargetSeconds() - seconds);
     els.timerOverlay.textContent = formatTime(seconds);
   }
 
   function formatTime(totalSeconds) {
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const seconds = safeSeconds % 60;
     return [hours, minutes, seconds].map((n) => String(n).padStart(2, '0')).join(':');
   }
 
@@ -1184,9 +1337,15 @@
       currentPage: state.currentPage,
       totalPages: state.totalPages,
       zoom: state.zoom,
-      autoPlaying: Boolean(state.autoTimer && !state.autoPaused),
+      viewportCenterX: state.viewportCenterX,
+      viewportCenterY: state.viewportCenterY,
+      autoPlaying: state.autoPlaying,
       autoPaused: state.autoPaused,
+      autoElapsed: getAutoElapsedSeconds(false),
+      autoDuration: state.autoCurrentDuration || getCurrentTimingSeconds(),
+      timingMode: state.timingMode,
       globalTiming: getGlobalTimingSeconds(),
+      currentTiming: getCurrentTimingSeconds(),
       perPageTiming: state.perPageTiming,
       timerVisible: state.timer.visible,
       timerOpacity: state.timer.opacity,
@@ -1205,7 +1364,7 @@
   }
 
   async function getCurrentThumbForRemote() {
-    const key = `${state.activeFile ? state.activeFile.id : ''}:${state.currentPage}:${Math.round(state.zoom * 100)}:${state.timer.visible ? 1 : 0}`;
+    const key = `${state.activeFile ? state.activeFile.id : ''}:${state.currentPage}:${Math.round(state.zoom * 100)}:${Math.round(state.viewportCenterX * 100)}:${Math.round(state.viewportCenterY * 100)}:${state.timer.visible ? 1 : 0}`;
     if (!state.remotePreviewBusy && state.lastRemoteThumbKey === key && !isPresentationFullscreen()) return '';
     state.remotePreviewBusy = true;
     try {
@@ -1241,15 +1400,33 @@
       case 'last': jumpToPage(state.totalPages); break;
       case 'zoomIn': setZoom(state.zoom + 0.1); break;
       case 'zoomOut': setZoom(state.zoom - 0.1); break;
-      case 'resetZoom': setZoom(1); break;
+      case 'resetZoom': setZoom(1, { centerX: 0.5, centerY: 0.5 }); break;
       case 'setZoom': setZoom(Number(command.value) || 1); break;
+      case 'setViewport': setViewportTransform(command.value || {}); break;
       case 'autoStart': startAutoPlay(); break;
       case 'autoPause': pauseAutoPlay(); break;
       case 'autoStop': stopAutoPlay(); break;
+      case 'setGlobalTiming':
+        state.timingMode = 'global';
+        updateTimingModeUI();
+        setGlobalTimingSeconds(command.value);
+        publishSessionState();
+        break;
+      case 'setCurrentSlideTiming':
+        setCurrentSlideTimingSeconds(command.value);
+        publishSessionState();
+        break;
+      case 'setTimingMode':
+        state.timingMode = command.value === 'per-slide' ? 'per-slide' : 'global';
+        updateTimingModeUI();
+        resetAutoClockForCurrentSlide();
+        updateTimerText();
+        publishSessionState();
+        break;
       case 'setTiming':
-        els.globalTimingSelect.value = 'custom';
-        els.customTimingWrap.classList.remove('hidden');
-        els.customTimingInput.value = Math.max(1, Number(command.value) || 10);
+        state.timingMode = 'global';
+        updateTimingModeUI();
+        setGlobalTimingSeconds(command.value);
         publishSessionState();
         break;
       case 'timerShow': showTimer(); break;
@@ -1293,16 +1470,26 @@
     const sessionId = qs.get('session') || '';
     const role = qs.get('role') || 'viewer';
     const isHost = role === 'host';
-    let remoteZoom = 1;
+    let remoteViewport = { zoom: 1, centerX: 0.5, centerY: 0.5 };
+    let latestThumb = '';
 
     els.remoteApp.innerHTML = `
       <main class="remote-card ${isHost ? '' : 'remote-viewer-only'}">
-        <h1>Presentation Remote</h1>
-        <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Host control' : 'Viewer only'}</p>
-        <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
-        <p class="remote-hint">Pinch the preview to zoom the desktop viewer.</p>
+        <div class="remote-head">
+          <div>
+            <h1>Presentation Remote</h1>
+            <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Host control' : 'Viewer only'}</p>
+          </div>
+          <span id="remoteStatusPill" class="remote-status-pill">Connecting</span>
+        </div>
+        <div class="remote-preview-shell">
+          <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
+          <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Fullscreen Preview</button>
+        </div>
+        <p class="remote-hint">Open fullscreen, rotate your phone landscape, then pinch and drag the preview. The desktop follows the same zoomed area.</p>
         <h2 id="remoteSlideLabel">Slide -- / --</h2>
         <p id="remoteFileLabel" class="remote-sub">Connect to an active desktop session.</p>
+        <p id="remoteAutoLabel" class="remote-sub remote-auto-label">Auto Play idle</p>
         <section class="remote-grid">
           <button data-command="first" data-host-only="true">First</button>
           <button data-command="last" data-host-only="true">Last</button>
@@ -1324,9 +1511,13 @@
             <button data-command="autoPause" data-host-only="true">Pause</button>
             <button data-command="autoStop" data-host-only="true">Stop</button>
           </div>
-          <div class="remote-wide">
+          <div class="remote-wide remote-timing-box">
+            <select id="remoteTimingMode" data-host-only="true">
+              <option value="global">Global - all slides</option>
+              <option value="per-slide">Per-slide - current slide</option>
+            </select>
             <input id="remoteTiming" type="number" min="1" value="10" placeholder="Seconds">
-            <button id="remoteSetTiming" data-host-only="true">Change Timing</button>
+            <button id="remoteSetTiming" data-host-only="true">Apply Timing</button>
           </div>
         </section>
         <section class="remote-section">
@@ -1342,32 +1533,59 @@
           </div>
         </section>
       </main>
+      <div id="remoteFullPreview" class="remote-full-preview hidden">
+        <div class="remote-full-toolbar">
+          <span id="remoteFullLabel">Slide Preview</span>
+          <button id="remoteClosePreview">Close</button>
+        </div>
+        <div id="remoteFullStage" class="remote-full-stage">
+          <img id="remoteFullImg" alt="Fullscreen current slide preview" />
+        </div>
+        <div class="remote-full-help">Pinch to zoom. Drag to choose the exact area shown on the desktop.</div>
+      </div>
     `;
 
     if (!hasFirebaseConfig()) {
       $('remoteFileLabel').textContent = 'Remote needs firebase-config.js because phones need realtime sync across devices.';
+      $('remoteStatusPill').textContent = 'Setup needed';
       return;
     }
 
     initFirebaseIfConfigured().then(() => {
       if (!state.firebaseReady || !sessionId) {
         $('remoteFileLabel').textContent = 'Could not connect to Firebase or missing session.';
+        $('remoteStatusPill').textContent = 'Offline';
         return;
       }
       const ref = state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
       ref.onSnapshot((snap) => {
         if (!snap.exists) {
           $('remoteFileLabel').textContent = 'Session not found. Open QR from the desktop viewer first.';
+          $('remoteStatusPill').textContent = 'No session';
           return;
         }
         const data = snap.data();
+        $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
         $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFileLabel').textContent = data.fileName || 'Active presentation';
+        if (data.thumb) latestThumb = data.thumb;
         const preview = $('remotePreview');
-        preview.innerHTML = data.thumb ? `<img src="${data.thumb}" alt="Current slide preview">` : '<span>No preview yet</span>';
-        $('remoteTiming').value = data.globalTiming || 10;
+        preview.innerHTML = latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>';
+        const fullImg = $('remoteFullImg');
+        if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
+        remoteViewport = {
+          zoom: Number(data.zoom) || 1,
+          centerX: Number.isFinite(Number(data.viewportCenterX)) ? Number(data.viewportCenterX) : 0.5,
+          centerY: Number.isFinite(Number(data.viewportCenterY)) ? Number(data.viewportCenterY) : 0.5,
+        };
+        $('remoteTimingMode').value = data.timingMode || 'global';
+        $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
         $('remoteOpacity').value = data.timerOpacity ?? 75;
-        remoteZoom = Number(data.zoom) || 1;
+        $('remoteAutoLabel').textContent = data.autoPlaying
+          ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
+          : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
+        applyRemoteFullPreviewTransform(remoteViewport);
       });
 
       els.remoteApp.querySelectorAll('[data-command]').forEach((button) => {
@@ -1376,10 +1594,19 @@
           sendRemoteCommand(ref, button.dataset.command);
         });
       });
-      attachRemotePreviewPinch(ref, isHost, () => remoteZoom);
+      attachRemotePreviewControls(ref, isHost, () => remoteViewport, (next) => {
+        remoteViewport = next;
+        applyRemoteFullPreviewTransform(remoteViewport);
+      });
+      $('remoteTimingMode').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTimingMode', $('remoteTimingMode').value);
+      });
       $('remoteSetTiming').addEventListener('click', () => {
         if (!isHost) return;
-        sendRemoteCommand(ref, 'setTiming', Number($('remoteTiming').value) || 10);
+        const seconds = Number($('remoteTiming').value) || 10;
+        const mode = $('remoteTimingMode').value;
+        sendRemoteCommand(ref, mode === 'per-slide' ? 'setCurrentSlideTiming' : 'setGlobalTiming', seconds);
       });
       $('remoteSetOpacity').addEventListener('click', () => {
         if (!isHost) return;
@@ -1388,12 +1615,63 @@
     });
   }
 
-  function attachRemotePreviewPinch(ref, isHost, getZoom) {
-    const preview = $('remotePreview');
-    if (!preview || !isHost) return;
+  function applyRemoteFullPreviewTransform(viewport) {
+    const img = $('remoteFullImg');
+    if (!img) return;
+    const zoom = Math.min(4, Math.max(0.25, Number(viewport.zoom) || 1));
+    const centerX = Math.max(0, Math.min(1, Number(viewport.centerX) || 0.5));
+    const centerY = Math.max(0, Math.min(1, Number(viewport.centerY) || 0.5));
+    img.style.transformOrigin = `${centerX * 100}% ${centerY * 100}%`;
+    img.style.transform = `scale(${zoom})`;
+  }
+
+  function attachRemotePreviewControls(ref, isHost, getViewport, setLocalViewport) {
+    const openBtn = $('remotePreviewFullBtn');
+    const closeBtn = $('remoteClosePreview');
+    const full = $('remoteFullPreview');
+    const stage = $('remoteFullStage');
+    if (!openBtn || !full || !stage) return;
+
+    const safeViewport = (value) => ({
+      zoom: Math.min(4, Math.max(0.25, Number(value.zoom) || 1)),
+      centerX: Math.max(0, Math.min(1, Number(value.centerX) || 0.5)),
+      centerY: Math.max(0, Math.min(1, Number(value.centerY) || 0.5)),
+    });
+
+    const sendViewport = throttle((viewport) => {
+      if (!isHost) return;
+      sendRemoteCommand(ref, 'setViewport', safeViewport(viewport));
+    }, 90);
+
+    function openFullPreview() {
+      full.classList.remove('hidden');
+      document.body.classList.add('remote-fullscreen-open');
+      applyRemoteFullPreviewTransform(getViewport());
+      if (full.requestFullscreen) full.requestFullscreen().catch(() => {});
+      if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+    }
+
+    function closeFullPreview() {
+      full.classList.add('hidden');
+      document.body.classList.remove('remote-fullscreen-open');
+      if (document.fullscreenElement === full) document.exitFullscreen().catch(() => {});
+      if (screen.orientation && screen.orientation.unlock) {
+        try { screen.orientation.unlock(); } catch (error) {}
+      }
+    }
+
+    openBtn.addEventListener('click', openFullPreview);
+    if (closeBtn) closeBtn.addEventListener('click', closeFullPreview);
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement && !full.classList.contains('hidden')) closeFullPreview();
+    });
+
+    if (!isHost) return;
+
     let startDistance = 0;
     let startZoom = 1;
-    let lastSent = 0;
+    let startCenter = { centerX: 0.5, centerY: 0.5 };
+    let startPoint = null;
 
     const distance = (touches) => {
       const dx = touches[0].clientX - touches[1].clientX;
@@ -1401,22 +1679,83 @@
       return Math.hypot(dx, dy);
     };
 
-    preview.addEventListener('touchstart', (event) => {
-      if (event.touches.length !== 2) return;
-      startDistance = distance(event.touches);
-      startZoom = Number(getZoom()) || 1;
+    const midpoint = (touches, rect) => ({
+      x: ((touches[0].clientX + touches[1].clientX) / 2 - rect.left) / rect.width,
+      y: ((touches[0].clientY + touches[1].clientY) / 2 - rect.top) / rect.height,
+    });
+
+    stage.addEventListener('touchstart', (event) => {
+      const current = safeViewport(getViewport());
+      startZoom = current.zoom;
+      startCenter = { centerX: current.centerX, centerY: current.centerY };
+      if (event.touches.length === 2) {
+        startDistance = distance(event.touches);
+        startPoint = null;
+      } else if (event.touches.length === 1) {
+        startPoint = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+        startDistance = 0;
+      }
     }, { passive: true });
 
-    preview.addEventListener('touchmove', (event) => {
-      if (event.touches.length !== 2 || !startDistance) return;
+    stage.addEventListener('touchmove', (event) => {
+      if (event.touches.length !== 1 && event.touches.length !== 2) return;
       event.preventDefault();
-      const ratio = distance(event.touches) / startDistance;
-      const nextZoom = Math.min(4, Math.max(0.25, startZoom * ratio));
-      const now = Date.now();
-      if (now - lastSent < 120) return;
-      lastSent = now;
-      sendRemoteCommand(ref, 'setZoom', nextZoom);
+      const rect = stage.getBoundingClientRect();
+      let next = safeViewport(getViewport());
+
+      if (event.touches.length === 2 && startDistance) {
+        const ratio = distance(event.touches) / startDistance;
+        const mid = midpoint(event.touches, rect);
+        next = safeViewport({
+          zoom: startZoom * ratio,
+          centerX: mid.x,
+          centerY: mid.y,
+        });
+      } else if (event.touches.length === 1 && startPoint) {
+        const dx = event.touches[0].clientX - startPoint.x;
+        const dy = event.touches[0].clientY - startPoint.y;
+        const divisor = Math.max(1, startZoom);
+        next = safeViewport({
+          zoom: startZoom,
+          centerX: startCenter.centerX - dx / (rect.width * divisor),
+          centerY: startCenter.centerY - dy / (rect.height * divisor),
+        });
+      }
+
+      setLocalViewport(next);
+      sendViewport(next);
     }, { passive: false });
+
+    stage.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const current = safeViewport(getViewport());
+      const rect = stage.getBoundingClientRect();
+      const next = safeViewport({
+        zoom: current.zoom + (event.deltaY < 0 ? 0.12 : -0.12),
+        centerX: (event.clientX - rect.left) / rect.width,
+        centerY: (event.clientY - rect.top) / rect.height,
+      });
+      setLocalViewport(next);
+      sendViewport(next);
+    }, { passive: false });
+  }
+
+  function throttle(fn, delay) {
+    let last = 0;
+    let trailing = null;
+    return (...args) => {
+      const now = Date.now();
+      if (now - last >= delay) {
+        last = now;
+        fn(...args);
+        return;
+      }
+      clearTimeout(trailing);
+      trailing = setTimeout(() => {
+        last = Date.now();
+        fn(...args);
+      }, delay - (now - last));
+    };
   }
 
   function sendRemoteCommand(ref, action, value) {
