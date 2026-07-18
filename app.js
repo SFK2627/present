@@ -46,6 +46,9 @@
     autoCurrentDuration: 10,
     autoAdvancing: false,
     countdownAlert: 'off',
+    countdownVoiceGender: 'girl',
+    countdownVoiceStart: 5,
+    countdownPreviewTimers: [],
     lastCountdownAlertSecond: null,
     audioContext: null,
     audioUnlocked: false,
@@ -131,7 +134,7 @@
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
       'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'canvaFrame',
       'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
-      'countdownAlertSelect', 'soundTestBtn', 'slideTransitionSelect',
+      'countdownAlertSelect', 'countdownVoiceSelect', 'countdownVoiceStartSelect', 'soundTestBtn', 'slideTransitionSelect',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
@@ -217,10 +220,21 @@
       if (state.countdownAlert !== 'off') primePresentationAudio();
       publishSessionState();
     });
+    if (els.countdownVoiceSelect) els.countdownVoiceSelect.addEventListener('change', () => {
+      state.countdownVoiceGender = ['girl', 'boy'].includes(els.countdownVoiceSelect.value) ? els.countdownVoiceSelect.value : 'girl';
+      primePresentationAudio();
+      publishSessionState();
+    });
+    if (els.countdownVoiceStartSelect) els.countdownVoiceStartSelect.addEventListener('change', () => {
+      state.countdownVoiceStart = Number(els.countdownVoiceStartSelect.value) === 3 ? 3 : 5;
+      state.lastCountdownAlertSecond = null;
+      primePresentationAudio();
+      publishSessionState();
+    });
     if (els.soundTestBtn) els.soundTestBtn.addEventListener('click', () => {
       const mode = state.countdownAlert === 'off' ? 'both' : state.countdownAlert;
       primePresentationAudio();
-      triggerCountdownAlert(5, mode);
+      runCountdownAlertPreview(mode);
     });
     if (els.slideTransitionSelect) els.slideTransitionSelect.addEventListener('change', () => {
       state.transitionEffect = els.slideTransitionSelect.value || 'fade';
@@ -1778,6 +1792,8 @@
     if (els.timerSizeInput) els.timerSizeInput.value = timerSize;
     if (els.timerSizeLabel) els.timerSizeLabel.textContent = `${timerSize}px`;
     if (els.countdownAlertSelect) els.countdownAlertSelect.value = state.countdownAlert || 'off';
+    if (els.countdownVoiceSelect) els.countdownVoiceSelect.value = state.countdownVoiceGender || 'girl';
+    if (els.countdownVoiceStartSelect) els.countdownVoiceStartSelect.value = String(getCountdownVoiceStart());
     if (els.slideTransitionSelect) els.slideTransitionSelect.value = state.transitionEffect || 'fade';
   }
 
@@ -2010,10 +2026,28 @@
     triggerCountdownAlert(remaining);
   }
 
-  function triggerCountdownAlert(second, overrideMode) {
+  function getCountdownVoiceStart() {
+    return Number(state.countdownVoiceStart) === 3 ? 3 : 5;
+  }
+
+  function triggerCountdownAlert(second, overrideMode, options = {}) {
     const mode = overrideMode || state.countdownAlert;
     if (mode === 'sound' || mode === 'both') playCountdownBeep(second);
-    if (mode === 'voice' || mode === 'both') speakCountdown(second);
+    const voiceEnabled = mode === 'voice' || mode === 'both';
+    const voiceShouldPlay = options.forceVoice || second <= getCountdownVoiceStart();
+    if (voiceEnabled && voiceShouldPlay) speakCountdown(second);
+  }
+
+  function runCountdownAlertPreview(overrideMode) {
+    const mode = overrideMode || (state.countdownAlert === 'off' ? 'both' : state.countdownAlert);
+    if (state.countdownPreviewTimers) state.countdownPreviewTimers.forEach((timer) => clearTimeout(timer));
+    state.countdownPreviewTimers = [];
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    primePresentationAudio();
+    [5, 4, 3, 2, 1].forEach((second, index) => {
+      const timer = setTimeout(() => triggerCountdownAlert(second, mode), index * 520);
+      state.countdownPreviewTimers.push(timer);
+    });
   }
 
   function primePresentationAudio() {
@@ -2056,6 +2090,22 @@
     } catch (error) {}
   }
 
+  function getPreferredCountdownVoice() {
+    try {
+      if (!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
+      const voices = window.speechSynthesis.getVoices().filter((voice) => /^en/i.test(voice.lang || ''));
+      if (!voices.length) return null;
+      const gender = state.countdownVoiceGender === 'boy' ? 'boy' : 'girl';
+      const girlHints = ['female', 'woman', 'girl', 'samantha', 'zira', 'victoria', 'karen', 'moira', 'tessa', 'susan', 'allison', 'ava', 'aria', 'jenny'];
+      const boyHints = ['male', 'man', 'boy', 'david', 'mark', 'alex', 'daniel', 'tom', 'fred', 'guy', 'ryan', 'george'];
+      const hints = gender === 'boy' ? boyHints : girlHints;
+      const byName = voices.find((voice) => hints.some((hint) => `${voice.name} ${voice.voiceURI}`.toLowerCase().includes(hint)));
+      return byName || voices.find((voice) => /en-US/i.test(voice.lang || '')) || voices[0];
+    } catch (error) {
+      return null;
+    }
+  }
+
   function speakCountdown(second) {
     try {
       if (!window.speechSynthesis) return;
@@ -2063,8 +2113,9 @@
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(words[second] || String(second));
       utterance.lang = 'en-US';
-      utterance.rate = 1.03;
-      utterance.pitch = 1;
+      utterance.voice = getPreferredCountdownVoice();
+      utterance.rate = 1.02;
+      utterance.pitch = state.countdownVoiceGender === 'boy' ? 0.78 : 1.25;
       utterance.volume = 1;
       window.speechSynthesis.speak(utterance);
     } catch (error) {}
@@ -2119,6 +2170,8 @@
       timerMode: state.timer.mode,
       timerPosition: state.timer.position,
       countdownAlert: state.countdownAlert,
+      countdownVoiceGender: state.countdownVoiceGender,
+      countdownVoiceStart: getCountdownVoiceStart(),
       transitionEffect: state.transitionEffect,
       updatedAt: Date.now(),
     };
@@ -2244,10 +2297,23 @@
         applyTimerSettings();
         publishSessionState();
         break;
+      case 'setCountdownVoiceGender':
+        state.countdownVoiceGender = command.value === 'boy' ? 'boy' : 'girl';
+        primePresentationAudio();
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setCountdownVoiceStart':
+        state.countdownVoiceStart = Number(command.value) === 3 ? 3 : 5;
+        state.lastCountdownAlertSecond = null;
+        primePresentationAudio();
+        applyTimerSettings();
+        publishSessionState();
+        break;
       case 'testCountdownAlert': {
         const mode = ['sound', 'voice', 'both'].includes(command.value) ? command.value : (state.countdownAlert === 'off' ? 'both' : state.countdownAlert);
         primePresentationAudio();
-        triggerCountdownAlert(5, mode);
+        runCountdownAlertPreview(mode);
         break;
       }
       case 'setTransitionEffect':
@@ -2390,6 +2456,14 @@
               <option value="voice">Voice count</option>
               <option value="both">Sound + voice</option>
             </select>
+            <select id="remoteCountdownVoice" data-host-only="true">
+              <option value="girl">Girl voice</option>
+              <option value="boy">Boy voice</option>
+            </select>
+            <select id="remoteCountdownVoiceStart" data-host-only="true">
+              <option value="5">Voice from 5 sec</option>
+              <option value="3">Voice from 3 sec</option>
+            </select>
             <button id="remoteTestAlert" data-host-only="true">Test Sound/Voice</button>
           </div>
         </section>
@@ -2470,6 +2544,8 @@
         $('remoteTimingMode').value = data.timingMode || 'global';
         $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
         if ($('remoteCountdownAlert')) $('remoteCountdownAlert').value = data.countdownAlert || 'off';
+        if ($('remoteCountdownVoice')) $('remoteCountdownVoice').value = data.countdownVoiceGender || 'girl';
+        if ($('remoteCountdownVoiceStart')) $('remoteCountdownVoiceStart').value = String(Number(data.countdownVoiceStart) === 3 ? 3 : 5);
         if ($('remoteTransition')) $('remoteTransition').value = data.transitionEffect || 'fade';
         if ($('remoteTimerPosition')) $('remoteTimerPosition').value = data.timerPosition || 'bottom-right';
         if ($('remoteTimerMode')) $('remoteTimerMode').value = data.timerMode || 'up';
@@ -2506,6 +2582,14 @@
       if ($('remoteCountdownAlert')) $('remoteCountdownAlert').addEventListener('change', () => {
         if (!isHost) return;
         sendRemoteCommand(ref, 'setCountdownAlert', $('remoteCountdownAlert').value);
+      });
+      if ($('remoteCountdownVoice')) $('remoteCountdownVoice').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setCountdownVoiceGender', $('remoteCountdownVoice').value);
+      });
+      if ($('remoteCountdownVoiceStart')) $('remoteCountdownVoiceStart').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setCountdownVoiceStart', Number($('remoteCountdownVoiceStart').value) === 3 ? 3 : 5);
       });
       if ($('remoteTestAlert')) $('remoteTestAlert').addEventListener('click', () => {
         if (!isHost) return;

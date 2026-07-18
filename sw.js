@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-scroll-fix-1';
+const CACHE_NAME = 'presentation-hub-pro-v10-voice-options-1';
 const APP_SHELL = [
   './',
   './index.html',
