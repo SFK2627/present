@@ -3539,3 +3539,79 @@ body > .magic-effect-layer { position: fixed !important; }
   58% { background: radial-gradient(circle at 34% 72%, rgba(255,255,255,.04) 0 10%, rgba(255,255,255,.24) 11%, rgba(255,255,255,.18) 14%, rgba(0,0,0,0) 20%, rgba(0,0,0,.86) 38%, rgba(0,0,0,.95) 100%); }
   82%, 100% { background: radial-gradient(circle at 62% 54%, rgba(255,255,255,.04) 0 11%, rgba(255,255,255,.26) 12%, rgba(255,255,255,.2) 15%, rgba(0,0,0,0) 22%, rgba(0,0,0,.84) 38%, rgba(0,0,0,.95) 100%); }
 }
+
+
+/* Pro v10.13 super polish pass */
+.magic-effect-layer {
+  isolation: isolate;
+}
+.magic-effect-layer.show {
+  animation: magicLayerIn .18s ease-out both;
+}
+.magic-effect-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(circle at center, rgba(255,255,255,.04), transparent 46%);
+}
+.magic-effect-layer .magic-center {
+  z-index: 6 !important;
+}
+.magic-stage-flash {
+  animation-duration: 1.7s !important;
+}
+.magic-glow-ring,
+.magic-time-rings,
+.magic-vignette,
+.magic-freeze,
+.magic-curtain,
+.magic-reveal-shine,
+.magic-moving-spotlight,
+.magic-particles {
+  z-index: 3;
+}
+.confetti-full .magic-confetti:nth-child(3n) { border-radius: 999px !important; }
+.confetti-full .magic-confetti:nth-child(4n) { transform: rotate(20deg); }
+.confetti-full .magic-confetti:nth-child(5n) { transform: rotate(-22deg); }
+.magic-curtain.left,
+.magic-curtain.right {
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.06), transparent 8%, rgba(255,255,255,.08) 11%, transparent 15%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 4px, rgba(0,0,0,.02) 4px 12px),
+    linear-gradient(180deg, #8b1d45 0%, #77163a 28%, #5f1230 62%, #450b20 100%) !important;
+  box-shadow: inset -16px 0 24px rgba(0,0,0,.22), 0 0 40px rgba(0,0,0,.2);
+}
+.magic-curtain.right {
+  box-shadow: inset 16px 0 24px rgba(0,0,0,.22), 0 0 40px rgba(0,0,0,.2);
+}
+.magic-reveal-shine {
+  background: radial-gradient(circle at center, rgba(255,255,255,.28), rgba(255,255,255,.06) 24%, transparent 50%) !important;
+}
+.bubbles-full .magic-bubble:nth-child(4n) { background: radial-gradient(circle at 35% 35%, rgba(255,255,255,.94), rgba(255,255,255,.42) 22%, rgba(96,165,250,.34) 58%, rgba(59,130,246,.12) 78%, transparent 100%) !important; }
+.applause-full .magic-symbol { filter: drop-shadow(0 8px 12px rgba(0,0,0,.24)); }
+.magic-moving-spotlight {
+  backdrop-filter: blur(1.5px);
+}
+.magic-big-mark.correct .magic-mark,
+.magic-big-mark.wrong .magic-mark,
+.magic-clock,
+.magic-drum-emoji.main,
+.magic-mic,
+.magic-applause-hero .magic-emoji,
+.magic-sparkle-hero .magic-emoji,
+.magic-stars-hero .magic-emoji,
+.magic-hype-hero .magic-emoji,
+.magic-freeze-hero .magic-emoji,
+.magic-quiet-hero .magic-emoji {
+  will-change: transform, filter, opacity;
+}
+.magic-sparkle-hero .magic-emoji { text-shadow: 0 0 28px rgba(255,255,255,.45); }
+.magic-stars-hero .magic-emoji { text-shadow: 0 0 28px rgba(250,204,21,.45); }
+.magic-hype-hero .magic-emoji { text-shadow: 0 0 30px rgba(248,113,113,.42); }
+.magic-freeze-hero .magic-emoji { text-shadow: 0 0 30px rgba(147,197,253,.42); }
+@keyframes magicLayerIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

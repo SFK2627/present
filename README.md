@@ -195,3 +195,9 @@ For perfect PPTX design fidelity, export PPTX/Canva to PDF first and upload the 
 - Added visible Magic Settings: sound on/off, volume slider, intensity selector, and test button.
 - Desktop effects are rendered through a fixed full-screen overlay so the main animation is centered, including in fullscreen mode.
 - Only Magic Effects panel/overlay/sound controls were changed.
+
+
+## v10.13 Magic Polish Pass
+- Rebalanced per-effect sound mix levels for more consistent loudness.
+- Added smoother, more premium overlay polish and richer curtain/confetti/bubbles styling.
+- Fine-tuned quiet/shoosh voice delivery and mix.

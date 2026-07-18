@@ -1749,21 +1749,40 @@
     const volume = getMagicEffectVolume();
     if (volume <= 0) return;
 
+    const effectMixMap = {
+      drumroll: 1.08,
+      confetti: 1.06,
+      micdrop: 0.98,
+      curtain: 0.94,
+      bubbles: 0.86,
+      quiet: 0.78,
+      applause: 1.02,
+      spotlight: 0.82,
+      correct: 0.96,
+      wrong: 0.9,
+      timesup: 1.0,
+      sparkle: 0.88,
+      stars: 0.92,
+      hype: 1.08,
+      freeze: 0.9
+    };
+    const effectMix = effectMixMap[effectId] || 1;
+
     // One compressed mix bus per effect. This lets the effects sound much bigger
     // without turning into painful clipping/distortion on laptop speakers.
     const master = ctx.createGain();
     const compressor = ctx.createDynamicsCompressor();
     try {
-      compressor.threshold.setValueAtTime(-18, now);
-      compressor.knee.setValueAtTime(24, now);
-      compressor.ratio.setValueAtTime(7, now);
-      compressor.attack.setValueAtTime(0.003, now);
-      compressor.release.setValueAtTime(0.22, now);
+      compressor.threshold.setValueAtTime(-20, now);
+      compressor.knee.setValueAtTime(28, now);
+      compressor.ratio.setValueAtTime(6, now);
+      compressor.attack.setValueAtTime(0.004, now);
+      compressor.release.setValueAtTime(0.28, now);
     } catch (error) {}
-    master.gain.setValueAtTime(Math.min(1.25, 0.72 + volume * 0.18), now);
+    master.gain.setValueAtTime(Math.min(1.18, (0.62 + volume * 0.14) * effectMix), now);
     master.connect(compressor).connect(ctx.destination);
 
-    const clampGain = (gainValue) => Math.max(0.0001, Math.min(0.85, gainValue * volume));
+    const clampGain = (gainValue) => Math.max(0.0001, Math.min(0.78, gainValue * volume * Math.min(1.08, 0.92 + effectMix * 0.12)));
 
     const disconnectLater = (node, delay = 3.5) => {
       window.setTimeout(() => {
@@ -1925,9 +1944,12 @@
           try {
             window.speechSynthesis.cancel();
             const utter = new SpeechSynthesisUtterance('Shooooshhh...');
-            utter.rate = 0.58;
-            utter.pitch = 0.56;
-            utter.volume = Math.min(1, 0.9 * volume);
+            const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+            const preferred = voices.find(v => /en|us|uk|ph/i.test((v.lang || '') + ' ' + (v.name || ''))) || voices[0];
+            if (preferred) utter.voice = preferred;
+            utter.rate = 0.54;
+            utter.pitch = 0.52;
+            utter.volume = Math.min(1, 0.82 * volume);
             window.speechSynthesis.speak(utter);
           } catch (error) {}
         }
@@ -1963,7 +1985,7 @@
         break;
     }
 
-    disconnectLater(master, ['curtain','drumroll','confetti','bubbles','spotlight'].includes(effectId) ? 3.4 : 2.7);
+    disconnectLater(master, ['curtain','drumroll','confetti','bubbles','spotlight','applause','hype'].includes(effectId) ? 3.6 : 2.9);
   }
 
   function handleKeyboard(event) {

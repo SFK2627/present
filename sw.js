@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-magic-refined-v4';
+const CACHE_NAME = 'presentation-hub-pro-v10-magic-polish-v5';
 const CORE_ASSETS = [
   './',
   './index.html',
