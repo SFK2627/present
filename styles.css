@@ -2053,3 +2053,64 @@ body.dark select option:checked,
     line-height: 1.2 !important;
   }
 }
+
+/* Pro v10.2: phone host/viewer scroll repair
+   Dashboard pages must scroll normally. Pinch/drag is locked only inside
+   the explicit portrait preview surface, never on the host dashboard itself. */
+html.presentation-hub-remote-mode,
+body.presentation-hub-remote-mode {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: auto !important;
+  touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch !important;
+}
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-app {
+  height: auto !important;
+  min-height: 100dvh !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
+  overscroll-behavior-y: auto !important;
+  touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch !important;
+  padding-bottom: max(34px, calc(18px + env(safe-area-inset-bottom, 0px))) !important;
+}
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-card,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-premium-card {
+  height: auto !important;
+  max-height: none !important;
+}
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-preview,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-preview-shell,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-now-card,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-premium-section,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-nav-pad,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-control-row,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-wide,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-form-grid,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) button,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) select,
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) input {
+  touch-action: pan-y !important;
+}
+body.presentation-hub-remote-mode.remote-fullscreen-open,
+body.remote-fullscreen-open,
+html.presentation-hub-remote-mode:has(body.remote-fullscreen-open) {
+  overflow: hidden !important;
+  touch-action: none !important;
+}
+body.remote-fullscreen-open .remote-app {
+  overflow: hidden !important;
+  touch-action: none !important;
+}
+body.remote-fullscreen-open .remote-portrait-preview .remote-full-stage,
+body.remote-fullscreen-open .remote-portrait-preview .remote-full-stage img {
+  touch-action: none !important;
+}
+@supports not selector(:has(*)) {
+  body.remote-fullscreen-open {
+    overflow: hidden !important;
+  }
+}

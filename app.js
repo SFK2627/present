@@ -88,6 +88,14 @@
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {
+    if (isRemoteMode) {
+      document.documentElement.classList.add('presentation-hub-remote-mode');
+      document.body.classList.add('presentation-hub-remote-mode');
+      document.body.classList.remove('remote-fullscreen-open');
+    } else {
+      document.documentElement.classList.remove('presentation-hub-remote-mode');
+      document.body.classList.remove('presentation-hub-remote-mode', 'remote-fullscreen-open');
+    }
     cacheElements();
     applySavedTheme();
     setupBaseEvents();
@@ -2275,6 +2283,8 @@
   }
 
   function renderRemoteApp() {
+    document.documentElement.classList.add('presentation-hub-remote-mode');
+    document.body.classList.add('presentation-hub-remote-mode');
     document.body.classList.remove('remote-fullscreen-open');
     if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (error) {} }
     els.app.classList.add('hidden');
@@ -2599,7 +2609,12 @@
       window.__presentationHubRemoteGestureActive = false;
       full.classList.add('hidden');
       document.body.classList.remove('remote-fullscreen-open');
+      document.documentElement.classList.add('presentation-hub-remote-mode');
+      document.body.classList.add('presentation-hub-remote-mode');
       if (document.fullscreenElement === full) document.exitFullscreen().catch(() => {});
+      requestAnimationFrame(() => {
+        document.body.classList.remove('remote-fullscreen-open');
+      });
     }
 
     openBtn.addEventListener('click', openFullPreview);
