@@ -601,3 +601,57 @@ input:focus, select:focus {
   box-shadow: none !important;
   border-radius: 0 !important;
 }
+
+/* Performance/fullscreen update */
+.viewer-stage.cursor-hidden { cursor: none; }
+.viewer-view.presentation-fullscreen,
+.viewer-view:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  grid-template-columns: 1fr;
+  background: #020617;
+}
+.viewer-view.presentation-fullscreen .thumb-sidebar,
+.viewer-view:fullscreen .thumb-sidebar {
+  display: none;
+}
+.viewer-view.presentation-fullscreen .viewer-stage,
+.viewer-view:fullscreen .viewer-stage {
+  width: 100vw;
+  height: 100vh;
+  background: #020617;
+}
+.viewer-view.presentation-fullscreen .viewer-canvas-wrap,
+.viewer-view:fullscreen .viewer-canvas-wrap {
+  max-width: 100vw;
+  max-height: 100vh;
+  width: 100vw;
+  height: 100vh;
+  padding: 0;
+  border-radius: 0;
+  overflow: auto;
+}
+.viewer-view.presentation-fullscreen .pdf-canvas,
+.viewer-view:fullscreen .pdf-canvas,
+.viewer-view.presentation-fullscreen .pptx-rendered-slide,
+.viewer-view:fullscreen .pptx-rendered-slide {
+  border-radius: 0;
+  box-shadow: none;
+}
+.viewer-view.presentation-fullscreen .viewer-toolbar,
+.viewer-view:fullscreen .viewer-toolbar {
+  top: 14px;
+  max-width: calc(100vw - 28px);
+  background: rgba(15, 23, 42, .74);
+  backdrop-filter: blur(18px);
+}
+.viewer-view.presentation-fullscreen .control-panel,
+.viewer-view:fullscreen .control-panel {
+  top: 78px;
+}
+.viewer-view.presentation-fullscreen .timer-overlay.top-right,
+.viewer-view:fullscreen .timer-overlay.top-right,
+.viewer-view.presentation-fullscreen .timer-overlay.top-left,
+.viewer-view:fullscreen .timer-overlay.top-left {
+  top: 24px;
+}

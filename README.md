@@ -47,3 +47,14 @@ service cloud.firestore {
 ## Best way to use with phone remote
 
 Upload the whole folder to Netlify, Firebase Hosting, GitHub Pages, or any web host. Phone remote works best when both laptop and phone open the same hosted website URL.
+
+
+## Update notes
+
+This version improves GitHub Pages usage:
+
+- Heavy PowerPoint rendering libraries are lazy-loaded only when a PPTX is opened, so the home screen loads faster.
+- Firebase sign-in no longer blocks the dashboard while loading.
+- Fullscreen now uses a true presentation mode: sidebar is hidden, the viewer fills the whole screen, and the toolbar appears only when the mouse moves.
+- Keyboard shortcuts still work in viewer mode: Arrow Right, Arrow Left, F, and Esc.
+- The service worker now uses a fresh cache name and network-first updates so GitHub Pages changes are less likely to stay stuck on an old cached version.

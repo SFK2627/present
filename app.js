@@ -64,9 +64,13 @@
     cacheElements();
     applySavedTheme();
     setupBaseEvents();
-    await initFirebaseIfConfigured();
+
+    // Do not block the dashboard while Firebase signs in. The viewer can open fast,
+    // then the remote status updates as soon as Firebase is ready.
+    const firebaseInitPromise = initFirebaseIfConfigured();
 
     if (isRemoteMode) {
+      await firebaseInitPromise;
       renderRemoteApp();
       return;
     }
@@ -75,7 +79,9 @@
     renderLibrary();
     registerServiceWorker();
     window.addEventListener('resize', () => {
-      if (state.activeFile && state.activeFile.type === 'pptx' && state.pptxVisualReady) showOnlyCurrentPptxSlide();
+      if (!state.activeFile) return;
+      if (state.activeFile.type === 'pptx' && state.pptxVisualReady) showOnlyCurrentPptxSlide();
+      if (state.activeFile.type === 'pdf') renderCurrentPage();
     });
   }
 
@@ -168,9 +174,14 @@
     if (els.timerResetBtn) els.timerResetBtn.addEventListener('click', resetTimer);
 
     document.addEventListener('keydown', handleKeyboard);
+    document.addEventListener('fullscreenchange', syncFullscreenState);
     if (els.viewerStage) {
       els.viewerStage.addEventListener('mousemove', revealToolbarTemporarily);
       els.viewerStage.addEventListener('touchstart', revealToolbarTemporarily, { passive: true });
+    }
+    if (els.viewerView) {
+      els.viewerView.addEventListener('mousemove', revealToolbarTemporarily);
+      els.viewerView.addEventListener('touchstart', revealToolbarTemporarily, { passive: true });
     }
   }
 
@@ -225,6 +236,55 @@
       els.firebaseStatus.textContent = customText || 'Remote setup';
       els.firebaseStatus.classList.remove('ready');
       els.firebaseStatus.classList.add('muted');
+    }
+  }
+
+  function loadScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector(`script[data-src="${src}"]`);
+      if (existing) {
+        if (existing.dataset.loaded === '1') resolve();
+        else existing.addEventListener('load', resolve, { once: true });
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = src;
+      script.dataset.src = src;
+      script.async = false;
+      script.onload = () => { script.dataset.loaded = '1'; resolve(); };
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(script);
+    });
+  }
+
+  function loadStyleOnce(href) {
+    if (document.querySelector(`link[data-href="${href}"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = href;
+    link.dataset.href = href;
+    document.head.appendChild(link);
+  }
+
+  async function ensurePptxRendererAssets() {
+    loadStyleOnce('https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/css/pptxjs.css');
+    loadStyleOnce('https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/css/nv.d3.min.css');
+
+    if (!window.jQuery) {
+      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js');
+    }
+    if (!window.d3) {
+      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.min.js');
+    }
+    if (!window.nv) {
+      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/nvd3/1.8.6/nv.d3.min.js');
+    }
+    await loadScriptOnce('https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/filereader.js');
+    await loadScriptOnce('https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/dingbat.js');
+    await loadScriptOnce('https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/pptxjs.js');
+    await loadScriptOnce('https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/divs2slides.js');
+    if (!window.html2canvas) {
+      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
     }
   }
 
@@ -582,6 +642,8 @@
   }
 
   function closeViewer() {
+    if (document.fullscreenElement === els.viewerView) document.exitFullscreen().catch(() => {});
+    els.viewerView.classList.remove('presentation-fullscreen');
     stopAutoPlay();
     stopTimerInterval();
     if (state.unsubscribeSession) state.unsubscribeSession();
@@ -610,6 +672,13 @@
     els.pptxSlide.classList.add('visual-pptx');
     els.pptxSlide.style.transform = '';
     els.pptxSlide.innerHTML = '<div class="viewer-message">Rendering PowerPoint visually...</div>';
+
+    try {
+      await ensurePptxRendererAssets();
+    } catch (error) {
+      console.warn('PPTXjs assets could not be loaded. Falling back to text preview.', error);
+      return;
+    }
 
     if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.pptxToHtml) {
       console.warn('PPTXjs visual renderer is not available. Falling back to text preview.');
@@ -703,11 +772,27 @@
     return unique;
   }
 
+  function isPresentationFullscreen() {
+    return document.fullscreenElement === els.viewerView || els.viewerView.classList.contains('presentation-fullscreen');
+  }
+
+  function getAvailableStageSize() {
+    const rect = els.viewerStage ? els.viewerStage.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
+    const fullscreen = isPresentationFullscreen();
+    const horizontalPadding = fullscreen ? 0 : 64;
+    const verticalPadding = fullscreen ? 0 : 46;
+    return {
+      width: Math.max(320, rect.width - horizontalPadding),
+      height: Math.max(240, rect.height - verticalPadding),
+    };
+  }
+
   function showOnlyCurrentPptxSlide() {
     if (!state.pptxVisualReady || !state.pptxRenderedSlides.length) return;
     const current = state.pptxRenderedSlides[state.currentPage - 1] || state.pptxRenderedSlides[0];
-    const maxWidth = Math.max(320, window.innerWidth - 300);
-    const maxHeight = Math.max(240, window.innerHeight - 110);
+    const available = getAvailableStageSize();
+    const maxWidth = available.width;
+    const maxHeight = available.height;
 
     state.pptxRenderedSlides.forEach((slide) => {
       slide.style.display = 'none';
@@ -742,9 +827,10 @@
       els.pptxSlide.classList.add('hidden');
       els.pdfCanvas.classList.remove('hidden');
       const page = await state.activePdf.getPage(state.currentPage);
-      const baseWidth = Math.min(1180, Math.max(700, window.innerWidth - 320));
       const viewportBase = page.getViewport({ scale: 1 });
-      const scale = (baseWidth / viewportBase.width) * state.zoom;
+      const available = getAvailableStageSize();
+      const fitScale = Math.min(available.width / viewportBase.width, available.height / viewportBase.height);
+      const scale = Math.max(0.15, fitScale * state.zoom);
       const viewport = page.getViewport({ scale });
       const canvas = els.pdfCanvas;
       const ctx = canvas.getContext('2d');
@@ -873,27 +959,57 @@
 
   function handleKeyboard(event) {
     if (els.viewerView.classList.contains('hidden')) return;
-    if (event.key === 'ArrowRight') nextPage();
-    if (event.key === 'ArrowLeft') previousPage();
-    if (event.key.toLowerCase() === 'f') toggleFullscreen();
+    const focusedTag = document.activeElement ? document.activeElement.tagName : '';
+    const isTyping = ['INPUT', 'TEXTAREA', 'SELECT'].includes(focusedTag);
+
+    if (event.key === 'Escape' && document.fullscreenElement) {
+      event.preventDefault();
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+    if (isTyping) return;
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      nextPage();
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      previousPage();
+    }
+    if (event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      toggleFullscreen();
+    }
   }
 
   async function toggleFullscreen() {
     if (!document.fullscreenElement) {
-      await els.viewerStage.requestFullscreen().catch(() => {});
+      await els.viewerView.requestFullscreen().catch(() => {});
     } else {
       await document.exitFullscreen().catch(() => {});
     }
   }
 
+  function syncFullscreenState() {
+    if (!els.viewerView) return;
+    const fullscreen = document.fullscreenElement === els.viewerView;
+    els.viewerView.classList.toggle('presentation-fullscreen', fullscreen);
+    if (els.fullscreenBtn) els.fullscreenBtn.textContent = fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+    if (els.controlPanel && fullscreen) els.controlPanel.classList.add('hidden');
+    revealToolbarTemporarily();
+    if (state.activeFile) renderCurrentPage();
+  }
+
   function revealToolbarTemporarily() {
     if (!els.viewerToolbar) return;
     els.viewerToolbar.classList.remove('toolbar-hidden');
+    if (els.viewerStage) els.viewerStage.classList.remove('cursor-hidden');
     clearTimeout(state.toolbarHideTimer);
     state.toolbarHideTimer = setTimeout(() => {
       if (!els.controlPanel.classList.contains('hidden')) return;
       els.viewerToolbar.classList.add('toolbar-hidden');
-    }, 3200);
+      if (els.viewerStage && isPresentationFullscreen()) els.viewerStage.classList.add('cursor-hidden');
+    }, 2400);
   }
 
   function getGlobalTimingSeconds() {
