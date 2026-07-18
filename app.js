@@ -192,7 +192,7 @@
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
-      'qrHelp', 'setupModal', 'closeSetupBtn'
+      'qrHelp', 'setupModal', 'closeSetupBtn', 'fullscreenRequestPrompt', 'acceptRemoteFullscreenBtn', 'dismissRemoteFullscreenBtn'
     ].forEach((id) => { els[id] = $(id); });
   }
 
@@ -228,6 +228,8 @@
     if (els.zoomOutBtn) els.zoomOutBtn.addEventListener('click', () => setZoom(state.zoom - 0.1));
     if (els.resetZoomBtn) els.resetZoomBtn.addEventListener('click', () => setZoom(1));
     if (els.fullscreenBtn) els.fullscreenBtn.addEventListener('click', toggleFullscreen);
+    if (els.acceptRemoteFullscreenBtn) els.acceptRemoteFullscreenBtn.addEventListener('click', enterFullscreenFromPrompt);
+    if (els.dismissRemoteFullscreenBtn) els.dismissRemoteFullscreenBtn.addEventListener('click', hideRemoteFullscreenPrompt);
     if (els.qrBtn) els.qrBtn.addEventListener('click', openQrModal);
     if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => hideModal(els.qrModal));
     if (els.settingsBtn) els.settingsBtn.addEventListener('click', () => els.controlPanel.classList.toggle('hidden'));
@@ -1646,10 +1648,58 @@
       document.activeElement.blur();
     }
     if (!document.fullscreenElement) {
-      await els.viewerView.requestFullscreen().catch(() => {});
+      try {
+        await els.viewerView.requestFullscreen();
+        hideRemoteFullscreenPrompt();
+      } catch (error) {
+        showRemoteFullscreenPrompt();
+      }
     } else {
       await document.exitFullscreen().catch(() => {});
+      hideRemoteFullscreenPrompt();
     }
+  }
+
+  async function handleRemoteFullscreenRequest() {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => {});
+      hideRemoteFullscreenPrompt();
+      return;
+    }
+
+    // Browsers intentionally block entering fullscreen from a remote/Firebase event
+    // because it is not a direct click on the desktop page. Exiting fullscreen is
+    // allowed, which is why the phone button could exit but not enter. We still
+    // attempt once, then show a desktop confirmation button that has the required
+    // local user gesture.
+    try {
+      await els.viewerView.requestFullscreen();
+      hideRemoteFullscreenPrompt();
+    } catch (error) {
+      showRemoteFullscreenPrompt();
+    }
+  }
+
+  async function enterFullscreenFromPrompt() {
+    if (document.activeElement && typeof document.activeElement.blur === 'function') {
+      document.activeElement.blur();
+    }
+    try {
+      await els.viewerView.requestFullscreen();
+      hideRemoteFullscreenPrompt();
+    } catch (error) {
+      showRemoteFullscreenPrompt();
+    }
+  }
+
+  function showRemoteFullscreenPrompt() {
+    if (!els.fullscreenRequestPrompt || !els.viewerView || els.viewerView.classList.contains('hidden')) return;
+    els.fullscreenRequestPrompt.classList.remove('hidden');
+    revealToolbarTemporarily();
+  }
+
+  function hideRemoteFullscreenPrompt() {
+    if (els.fullscreenRequestPrompt) els.fullscreenRequestPrompt.classList.add('hidden');
   }
 
   function syncFullscreenState() {
@@ -1658,6 +1708,7 @@
     els.viewerView.classList.toggle('presentation-fullscreen', fullscreen);
     if (els.fullscreenBtn) els.fullscreenBtn.textContent = fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
     if (els.controlPanel && fullscreen) els.controlPanel.classList.add('hidden');
+    if (fullscreen) hideRemoteFullscreenPrompt();
     if (fullscreen && document.activeElement && typeof document.activeElement.blur === 'function') {
       document.activeElement.blur();
     }
@@ -2333,7 +2384,7 @@
       case 'zoomIn': setZoom(state.zoom + 0.1); break;
       case 'zoomOut': setZoom(state.zoom - 0.1); break;
       case 'resetZoom': setZoom(1, { centerX: 0.5, centerY: 0.5 }); break;
-      case 'toggleFullscreen': toggleFullscreen(); break;
+      case 'toggleFullscreen': handleRemoteFullscreenRequest(); break;
       case 'setZoom': setZoom(Number(command.value) || 1); break;
       case 'setViewport': setViewportTransform(command.value || {}); break;
       case 'autoStart': startAutoPlay(); break;

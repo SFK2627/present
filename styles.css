@@ -2247,3 +2247,67 @@ body.remote-fullscreen-open .remote-portrait-preview .remote-full-stage img {
   transition: none !important;
   will-change: left, top, width, height !important;
 }
+
+
+/* Remote fullscreen request handshake
+   A phone/Firebase command is not a local desktop user gesture, so browsers may block entering fullscreen.
+   This prompt appears only when the desktop must receive one tap to complete fullscreen. */
+.fullscreen-request-prompt {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  padding: 24px;
+  background: radial-gradient(circle at center, rgba(17, 24, 39, .18), rgba(0, 0, 0, .48));
+}
+.fullscreen-request-prompt.hidden { display: none !important; }
+.fullscreen-request-card {
+  pointer-events: auto;
+  width: min(520px, calc(100vw - 36px));
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border-radius: 26px;
+  border: 1px solid rgba(255,255,255,.24);
+  background: linear-gradient(145deg, rgba(20, 24, 44, .92), rgba(40, 45, 78, .86));
+  color: #fff;
+  box-shadow: 0 28px 80px rgba(0,0,0,.42);
+  text-align: center;
+}
+.fullscreen-request-card strong {
+  font-size: clamp(1.15rem, 2.2vw, 1.7rem);
+  letter-spacing: -.02em;
+}
+.fullscreen-request-card span {
+  color: rgba(255,255,255,.76);
+  line-height: 1.45;
+}
+.fullscreen-request-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 6px;
+}
+.fullscreen-request-actions button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 999px;
+  font-weight: 800;
+  cursor: pointer;
+}
+#acceptRemoteFullscreenBtn {
+  color: #fff;
+  background: linear-gradient(135deg, #7c5cff, #22c1c3);
+  box-shadow: 0 16px 34px rgba(124,92,255,.28);
+}
+#dismissRemoteFullscreenBtn {
+  color: rgba(255,255,255,.9);
+  background: rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.2);
+}
+.viewer-view.presentation-fullscreen .fullscreen-request-prompt,
+.viewer-view:fullscreen .fullscreen-request-prompt {
+  display: none !important;
+}

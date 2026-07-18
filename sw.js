@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-exact-monitor-zoom-1';
+const CACHE_NAME = 'presentation-hub-pro-v10-remote-fullscreen-fix';
 const APP_SHELL = [
   './',
   './index.html',
