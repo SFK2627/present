@@ -76,6 +76,7 @@
     lastRemoteThumbKey: '',
     remotePreviewBusy: false,
     remoteThumbTimer: null,
+    viewportQualityTimer: null,
     firebaseReady: false,
     firebaseDb: null,
     firebaseAuthReady: false,
@@ -1521,7 +1522,43 @@
   }
 
   function setViewportTransform(value = {}) {
-    setZoom(value.zoom ?? state.zoom, { centerX: value.centerX ?? state.viewportCenterX, centerY: value.centerY ?? state.viewportCenterY });
+    const nextZoom = Math.min(4, Math.max(0.25, Number(value.zoom ?? state.zoom) || 1));
+    state.zoom = nextZoom;
+    if (Number.isFinite(Number(value.centerX))) state.viewportCenterX = clamp01(Number(value.centerX));
+    if (Number.isFinite(Number(value.centerY))) state.viewportCenterY = clamp01(Number(value.centerY));
+    updateZoomLabel();
+
+    // Remote pinch/drag should feel instant. For PDFs, resize/reposition the
+    // already-rendered page first, then do a quiet high-quality re-render after
+    // the gesture settles. This avoids the desktop flash/jitter caused by
+    // running PDF.js on every tiny finger movement.
+    if (state.activeFile && state.activeFile.type === 'pdf' && applyLivePdfViewportTransform()) {
+      scheduleViewportQualityRender();
+      return;
+    }
+
+    renderCurrentPage();
+  }
+
+  function scheduleViewportQualityRender() {
+    clearTimeout(state.viewportQualityTimer);
+    state.viewportQualityTimer = setTimeout(() => {
+      if (state.activeFile && state.activeFile.type === 'pdf') renderCurrentPage();
+    }, 380);
+  }
+
+  function applyLivePdfViewportTransform() {
+    const layer = state.activePdfCanvas;
+    if (!layer || !layer.isConnected) return false;
+    const renderedZoom = Math.max(0.001, Number(layer.dataset.renderZoom) || 1);
+    const baseWidth = Number(layer.dataset.baseWidth) || ((layer.offsetWidth || 1) / renderedZoom);
+    const baseHeight = Number(layer.dataset.baseHeight) || ((layer.offsetHeight || 1) / renderedZoom);
+    layer.style.width = `${Math.max(1, Math.round(baseWidth * state.zoom))}px`;
+    layer.style.height = `${Math.max(1, Math.round(baseHeight * state.zoom))}px`;
+    layer.style.maxWidth = 'none';
+    layer.style.maxHeight = 'none';
+    applyViewportScroll();
+    return true;
   }
 
   function clamp01(value) {
@@ -2006,10 +2043,16 @@
 
   function preparePdfLayer(canvas, info) {
     canvas.classList.remove('hidden', ...getTransitionClasses(), 'pdf-layer-incoming', 'pdf-layer-show', 'pdf-layer-outgoing');
-    canvas.style.width = `${Math.floor(info.cssViewport.width)}px`;
-    canvas.style.height = `${Math.floor(info.cssViewport.height)}px`;
+    const renderZoom = Math.max(0.001, Number(state.zoom) || 1);
+    const width = Math.floor(info.cssViewport.width);
+    const height = Math.floor(info.cssViewport.height);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     canvas.style.maxWidth = 'none';
     canvas.style.maxHeight = 'none';
+    canvas.dataset.renderZoom = String(renderZoom);
+    canvas.dataset.baseWidth = String(width / renderZoom);
+    canvas.dataset.baseHeight = String(height / renderZoom);
   }
 
   async function warmAdjacentPdfBitmaps() {
@@ -2688,20 +2731,89 @@
   function applyRemoteFullPreviewTransform(viewport) {
     const img = $('remoteFullImg');
     if (!img) return;
+    const screen = img.closest('.remote-monitor-screen') || $('remoteFullStage');
+    if (!screen) return;
+
     const zoom = Math.min(4, Math.max(1, Number(viewport.zoom) || 1));
-    const centerX = Math.max(0, Math.min(1, Number(viewport.centerX) || 0.5));
-    const centerY = Math.max(0, Math.min(1, Number(viewport.centerY) || 0.5));
-    const offsetStrength = Math.max(0, zoom - 1);
-    const translateX = (0.5 - centerX) * 100 * offsetStrength;
-    const translateY = (0.5 - centerY) * 100 * offsetStrength;
-    const transformValue = `translate3d(${translateX}%, ${translateY}%, 0) scale(${zoom})`;
-    img.style.transformOrigin = 'center center';
-    // Keep the phone portrait preview visually synced while pinching.
-    // The CSS uses an !important transform for GPU stability, so update the
-    // custom property it reads instead of only setting style.transform.
-    img.style.setProperty('--remote-full-transform', transformValue);
-    img.style.setProperty('transform', transformValue, 'important');
+    let centerX = Math.max(0, Math.min(1, Number(viewport.centerX) || 0.5));
+    let centerY = Math.max(0, Math.min(1, Number(viewport.centerY) || 0.5));
+    const screenRect = screen.getBoundingClientRect();
+    const screenW = Math.max(1, screen.clientWidth || screenRect.width || 1);
+    const screenH = Math.max(1, screen.clientHeight || screenRect.height || 1);
+    const naturalW = Math.max(1, img.naturalWidth || 16);
+    const naturalH = Math.max(1, img.naturalHeight || 9);
+    const aspect = naturalW / naturalH;
+
+    let fitW = screenW;
+    let fitH = fitW / aspect;
+    if (fitH > screenH) {
+      fitH = screenH;
+      fitW = fitH * aspect;
+    }
+
+    const contentW = fitW * zoom;
+    const contentH = fitH * zoom;
+    const minCenterX = contentW > screenW ? screenW / (2 * contentW) : 0.5;
+    const maxCenterX = contentW > screenW ? 1 - minCenterX : 0.5;
+    const minCenterY = contentH > screenH ? screenH / (2 * contentH) : 0.5;
+    const maxCenterY = contentH > screenH ? 1 - minCenterY : 0.5;
+    centerX = Math.max(minCenterX, Math.min(maxCenterX, centerX));
+    centerY = Math.max(minCenterY, Math.min(maxCenterY, centerY));
+
+    const left = (screenW / 2) - (centerX * contentW);
+    const top = (screenH / 2) - (centerY * contentH);
+
+    // Pixel layout mirrors the desktop scroll viewport: fit image first, then
+    // enlarge and position it by normalized center. This makes the phone monitor
+    // crop match the desktop crop instead of using a separate percent transform.
+    img.style.setProperty('--remote-full-transform', 'none');
+    img.style.setProperty('transform', 'none', 'important');
+    img.style.position = 'absolute';
+    img.style.left = `${left}px`;
+    img.style.top = `${top}px`;
+    img.style.width = `${contentW}px`;
+    img.style.height = `${contentH}px`;
+    img.style.maxWidth = 'none';
+    img.style.maxHeight = 'none';
+    img.dataset.actualCenterX = String(centerX);
+    img.dataset.actualCenterY = String(centerY);
   }
+
+  function clampViewportToRemoteScreen(viewport) {
+    const img = $('remoteFullImg');
+    const screen = img ? (img.closest('.remote-monitor-screen') || $('remoteFullStage')) : null;
+    if (!img || !screen) {
+      return {
+        zoom: Math.min(4, Math.max(1, Number(viewport.zoom) || 1)),
+        centerX: Math.max(0, Math.min(1, Number(viewport.centerX) || 0.5)),
+        centerY: Math.max(0, Math.min(1, Number(viewport.centerY) || 0.5)),
+      };
+    }
+    const zoom = Math.min(4, Math.max(1, Number(viewport.zoom) || 1));
+    const screenW = Math.max(1, screen.clientWidth || screen.getBoundingClientRect().width || 1);
+    const screenH = Math.max(1, screen.clientHeight || screen.getBoundingClientRect().height || 1);
+    const naturalW = Math.max(1, img.naturalWidth || 16);
+    const naturalH = Math.max(1, img.naturalHeight || 9);
+    const aspect = naturalW / naturalH;
+    let fitW = screenW;
+    let fitH = fitW / aspect;
+    if (fitH > screenH) {
+      fitH = screenH;
+      fitW = fitH * aspect;
+    }
+    const contentW = fitW * zoom;
+    const contentH = fitH * zoom;
+    const minX = contentW > screenW ? screenW / (2 * contentW) : 0.5;
+    const maxX = contentW > screenW ? 1 - minX : 0.5;
+    const minY = contentH > screenH ? screenH / (2 * contentH) : 0.5;
+    const maxY = contentH > screenH ? 1 - minY : 0.5;
+    return {
+      zoom,
+      centerX: Math.max(minX, Math.min(maxX, Number(viewport.centerX) || 0.5)),
+      centerY: Math.max(minY, Math.min(maxY, Number(viewport.centerY) || 0.5)),
+    };
+  }
+
 
   function attachRemotePreviewControls(ref, isHost, getViewport, setLocalViewport) {
     const openBtn = $('remotePreviewFullBtn');
@@ -2711,11 +2823,7 @@
     const stage = $('remoteFullStage');
     if (!openBtn || !full || !stage) return;
 
-    const safeViewport = (value) => ({
-      zoom: Math.min(4, Math.max(1, Number(value.zoom) || 1)),
-      centerX: Math.max(0, Math.min(1, Number(value.centerX) || 0.5)),
-      centerY: Math.max(0, Math.min(1, Number(value.centerY) || 0.5)),
-    });
+    const safeViewport = (value) => clampViewportToRemoteScreen(value || {});
 
     let localViewport = safeViewport(getViewport());
     let rafId = 0;
@@ -2724,7 +2832,7 @@
     const sendViewport = throttle((viewport) => {
       if (!isHost) return;
       sendRemoteCommand(ref, 'setViewport', safeViewport(viewport));
-    }, 140);
+    }, 110);
 
     function renderLocal(viewport) {
       localViewport = safeViewport(viewport);
@@ -2800,6 +2908,22 @@
       return (screen || stage).getBoundingClientRect();
     };
 
+    const screenGeometry = (zoomValue) => {
+      const img = $('remoteFullImg');
+      const screen = stage.querySelector('.remote-monitor-screen') || stage;
+      const rect = screen.getBoundingClientRect();
+      const naturalW = Math.max(1, img && img.naturalWidth ? img.naturalWidth : 16);
+      const naturalH = Math.max(1, img && img.naturalHeight ? img.naturalHeight : 9);
+      const aspect = naturalW / naturalH;
+      let fitW = Math.max(1, rect.width);
+      let fitH = fitW / aspect;
+      if (fitH > rect.height) {
+        fitH = Math.max(1, rect.height);
+        fitW = fitH * aspect;
+      }
+      return { rect, fitW, fitH, contentW: fitW * zoomValue, contentH: fitH * zoomValue };
+    };
+
     stage.addEventListener('touchstart', (event) => {
       if (event.touches.length) event.preventDefault();
       beginGesture();
@@ -2828,8 +2952,9 @@
         const ratio = distance(event.touches) / startDistance;
         const mid = midpoint(event.touches, rect);
         const nextZoom = Math.min(4, Math.max(1, startZoom * ratio));
-        const dragX = (mid.x - startMid.x) / Math.max(1, nextZoom);
-        const dragY = (mid.y - startMid.y) / Math.max(1, nextZoom);
+        const geometry = screenGeometry(nextZoom);
+        const dragX = ((mid.x - startMid.x) * geometry.rect.width) / Math.max(1, geometry.contentW);
+        const dragY = ((mid.y - startMid.y) * geometry.rect.height) / Math.max(1, geometry.contentH);
         next = safeViewport({
           zoom: nextZoom,
           centerX: startCenter.centerX - dragX,
@@ -2838,11 +2963,11 @@
       } else if (event.touches.length === 1 && startPoint) {
         const dx = event.touches[0].clientX - startPoint.x;
         const dy = event.touches[0].clientY - startPoint.y;
-        const divisor = Math.max(1, startZoom);
+        const geometry = screenGeometry(startZoom);
         next = safeViewport({
           zoom: startZoom,
-          centerX: startCenter.centerX - dx / (Math.max(1, rect.width) * divisor),
-          centerY: startCenter.centerY - dy / (Math.max(1, rect.height) * divisor),
+          centerX: startCenter.centerX - dx / Math.max(1, geometry.contentW),
+          centerY: startCenter.centerY - dy / Math.max(1, geometry.contentH),
         });
       }
 

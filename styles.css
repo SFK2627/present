@@ -2223,3 +2223,27 @@ body.remote-fullscreen-open .remote-portrait-preview .remote-full-stage img {
   .remote-monitor-neck { height: 18px !important; }
   .remote-monitor-base { height: 12px !important; }
 }
+
+/* Pro v10.4: exact monitor preview mapping
+   The portrait monitor uses pixel positioning instead of percent transforms so
+   its crop matches the desktop viewer's normalized center/zoom math. */
+.remote-monitor-screen {
+  padding: 0 !important;
+  isolation: isolate !important;
+}
+.remote-monitor-screen::after {
+  inset: 0 !important;
+  border-radius: inherit !important;
+}
+.remote-monitor-screen img,
+.remote-portrait-preview .remote-full-stage img {
+  position: absolute !important;
+  display: block !important;
+  object-fit: fill !important;
+  max-width: none !important;
+  max-height: none !important;
+  border-radius: 18px !important;
+  transform: none !important;
+  transition: none !important;
+  will-change: left, top, width, height !important;
+}
