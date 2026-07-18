@@ -1,7 +1,7 @@
 /* Presentation Hub static app
    - Open index.html directly or upload the folder to any static host.
-   - PDF rendering uses PDF.js from CDN.
-   - PPTX static mode extracts slide text and slide count from the PPTX zip. For pixel-perfect PPTX, convert PPTX to PDF first.
+   - PDF rendering uses PDF.js from CDN with high-DPI fullscreen rendering.
+   - PPTX visual mode uses PPTXjs when online. For pixel-perfect PowerPoint output, export PPTX as PDF and upload the PDF.
    - Phone remote uses Firebase when firebase-config.js is configured.
 */
 
@@ -46,6 +46,9 @@
       opacity: 75,
     },
     toolbarHideTimer: null,
+    renderToken: 0,
+    lastRemoteThumbKey: '',
+    remotePreviewBusy: false,
     firebaseReady: false,
     firebaseDb: null,
     firebaseAuthReady: false,
@@ -118,8 +121,8 @@
     if (els.sortSelect) els.sortSelect.addEventListener('change', renderLibrary);
     if (els.clearLibraryBtn) els.clearLibraryBtn.addEventListener('click', clearLibrary);
     if (els.themeToggle) els.themeToggle.addEventListener('click', toggleTheme);
-    if (els.firebaseStatus) els.firebaseStatus.addEventListener('click', () => els.setupModal.classList.remove('hidden'));
-    if (els.closeSetupBtn) els.closeSetupBtn.addEventListener('click', () => els.setupModal.classList.add('hidden'));
+    if (els.firebaseStatus) els.firebaseStatus.addEventListener('click', () => showModal(els.setupModal));
+    if (els.closeSetupBtn) els.closeSetupBtn.addEventListener('click', () => hideModal(els.setupModal));
 
     if (els.backHomeBtn) els.backHomeBtn.addEventListener('click', closeViewer);
     if (els.prevBtn) els.prevBtn.addEventListener('click', previousPage);
@@ -130,7 +133,7 @@
     if (els.resetZoomBtn) els.resetZoomBtn.addEventListener('click', () => setZoom(1));
     if (els.fullscreenBtn) els.fullscreenBtn.addEventListener('click', toggleFullscreen);
     if (els.qrBtn) els.qrBtn.addEventListener('click', openQrModal);
-    if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => els.qrModal.classList.add('hidden'));
+    if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => hideModal(els.qrModal));
     if (els.settingsBtn) els.settingsBtn.addEventListener('click', () => els.controlPanel.classList.toggle('hidden'));
 
     if (els.globalTimingSelect) els.globalTimingSelect.addEventListener('change', () => {
@@ -237,6 +240,20 @@
       els.firebaseStatus.classList.remove('ready');
       els.firebaseStatus.classList.add('muted');
     }
+  }
+
+  function showModal(modal) {
+    if (!modal) return;
+    const root = document.fullscreenElement || document.body;
+    if (modal.parentElement !== root) root.appendChild(modal);
+    modal.classList.remove('hidden');
+    revealToolbarTemporarily();
+  }
+
+  function hideModal(modal) {
+    if (!modal) return;
+    modal.classList.add('hidden');
+    if (els.app && modal.parentElement !== els.app) els.app.appendChild(modal);
   }
 
   function loadScriptOnce(src) {
@@ -509,15 +526,17 @@
     if (line && lines < maxLines) ctx.fillText(line, x, y + lines * lineHeight);
   }
 
-  async function renderPdfPageToDataUrl(pdf, pageNumber, scale) {
+  async function renderPdfPageToDataUrl(pdf, pageNumber, targetWidth = 900) {
     const page = await pdf.getPage(pageNumber);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(1.25, Math.max(0.25, targetWidth / base.width));
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
-    return canvas.toDataURL('image/jpeg', 0.8);
+    return canvas.toDataURL('image/jpeg', 0.86);
   }
 
   function renderLibrary() {
@@ -777,8 +796,10 @@
   }
 
   function getAvailableStageSize() {
-    const rect = els.viewerStage ? els.viewerStage.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
     const fullscreen = isPresentationFullscreen();
+    const rect = fullscreen
+      ? { width: window.innerWidth, height: window.innerHeight }
+      : (els.viewerStage ? els.viewerStage.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight });
     const horizontalPadding = fullscreen ? 0 : 64;
     const verticalPadding = fullscreen ? 0 : 46;
     return {
@@ -798,16 +819,17 @@
       slide.style.display = 'none';
       slide.style.visibility = 'visible';
       slide.style.transformOrigin = 'center center';
+      slide.style.margin = '0';
     });
 
     current.style.display = 'block';
     current.style.transform = 'none';
-    current.style.margin = '0 auto';
+    current.style.margin = '0';
 
     const rect = current.getBoundingClientRect();
     const naturalWidth = current.offsetWidth || rect.width || 960;
     const naturalHeight = current.offsetHeight || rect.height || 540;
-    const fitScale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight, 1.3);
+    const fitScale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight);
     const finalScale = Math.max(0.15, fitScale * state.zoom);
 
     current.style.transform = `scale(${finalScale})`;
@@ -818,6 +840,7 @@
 
   async function renderCurrentPage() {
     if (!state.activeFile) return;
+    const token = ++state.renderToken;
     state.currentPage = Math.min(Math.max(1, state.currentPage), state.totalPages);
     els.jumpInput.value = state.currentPage;
     els.perSlideTimingInput.value = state.perPageTiming[state.currentPage] || '';
@@ -827,16 +850,21 @@
       els.pptxSlide.classList.add('hidden');
       els.pdfCanvas.classList.remove('hidden');
       const page = await state.activePdf.getPage(state.currentPage);
+      if (token !== state.renderToken) return;
       const viewportBase = page.getViewport({ scale: 1 });
       const available = getAvailableStageSize();
       const fitScale = Math.min(available.width / viewportBase.width, available.height / viewportBase.height);
-      const scale = Math.max(0.15, fitScale * state.zoom);
-      const viewport = page.getViewport({ scale });
+      const cssScale = Math.max(0.15, fitScale * state.zoom);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.4);
+      const renderViewport = page.getViewport({ scale: cssScale * dpr });
+      const cssViewport = page.getViewport({ scale: cssScale });
       const canvas = els.pdfCanvas;
-      const ctx = canvas.getContext('2d');
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      await page.render({ canvasContext: ctx, viewport }).promise;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      canvas.width = Math.floor(renderViewport.width);
+      canvas.height = Math.floor(renderViewport.height);
+      canvas.style.width = `${Math.floor(cssViewport.width)}px`;
+      canvas.style.height = `${Math.floor(cssViewport.height)}px`;
+      await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
     } else {
       els.pdfCanvas.classList.add('hidden');
       els.pptxSlide.classList.remove('hidden');
@@ -844,12 +872,12 @@
         showOnlyCurrentPptxSlide();
       } else {
         els.pptxSlide.classList.remove('visual-pptx');
-        const slide = state.activePptxSlides[state.currentPage - 1] || { title: `Slide ${state.currentPage}`, lines: [] };
-        els.pptxSlide.style.transform = `scale(${state.zoom})`;
+        els.pptxSlide.style.transform = '';
         els.pptxSlide.innerHTML = `
-          <h2>${escapeHtml(slide.title)}</h2>
-          ${slide.lines.slice(0, 8).map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
-          <div class="pptx-note">Visual PPTX renderer did not load. For perfect layout, export this PowerPoint as PDF and upload the PDF.</div>
+          <div class="viewer-message viewer-message-warning">
+            <strong>PowerPoint visual render is not available.</strong>
+            <span>For the exact colors, pictures, fonts, and layout, export this PPTX as PDF and upload the PDF here. Static browser PPTX rendering cannot guarantee every PowerPoint element.</span>
+          </div>
         `;
       }
     }
@@ -949,7 +977,7 @@
   }
 
   function setZoom(value) {
-    state.zoom = Math.min(2.5, Math.max(0.45, Number(value)));
+    state.zoom = Math.min(4, Math.max(0.25, Number(value)));
     renderCurrentPage();
   }
 
@@ -1177,24 +1205,30 @@
   }
 
   async function getCurrentThumbForRemote() {
+    const key = `${state.activeFile ? state.activeFile.id : ''}:${state.currentPage}:${Math.round(state.zoom * 100)}:${state.timer.visible ? 1 : 0}`;
+    if (!state.remotePreviewBusy && state.lastRemoteThumbKey === key && !isPresentationFullscreen()) return '';
+    state.remotePreviewBusy = true;
     try {
+      state.lastRemoteThumbKey = key;
       if (state.activeFile.type === 'pdf' && state.activePdf) {
-        return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 0.16);
+        return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 900);
       }
       if (state.activeFile.type === 'pptx') {
         if (state.pptxVisualReady && window.html2canvas && state.pptxRenderedSlides[state.currentPage - 1]) {
           const canvas = await window.html2canvas(state.pptxRenderedSlides[state.currentPage - 1], {
-            backgroundColor: null,
-            scale: 0.35,
+            backgroundColor: '#ffffff',
+            scale: 0.9,
             logging: false,
+            useCORS: true,
           });
-          return canvas.toDataURL('image/jpeg', 0.72);
+          return canvas.toDataURL('image/jpeg', 0.86);
         }
-        const slide = state.activePptxSlides[state.currentPage - 1];
-        return createPptxThumbDataUrl(slide ? slide.title : `Slide ${state.currentPage}`, state.currentPage);
+        return createPptxThumbDataUrl(`Slide ${state.currentPage}`, state.currentPage);
       }
     } catch (error) {
       return '';
+    } finally {
+      state.remotePreviewBusy = false;
     }
     return '';
   }
@@ -1208,6 +1242,7 @@
       case 'zoomIn': setZoom(state.zoom + 0.1); break;
       case 'zoomOut': setZoom(state.zoom - 0.1); break;
       case 'resetZoom': setZoom(1); break;
+      case 'setZoom': setZoom(Number(command.value) || 1); break;
       case 'autoStart': startAutoPlay(); break;
       case 'autoPause': pauseAutoPlay(); break;
       case 'autoStop': stopAutoPlay(); break;
@@ -1249,7 +1284,7 @@
     els.viewerQr.innerHTML = '';
     new QRCode(els.hostQr, { text: hostUrl, width: 210, height: 210 });
     new QRCode(els.viewerQr, { text: viewerUrl, width: 210, height: 210 });
-    els.qrModal.classList.remove('hidden');
+    showModal(els.qrModal);
   }
 
   function renderRemoteApp() {
@@ -1258,12 +1293,14 @@
     const sessionId = qs.get('session') || '';
     const role = qs.get('role') || 'viewer';
     const isHost = role === 'host';
+    let remoteZoom = 1;
 
     els.remoteApp.innerHTML = `
       <main class="remote-card ${isHost ? '' : 'remote-viewer-only'}">
         <h1>Presentation Remote</h1>
         <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Host control' : 'Viewer only'}</p>
         <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
+        <p class="remote-hint">Pinch the preview to zoom the desktop viewer.</p>
         <h2 id="remoteSlideLabel">Slide -- / --</h2>
         <p id="remoteFileLabel" class="remote-sub">Connect to an active desktop session.</p>
         <section class="remote-grid">
@@ -1330,6 +1367,7 @@
         preview.innerHTML = data.thumb ? `<img src="${data.thumb}" alt="Current slide preview">` : '<span>No preview yet</span>';
         $('remoteTiming').value = data.globalTiming || 10;
         $('remoteOpacity').value = data.timerOpacity ?? 75;
+        remoteZoom = Number(data.zoom) || 1;
       });
 
       els.remoteApp.querySelectorAll('[data-command]').forEach((button) => {
@@ -1338,6 +1376,7 @@
           sendRemoteCommand(ref, button.dataset.command);
         });
       });
+      attachRemotePreviewPinch(ref, isHost, () => remoteZoom);
       $('remoteSetTiming').addEventListener('click', () => {
         if (!isHost) return;
         sendRemoteCommand(ref, 'setTiming', Number($('remoteTiming').value) || 10);
@@ -1347,6 +1386,37 @@
         sendRemoteCommand(ref, 'setTimerOpacity', Number($('remoteOpacity').value));
       });
     });
+  }
+
+  function attachRemotePreviewPinch(ref, isHost, getZoom) {
+    const preview = $('remotePreview');
+    if (!preview || !isHost) return;
+    let startDistance = 0;
+    let startZoom = 1;
+    let lastSent = 0;
+
+    const distance = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    preview.addEventListener('touchstart', (event) => {
+      if (event.touches.length !== 2) return;
+      startDistance = distance(event.touches);
+      startZoom = Number(getZoom()) || 1;
+    }, { passive: true });
+
+    preview.addEventListener('touchmove', (event) => {
+      if (event.touches.length !== 2 || !startDistance) return;
+      event.preventDefault();
+      const ratio = distance(event.touches) / startDistance;
+      const nextZoom = Math.min(4, Math.max(0.25, startZoom * ratio));
+      const now = Date.now();
+      if (now - lastSent < 120) return;
+      lastSent = now;
+      sendRemoteCommand(ref, 'setZoom', nextZoom);
+    }, { passive: false });
   }
 
   function sendRemoteCommand(ref, action, value) {

@@ -655,3 +655,95 @@ input:focus, select:focus {
 .viewer-view:fullscreen .timer-overlay.top-left {
   top: 24px;
 }
+
+/* True monitor fullscreen + in-fullscreen modal fixes */
+.viewer-view.presentation-fullscreen,
+.viewer-view:fullscreen {
+  inset: 0;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+.viewer-view.presentation-fullscreen .viewer-stage,
+.viewer-view:fullscreen .viewer-stage {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.viewer-view.presentation-fullscreen .viewer-canvas-wrap,
+.viewer-view:fullscreen .viewer-canvas-wrap {
+  display: grid;
+  place-items: center;
+  background: #000;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.viewer-view.presentation-fullscreen .viewer-canvas-wrap::-webkit-scrollbar,
+.viewer-view:fullscreen .viewer-canvas-wrap::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.viewer-view.presentation-fullscreen .modal,
+.viewer-view:fullscreen .modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+}
+.viewer-view.presentation-fullscreen .modal.hidden,
+.viewer-view:fullscreen .modal.hidden {
+  display: none !important;
+}
+.viewer-view.presentation-fullscreen .modal-card,
+.viewer-view:fullscreen .modal-card {
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+}
+.viewer-message-warning {
+  width: min(760px, 90vw);
+  min-height: 300px;
+  padding: 32px;
+  gap: 14px;
+  text-align: center;
+  line-height: 1.45;
+}
+.viewer-message-warning strong {
+  display: block;
+  font-size: clamp(1.35rem, 2.2vw, 2rem);
+}
+.viewer-message-warning span {
+  display: block;
+  color: #cbd5e1;
+  max-width: 620px;
+}
+
+/* Clearer phone remote preview and pinch zoom area */
+.remote-card {
+  width: min(640px, 100%);
+}
+.remote-preview {
+  aspect-ratio: 16 / 9;
+  min-height: 220px;
+  touch-action: none;
+  background: #020617;
+}
+.remote-preview img {
+  image-rendering: auto;
+}
+.remote-hint {
+  margin: -8px 0 10px;
+  color: #c4b5fd;
+  font-size: .9rem;
+  text-align: center;
+}
+@media (max-width: 520px) {
+  .remote-app { padding: 10px; }
+  .remote-card { border-radius: 22px; padding: 14px; }
+  .remote-preview { min-height: 205px; border-radius: 18px; }
+  .remote-grid button, .remote-wide button { min-height: 58px; }
+}

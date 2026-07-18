@@ -58,3 +58,16 @@ This version improves GitHub Pages usage:
 - Fullscreen now uses a true presentation mode: sidebar is hidden, the viewer fills the whole screen, and the toolbar appears only when the mouse moves.
 - Keyboard shortcuts still work in viewer mode: Arrow Right, Arrow Left, F, and Esc.
 - The service worker now uses a fresh cache name and network-first updates so GitHub Pages changes are less likely to stay stuck on an old cached version.
+
+## Latest update notes
+
+This build improves the presentation behavior requested for GitHub Pages:
+
+- Fullscreen now targets the entire monitor area and removes sidebar spacing, borders, rounded corners, and shadows.
+- QR and setup modals are moved into the active fullscreen container, so they remain visible while the viewer is fullscreen.
+- PDF rendering now uses high-DPI canvas rendering for clearer fullscreen output.
+- Phone remote preview now sends a larger, clearer current-page image.
+- Host phones can pinch on the preview to zoom the desktop viewer in real time.
+- PPTX no longer falls back to a plain text-only slide view when visual rendering fails. It shows a clear warning instead, because exact PPTX rendering needs visual rendering or PDF export.
+
+For PowerPoint files that must look exactly like the original, use PowerPoint/WPS/Canva export to PDF first, then upload the PDF into Presentation Hub. That is the recommended exact mode.
