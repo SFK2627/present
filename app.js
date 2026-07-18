@@ -90,6 +90,7 @@
     remoteSlideThumbsCount: 0,
     remoteSlideThumbsBusy: false,
     magicEffectTimer: null,
+    magicEffectVolume: 160,
   };
 
 
@@ -1663,37 +1664,37 @@
     const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
     switch (effect.id) {
       case 'drumroll':
-        return `<div class="magic-center magic-drum"><div class="magic-emoji">🥁</div><strong>Drumroll...</strong><span></span><span></span><span></span></div>`;
+        return `<div class="magic-glow-ring"></div><div class="magic-center magic-drum magic-grand"><div class="magic-emoji">🥁</div><strong>Drumroll...</strong><small>Get ready</small><span></span><span></span><span></span></div>`;
       case 'confetti':
-        return `<div class="magic-center magic-pop"><div class="magic-emoji">🎉</div><strong>Celebrate!</strong></div><div class="magic-particles">${makeParticles(72, 'magic-confetti')}</div>`;
+        return `<div class="magic-glow-ring rainbow"></div><div class="magic-center magic-pop magic-grand"><div class="magic-emoji">🎉</div><strong>Celebrate!</strong><small>Great work</small></div><div class="magic-particles">${makeParticles(126, 'magic-confetti')}</div>`;
       case 'micdrop':
-        return `<div class="magic-center magic-drop"><div class="magic-emoji">🎤</div><strong>Mic Drop</strong></div>`;
+        return `<div class="magic-stage-flash"></div><div class="magic-center magic-drop magic-grand"><div class="magic-emoji">🎤</div><strong>Mic Drop</strong><small>That is the moment</small></div>`;
       case 'curtain':
-        return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-center magic-reveal"><strong>Reveal</strong></div>`;
+        return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-center magic-reveal magic-grand"><strong>Reveal</strong><small>Here we go</small></div>`;
       case 'bubbles':
-        return `<div class="magic-particles bubbles">${makeParticles(32, 'magic-bubble')}</div>`;
+        return `<div class="magic-center magic-bubble-title magic-grand"><div class="magic-emoji">🫧</div><strong>Bubbles</strong></div><div class="magic-particles bubbles">${makeParticles(74, 'magic-bubble')}</div>`;
       case 'quiet':
-        return `<div class="magic-center magic-quiet"><div class="magic-emoji">🤫</div><strong>Quiet please</strong><small>Eyes on the screen</small></div>`;
+        return `<div class="magic-vignette"></div><div class="magic-center magic-quiet magic-grand"><div class="magic-emoji">🤫</div><strong>Quiet please</strong><small>Eyes on the screen</small></div>`;
       case 'applause':
-        return `<div class="magic-center magic-pop"><div class="magic-emoji">👏</div><strong>Applause!</strong></div><div class="magic-particles">${makeParticles(34, 'magic-symbol', ['👏','👏','✨'])}</div>`;
+        return `<div class="magic-glow-ring"></div><div class="magic-center magic-pop magic-grand"><div class="magic-emoji">👏</div><strong>Applause!</strong><small>Well done</small></div><div class="magic-particles">${makeParticles(76, 'magic-symbol', ['👏','👏','✨','★'])}</div>`;
       case 'spotlight':
-        return `<div class="magic-spotlight"></div><div class="magic-center magic-small"><strong>Spotlight</strong></div>`;
+        return `<div class="magic-spotlight"></div><div class="magic-center magic-small magic-grand"><div class="magic-emoji">🔦</div><strong>Spotlight</strong></div>`;
       case 'correct':
-        return `<div class="magic-center magic-stamp correct"><div class="magic-emoji">✅</div><strong>Correct!</strong></div>`;
+        return `<div class="magic-glow-ring green"></div><div class="magic-center magic-stamp correct magic-grand"><div class="magic-emoji">✅</div><strong>Correct!</strong></div><div class="magic-particles">${makeParticles(48, 'magic-symbol', ['✅','✨','★'])}</div>`;
       case 'wrong':
-        return `<div class="magic-center magic-stamp wrong"><div class="magic-emoji">❌</div><strong>Try again</strong></div>`;
+        return `<div class="magic-stage-flash red"></div><div class="magic-center magic-stamp wrong magic-grand"><div class="magic-emoji">❌</div><strong>Try again</strong></div>`;
       case 'timesup':
-        return `<div class="magic-center magic-time"><div class="magic-emoji">⏰</div><strong>Time's Up!</strong></div>`;
+        return `<div class="magic-stage-flash amber"></div><div class="magic-center magic-time magic-grand"><div class="magic-emoji">⏰</div><strong>Time's Up!</strong></div>`;
       case 'sparkle':
-        return `<div class="magic-center magic-small"><div class="magic-emoji">✨</div><strong>Sparkle</strong></div><div class="magic-particles">${makeParticles(46, 'magic-symbol', ['✨','✦','✧'])}</div>`;
+        return `<div class="magic-glow-ring rainbow"></div><div class="magic-center magic-small magic-grand"><div class="magic-emoji">✨</div><strong>Sparkle</strong></div><div class="magic-particles">${makeParticles(90, 'magic-symbol', ['✨','✦','✧','★'])}</div>`;
       case 'stars':
-        return `<div class="magic-particles">${makeParticles(54, 'magic-symbol', ['🌟','⭐','✦'])}</div>`;
+        return `<div class="magic-center magic-small magic-grand"><div class="magic-emoji">🌟</div><strong>Star Rain</strong></div><div class="magic-particles">${makeParticles(98, 'magic-symbol', ['🌟','⭐','✦','★'])}</div>`;
       case 'hype':
-        return `<div class="magic-center magic-pop"><div class="magic-emoji">🔥</div><strong>Hype!</strong></div><div class="magic-particles">${makeParticles(46, 'magic-symbol', ['🔥','⚡','✨'])}</div>`;
+        return `<div class="magic-glow-ring fire"></div><div class="magic-center magic-pop magic-grand"><div class="magic-emoji">🔥</div><strong>Hype!</strong><small>Energy up</small></div><div class="magic-particles">${makeParticles(88, 'magic-symbol', ['🔥','⚡','✨','★'])}</div>`;
       case 'freeze':
-        return `<div class="magic-freeze"></div><div class="magic-center magic-stamp freeze"><div class="magic-emoji">🧊</div><strong>Freeze</strong></div>`;
+        return `<div class="magic-freeze"></div><div class="magic-center magic-stamp freeze magic-grand"><div class="magic-emoji">🧊</div><strong>Freeze</strong></div>`;
       default:
-        return `<div class="magic-center magic-pop"><div class="magic-emoji">${effect.emoji}</div><strong>${escapeHtml(effect.label)}</strong></div>`;
+        return `<div class="magic-center magic-pop magic-grand"><div class="magic-emoji">${effect.emoji}</div><strong>${escapeHtml(effect.label)}</strong></div>`;
     }
   }
 
@@ -1713,48 +1714,71 @@
     }, effect.id === 'curtain' ? 2600 : 2200);
   }
 
+  function getMagicEffectVolume() {
+    const value = Number(state.magicEffectVolume);
+    if (!Number.isFinite(value)) return 1.6;
+    return Math.max(0, Math.min(2.2, value / 100));
+  }
+
+  function setMagicEffectVolume(value, publish = true) {
+    state.magicEffectVolume = Math.max(0, Math.min(220, Number(value) || 0));
+    if (publish) publishSessionState();
+  }
+
   function playMagicEffectSound(effectId) {
     primePresentationAudio();
     if (!state.audioContext) return;
     const ctx = state.audioContext;
     const now = ctx.currentTime;
-    const beep = (time, freq, duration = 0.11, type = 'sine', gainValue = 0.055) => {
+    const volume = getMagicEffectVolume();
+    const beep = (time, freq, duration = 0.14, type = 'sine', gainValue = 0.12) => {
       try {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
+        const safeGain = Math.max(0.0001, Math.min(0.9, gainValue * volume));
         osc.type = type;
         osc.frequency.setValueAtTime(freq, time);
         gain.gain.setValueAtTime(0.0001, time);
-        gain.gain.exponentialRampToValueAtTime(gainValue, time + 0.015);
+        gain.gain.exponentialRampToValueAtTime(safeGain, time + 0.012);
         gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
         osc.connect(gain).connect(ctx.destination);
         osc.start(time);
-        osc.stop(time + duration + 0.02);
+        osc.stop(time + duration + 0.03);
       } catch (error) {}
     };
     if (effectId === 'drumroll') {
-      for (let i = 0; i < 10; i++) beep(now + i * 0.09, i % 2 ? 96 : 132, 0.055, 'square', 0.04);
-    } else if (effectId === 'confetti' || effectId === 'correct' || effectId === 'sparkle' || effectId === 'stars' || effectId === 'hype') {
-      [523, 659, 784, 1046].forEach((f, i) => beep(now + i * 0.08, f, 0.12, 'triangle', 0.045));
+      for (let i = 0; i < 18; i++) beep(now + i * 0.055, i % 2 ? 92 : 154, 0.045, 'square', 0.105);
+      beep(now + 1.02, 220, 0.18, 'triangle', 0.18);
+    } else if (effectId === 'confetti' || effectId === 'correct' || effectId === 'sparkle' || effectId === 'stars' || effectId === 'hype' || effectId === 'applause') {
+      [523, 659, 784, 1046, 1318].forEach((f, i) => beep(now + i * 0.075, f, 0.14, 'triangle', 0.115));
+      if (effectId === 'hype') [220, 330, 440].forEach((f, i) => beep(now + i * 0.09, f, 0.11, 'square', 0.08));
     } else if (effectId === 'wrong') {
-      beep(now, 180, 0.18, 'sawtooth', 0.05); beep(now + 0.18, 120, 0.22, 'sawtooth', 0.05);
+      beep(now, 180, 0.2, 'sawtooth', 0.15); beep(now + 0.18, 112, 0.26, 'sawtooth', 0.16);
     } else if (effectId === 'timesup' || effectId === 'bell') {
-      [880, 880, 660].forEach((f, i) => beep(now + i * 0.18, f, 0.14, 'sine', 0.045));
+      [988, 988, 740, 554].forEach((f, i) => beep(now + i * 0.16, f, 0.15, 'sine', 0.12));
     } else if (effectId === 'quiet') {
       if ('speechSynthesis' in window) {
         try {
           window.speechSynthesis.cancel();
-          const utter = new SpeechSynthesisUtterance('Shhh');
-          utter.rate = 0.78;
-          utter.pitch = 0.75;
-          utter.volume = 0.7;
+          const utter = new SpeechSynthesisUtterance('Shhh. Quiet please.');
+          utter.rate = 0.82;
+          utter.pitch = 0.72;
+          utter.volume = Math.min(1, 0.55 * volume);
           window.speechSynthesis.speak(utter);
-        } catch (error) { beep(now, 300, 0.25, 'sine', 0.025); }
-      } else beep(now, 300, 0.25, 'sine', 0.025);
+        } catch (error) { beep(now, 320, 0.34, 'sine', 0.09); }
+      } else beep(now, 320, 0.34, 'sine', 0.09);
     } else if (effectId === 'micdrop') {
-      beep(now, 260, 0.12, 'triangle', 0.045); beep(now + 0.22, 80, 0.24, 'sine', 0.065);
+      beep(now, 320, 0.14, 'triangle', 0.13); beep(now + 0.2, 90, 0.32, 'sine', 0.2); beep(now + 0.48, 55, 0.22, 'sawtooth', 0.11);
+    } else if (effectId === 'curtain') {
+      [196, 247, 330, 392, 523].forEach((f, i) => beep(now + i * 0.11, f, 0.16, 'triangle', 0.1));
+    } else if (effectId === 'bubbles') {
+      [880, 1046, 1174, 1318].forEach((f, i) => beep(now + i * 0.11, f, 0.1, 'sine', 0.075));
+    } else if (effectId === 'spotlight') {
+      beep(now, 180, 0.42, 'sine', 0.11); beep(now + 0.22, 520, 0.24, 'triangle', 0.08);
+    } else if (effectId === 'freeze') {
+      [660, 440, 330].forEach((f, i) => beep(now + i * 0.08, f, 0.16, 'sine', 0.095));
     } else {
-      beep(now, 440, 0.1, 'sine', 0.035);
+      beep(now, 520, 0.14, 'sine', 0.1);
     }
   }
 
@@ -2465,6 +2489,7 @@
       inkStrokes: state.inkStrokes.slice(-220),
       slideThumbsCount: state.remoteSlideThumbsCount || 0,
       slideThumbsReadyAt: state.remoteSlideThumbsReadyAt || 0,
+      magicEffectVolume: state.magicEffectVolume,
       updatedAt: Date.now(),
     };
 
@@ -2661,6 +2686,10 @@
         runCountdownAlertPreview(mode);
         break;
       }
+      case 'setMagicEffectVolume':
+        setMagicEffectVolume(command.value, false);
+        publishSessionState();
+        break;
       case 'setTransitionEffect':
         state.transitionEffect = command.value || 'fade';
         applyTimerSettings();
@@ -2868,6 +2897,7 @@
     let remoteSlideThumbs = {};
     let remoteSlideThumbsLoading = false;
     let remoteLastThumbsReadyAt = 0;
+    let remoteMagicVolumeTimer = null;
 
     els.remoteApp.innerHTML = `
       <main id="remoteControlDashboard" class="remote-card remote-premium-card ${isHost ? '' : 'remote-viewer-only'}">
@@ -2910,7 +2940,13 @@
 
         <section class="remote-section remote-premium-section remote-magic-section" data-host-only="true">
           <div class="remote-section-title"><span>Magic Effects</span><small>Tap to show on desktop</small></div>
-          <div class="remote-magic-grid">
+          <button id="remoteMagicToggle" type="button" class="remote-magic-toggle" data-host-only="true">✨ Show Magic Effects</button>
+          <div class="remote-slider-stack remote-magic-volume-wrap">
+            <label>Effect volume <span id="remoteMagicVolumeLabel">160%</span>
+              <input id="remoteMagicVolume" type="range" min="0" max="220" step="5" value="160" data-host-only="true">
+            </label>
+          </div>
+          <div id="remoteMagicGrid" class="remote-magic-grid remote-magic-collapsed">
             ${MAGIC_EFFECTS.map((effect) => `<button type="button" class="remote-magic-btn" data-magic-effect="${effect.id}" data-host-only="true"><span>${effect.emoji}</span><strong>${effect.label}</strong><small>${effect.shortcut}</small></button>`).join('')}
           </div>
         </section>
@@ -3110,6 +3146,8 @@
         if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${data.timerOpacity ?? 75}%`;
         $('remoteTimerSize').value = data.timerSize ?? 28;
         if ($('remoteTimerSizeLabel')) $('remoteTimerSizeLabel').textContent = `${data.timerSize ?? 28}px`;
+        if ($('remoteMagicVolume')) $('remoteMagicVolume').value = data.magicEffectVolume ?? 160;
+        if ($('remoteMagicVolumeLabel')) $('remoteMagicVolumeLabel').textContent = `${data.magicEffectVolume ?? 160}%`;
         $('remoteAutoLabel').textContent = data.autoPlaying
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
@@ -3147,6 +3185,29 @@
           sendRemoteCommand(ref, 'magicEffect', button.dataset.magicEffect);
         });
       });
+      const magicToggle = $('remoteMagicToggle');
+      const magicGrid = $('remoteMagicGrid');
+      if (magicToggle && magicGrid) {
+        magicToggle.addEventListener('click', () => {
+          const isClosed = magicGrid.classList.toggle('remote-magic-collapsed');
+          magicToggle.textContent = isClosed ? '✨ Show Magic Effects' : '✨ Hide Magic Effects';
+        });
+      }
+      if ($('remoteMagicVolume')) {
+        const sendMagicVolume = () => {
+          if (!isHost) return;
+          const value = Number($('remoteMagicVolume').value) || 0;
+          sendRemoteCommand(ref, 'setMagicEffectVolume', value);
+        };
+        $('remoteMagicVolume').addEventListener('input', () => {
+          if (!isHost) return;
+          const value = Number($('remoteMagicVolume').value) || 0;
+          if ($('remoteMagicVolumeLabel')) $('remoteMagicVolumeLabel').textContent = `${value}%`;
+          clearTimeout(remoteMagicVolumeTimer);
+          remoteMagicVolumeTimer = setTimeout(sendMagicVolume, 120);
+        });
+        $('remoteMagicVolume').addEventListener('change', sendMagicVolume);
+      }
 
       const allSlidesBtn = $('remoteAllSlidesBtn');
       const slidesPanel = $('remoteSlidesPanel');

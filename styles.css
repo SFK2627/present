@@ -3042,3 +3042,148 @@ body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteControlDas
 @keyframes curtainRight { 0%, 20% { transform: translateX(0); } 100% { transform: translateX(105%); } }
 @keyframes magicRevealText { 0%,25% { opacity: 0; transform: scale(.92); } 45%,100% { opacity: 1; transform: scale(1); } }
 @keyframes spotlightSweep { 0% { background-position: 40% 50%; opacity: 0; } 20%,90% { opacity: 1; } 100% { background-position: 60% 50%; opacity: 0; } }
+
+/* Pro v10.9 Magic Effects upgrade: louder controls, collapsed phone panel, grand centered overlays */
+.remote-magic-toggle {
+  width: 100%;
+  min-height: 56px;
+  border: 1px solid rgba(167, 139, 250, .45);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(124, 92, 255, .9), rgba(42, 196, 214, .72));
+  color: #fff;
+  font-weight: 900;
+  font-size: clamp(.98rem, 3.8vw, 1.12rem);
+  letter-spacing: .01em;
+  box-shadow: 0 18px 40px rgba(90, 84, 255, .26), inset 0 1px 0 rgba(255,255,255,.28);
+}
+.remote-magic-toggle:active { transform: scale(.985); }
+.remote-magic-volume-wrap {
+  margin: 10px 0 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.055);
+}
+.remote-magic-collapsed { display: none !important; }
+.remote-magic-grid {
+  margin-top: 12px;
+  max-height: min(52dvh, 560px);
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+}
+.remote-magic-btn {
+  background: radial-gradient(circle at 30% 15%, rgba(255,255,255,.22), transparent 36%), linear-gradient(145deg, rgba(24,31,52,.94), rgba(38,43,76,.9));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 10px 28px rgba(0,0,0,.18);
+}
+.remote-magic-btn:active {
+  transform: translateY(1px) scale(.98);
+  filter: brightness(1.12);
+}
+.magic-effect-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: none;
+  place-items: center;
+  pointer-events: none;
+  overflow: hidden;
+  isolation: isolate;
+  background: radial-gradient(circle at center, rgba(15, 23, 42, .08), rgba(2, 6, 23, .26));
+}
+.magic-effect-layer.show {
+  display: grid !important;
+  opacity: 1;
+}
+.magic-effect-layer.hidden { display: none !important; }
+.magic-center {
+  left: 50% !important;
+  top: 50% !important;
+  transform: translate(-50%, -50%);
+  max-width: min(86vw, 900px);
+  width: max-content;
+  min-width: min(520px, 78vw);
+  text-align: center;
+  border-radius: clamp(26px, 5vw, 58px);
+  padding: clamp(26px, 5vw, 58px) clamp(30px, 6vw, 70px);
+  box-shadow: 0 34px 120px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.32);
+  backdrop-filter: blur(16px) saturate(150%);
+}
+.magic-grand {
+  background: linear-gradient(145deg, rgba(22, 28, 54, .78), rgba(94, 92, 230, .38));
+  border: 2px solid rgba(255,255,255,.24);
+}
+.magic-center strong {
+  font-size: clamp(2.6rem, 7vw, 7.2rem) !important;
+  letter-spacing: -.045em;
+  text-shadow: 0 8px 30px rgba(0,0,0,.35);
+}
+.magic-center small {
+  display: block;
+  margin-top: .45rem;
+  font-size: clamp(1.05rem, 2.6vw, 2.2rem) !important;
+  color: rgba(255,255,255,.84) !important;
+}
+.magic-emoji { font-size: clamp(4.2rem, 12vw, 10rem) !important; }
+.magic-particles {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+.magic-confetti,
+.magic-symbol,
+.magic-bubble {
+  left: var(--x);
+  top: -8vh;
+  transform: translate(-50%, 0);
+  filter: drop-shadow(0 10px 18px rgba(0,0,0,.24));
+}
+.magic-symbol { font-size: calc(var(--s) * 1.35) !important; }
+.magic-bubble {
+  width: calc(var(--s) * 1.7) !important;
+  height: calc(var(--s) * 1.7) !important;
+  border-width: 2px;
+  background: radial-gradient(circle at 34% 30%, rgba(255,255,255,.95), rgba(126,216,255,.18) 46%, rgba(147,197,253,.04) 72%);
+}
+.magic-glow-ring,
+.magic-stage-flash,
+.magic-vignette {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  pointer-events: none;
+}
+.magic-glow-ring {
+  width: min(92vw, 920px);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(124,92,255,.38), rgba(42,196,214,.22) 34%, transparent 68%);
+  animation: magicGlowPulse 1.35s ease-in-out infinite alternate;
+}
+.magic-glow-ring.rainbow { background: conic-gradient(from 0deg, rgba(244,114,182,.35), rgba(250,204,21,.35), rgba(52,211,153,.32), rgba(96,165,250,.35), rgba(167,139,250,.35), rgba(244,114,182,.35)); filter: blur(18px); }
+.magic-glow-ring.green { background: radial-gradient(circle, rgba(34,197,94,.38), rgba(20,184,166,.20) 36%, transparent 68%); }
+.magic-glow-ring.fire { background: radial-gradient(circle, rgba(249,115,22,.44), rgba(250,204,21,.28) 34%, transparent 70%); }
+.magic-stage-flash { inset: 0; width: 100%; height: 100%; background: radial-gradient(circle at center, rgba(255,255,255,.22), transparent 58%); animation: magicFlash .75s ease-out both; }
+.magic-stage-flash.red { background: radial-gradient(circle at center, rgba(239,68,68,.34), transparent 60%); }
+.magic-stage-flash.amber { background: radial-gradient(circle at center, rgba(245,158,11,.36), transparent 60%); }
+.magic-vignette { inset: 0; width: 100%; height: 100%; background: radial-gradient(circle at center, rgba(15,23,42,.08), rgba(0,0,0,.62)); }
+.magic-spotlight {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: radial-gradient(circle at center, transparent 0 19%, rgba(0,0,0,.78) 42%, rgba(0,0,0,.9) 100%);
+  animation: magicSpotlightPulse 1.4s ease-in-out infinite alternate;
+}
+.magic-curtain { z-index: 4; background: repeating-linear-gradient(90deg, #5b0f20, #8f1635 26px, #4c0b1b 52px); box-shadow: inset 0 0 80px rgba(0,0,0,.55); }
+.magic-reveal { z-index: 6; }
+@keyframes magicGlowPulse { from { transform: translate(-50%,-50%) scale(.78); opacity: .62; } to { transform: translate(-50%,-50%) scale(1.08); opacity: .96; } }
+@keyframes magicFlash { 0% { opacity: 0; } 35% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes magicSpotlightPulse { from { background: radial-gradient(circle at center, transparent 0 16%, rgba(0,0,0,.76) 40%, rgba(0,0,0,.92) 100%); } to { background: radial-gradient(circle at center, transparent 0 25%, rgba(0,0,0,.72) 48%, rgba(0,0,0,.92) 100%); } }
+@media (max-width: 700px) {
+  .remote-magic-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .remote-magic-btn { min-height: 68px; }
+}
