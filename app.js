@@ -1667,37 +1667,37 @@
     const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
     switch (effect.id) {
       case 'drumroll':
-        return `<div class="magic-glow-ring"></div><div class="magic-center magic-drum magic-grand"><div class="magic-emoji">🥁</div><strong>Drumroll...</strong><small>Get ready</small><span></span><span></span><span></span></div>`;
+        return `<div class="magic-stage-flash subtle"></div><div class="magic-center magic-plain magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-stick right"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span></div></div>`;
       case 'confetti':
-        return `<div class="magic-glow-ring rainbow"></div><div class="magic-center magic-pop magic-grand"><div class="magic-emoji">🎉</div><strong>Celebrate!</strong><small>Great work</small></div><div class="magic-particles">${makeParticles(126, 'magic-confetti')}</div>`;
+        return `<div class="magic-particles confetti-full">${makeParticles(220, 'magic-confetti')}</div>`;
       case 'micdrop':
-        return `<div class="magic-stage-flash"></div><div class="magic-center magic-drop magic-grand"><div class="magic-emoji">🎤</div><strong>Mic Drop</strong><small>That is the moment</small></div>`;
+        return `<div class="magic-stage-flash"></div><div class="magic-center magic-plain magic-micdrop-hero"><span class="magic-mic">🎤</span><span class="magic-mic-shadow"></span></div>`;
       case 'curtain':
-        return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-center magic-reveal magic-grand"><strong>Reveal</strong><small>Here we go</small></div>`;
+        return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-reveal-shine"></div>`;
       case 'bubbles':
-        return `<div class="magic-center magic-bubble-title magic-grand"><div class="magic-emoji">🫧</div><strong>Bubbles</strong></div><div class="magic-particles bubbles">${makeParticles(74, 'magic-bubble')}</div>`;
+        return `<div class="magic-particles bubbles-full">${makeParticles(170, 'magic-bubble')}</div>`;
       case 'quiet':
-        return `<div class="magic-vignette"></div><div class="magic-center magic-quiet magic-grand"><div class="magic-emoji">🤫</div><strong>Quiet please</strong><small>Eyes on the screen</small></div>`;
+        return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji">🤫</div><span class="magic-shush-wave one"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span></div>`;
       case 'applause':
-        return `<div class="magic-glow-ring"></div><div class="magic-center magic-pop magic-grand"><div class="magic-emoji">👏</div><strong>Applause!</strong><small>Well done</small></div><div class="magic-particles">${makeParticles(76, 'magic-symbol', ['👏','👏','✨','★'])}</div>`;
+        return `<div class="magic-particles applause-full">${makeParticles(120, 'magic-symbol', ['👏','👏','👏','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div></div>`;
       case 'spotlight':
-        return `<div class="magic-spotlight"></div><div class="magic-center magic-small magic-grand"><div class="magic-emoji">🔦</div><strong>Spotlight</strong></div>`;
+        return `<div class="magic-moving-spotlight one"></div><div class="magic-moving-spotlight two"></div><div class="magic-moving-spotlight three"></div>`;
       case 'correct':
-        return `<div class="magic-glow-ring green"></div><div class="magic-center magic-stamp correct magic-grand"><div class="magic-emoji">✅</div><strong>Correct!</strong></div><div class="magic-particles">${makeParticles(48, 'magic-symbol', ['✅','✨','★'])}</div>`;
+        return `<div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct"><div class="magic-mark">✅</div></div><div class="magic-particles">${makeParticles(72, 'magic-symbol', ['✅','✨','★'])}</div>`;
       case 'wrong':
-        return `<div class="magic-stage-flash red"></div><div class="magic-center magic-stamp wrong magic-grand"><div class="magic-emoji">❌</div><strong>Try again</strong></div>`;
+        return `<div class="magic-stage-flash red"></div><div class="magic-center magic-plain magic-big-mark wrong"><div class="magic-mark">❌</div></div><div class="magic-particles">${makeParticles(42, 'magic-symbol', ['❌','⚡'])}</div>`;
       case 'timesup':
-        return `<div class="magic-stage-flash amber"></div><div class="magic-center magic-time magic-grand"><div class="magic-emoji">⏰</div><strong>Time's Up!</strong></div>`;
+        return `<div class="magic-stage-flash amber"></div><div class="magic-center magic-plain magic-clock-wrap"><div class="magic-clock">⏰</div></div><div class="magic-time-rings"></div>`;
       case 'sparkle':
-        return `<div class="magic-glow-ring rainbow"></div><div class="magic-center magic-small magic-grand"><div class="magic-emoji">✨</div><strong>Sparkle</strong></div><div class="magic-particles">${makeParticles(90, 'magic-symbol', ['✨','✦','✧','★'])}</div>`;
+        return `<div class="magic-glow-ring rainbow"></div><div class="magic-particles">${makeParticles(130, 'magic-symbol', ['✨','✦','✧','★'])}</div><div class="magic-center magic-plain magic-sparkle-hero"><div class="magic-emoji">✨</div></div>`;
       case 'stars':
-        return `<div class="magic-center magic-small magic-grand"><div class="magic-emoji">🌟</div><strong>Star Rain</strong></div><div class="magic-particles">${makeParticles(98, 'magic-symbol', ['🌟','⭐','✦','★'])}</div>`;
+        return `<div class="magic-particles">${makeParticles(140, 'magic-symbol', ['🌟','⭐','✦','★'])}</div><div class="magic-center magic-plain magic-stars-hero"><div class="magic-emoji">🌟</div></div>`;
       case 'hype':
-        return `<div class="magic-glow-ring fire"></div><div class="magic-center magic-pop magic-grand"><div class="magic-emoji">🔥</div><strong>Hype!</strong><small>Energy up</small></div><div class="magic-particles">${makeParticles(88, 'magic-symbol', ['🔥','⚡','✨','★'])}</div>`;
+        return `<div class="magic-glow-ring fire"></div><div class="magic-particles">${makeParticles(120, 'magic-symbol', ['🔥','⚡','✨','★'])}</div><div class="magic-center magic-plain magic-hype-hero"><div class="magic-emoji">🔥</div></div>`;
       case 'freeze':
-        return `<div class="magic-freeze"></div><div class="magic-center magic-stamp freeze magic-grand"><div class="magic-emoji">🧊</div><strong>Freeze</strong></div>`;
+        return `<div class="magic-freeze"></div><div class="magic-particles">${makeParticles(110, 'magic-symbol', ['❄️','✦','✧','🧊'])}</div><div class="magic-center magic-plain magic-freeze-hero"><div class="magic-emoji">🧊</div></div>`;
       default:
-        return `<div class="magic-center magic-pop magic-grand"><div class="magic-emoji">${effect.emoji}</div><strong>${escapeHtml(effect.label)}</strong></div>`;
+        return `<div class="magic-center magic-plain magic-generic-hero"><div class="magic-emoji">${effect.emoji}</div></div>`;
     }
   }
 
@@ -1710,11 +1710,12 @@
     layer.classList.add('show');
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
+    const durations = { drumroll: 2600, confetti: 2500, micdrop: 2200, curtain: 2700, bubbles: 2600, quiet: 2200, applause: 2400, spotlight: 2400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       layer.classList.remove('show');
       layer.classList.add('hidden');
       layer.innerHTML = '';
-    }, effect.id === 'curtain' ? 2600 : 2200);
+    }, durations[effect.id] || 2200);
   }
 
   function getMagicEffectVolume() {
@@ -1862,86 +1863,100 @@
 
     switch (effectId) {
       case 'drumroll': {
-        for (let i = 0; i < 30; i++) {
-          noise(now + i * 0.038, 0.035, i % 2 ? 0.12 : 0.09, 'bandpass', i % 2 ? 1650 : 900, 1.9);
-          tone(now + i * 0.038, i % 2 ? 108 : 150, 0.035, 'square', 0.045);
+        for (let i = 0; i < 42; i++) {
+          const t = now + i * 0.03;
+          noise(t, 0.042, i % 2 ? 0.16 : 0.13, 'bandpass', i % 2 ? 1350 : 980, 2.2);
+          tone(t, i % 2 ? 148 : 118, 0.05, 'square', 0.055, i % 2 ? 128 : 104);
         }
-        boom(now + 1.16, 0.85);
-        cymbal(now + 1.18, 0.9);
+        for (let i = 0; i < 6; i++) {
+          tone(now + 0.98 + i * 0.04, 186 + i * 12, 0.08, 'triangle', 0.08, 110 + i * 8);
+        }
+        boom(now + 1.18, 1.0);
+        cymbal(now + 1.2, 1.1);
         break;
       }
       case 'confetti':
         fanfare(now, true);
-        sparkleRun(now + 0.18, 10, 1046);
+        sparkleRun(now + 0.12, 13, 1046);
+        cymbal(now + 0.24, 1.0);
         break;
       case 'correct':
-        chord(now, [523, 659, 784], 0.18, 'triangle', 0.09);
-        chord(now + 0.18, [659, 784, 1046], 0.26, 'triangle', 0.095);
-        tone(now + 0.38, 1568, 0.22, 'sine', 0.08);
-        cymbal(now + 0.28, 0.45);
+        chord(now, [523, 659, 784], 0.18, 'triangle', 0.1);
+        chord(now + 0.16, [659, 784, 1046], 0.28, 'triangle', 0.11);
+        tone(now + 0.34, 1568, 0.25, 'sine', 0.09);
+        cymbal(now + 0.22, 0.6);
         break;
       case 'sparkle':
+        sparkleRun(now, 12, 988);
+        noise(now + 0.12, 0.52, 0.05, 'highpass', 5600, 0.65);
+        break;
       case 'stars':
-        sparkleRun(now, effectId === 'stars' ? 13 : 9, 880);
-        noise(now + 0.14, 0.45, 0.045, 'highpass', 5500, 0.6);
+        sparkleRun(now, 15, 880);
+        chord(now + 0.16, [659, 784, 988], 0.24, 'triangle', 0.06);
+        noise(now + 0.12, 0.5, 0.045, 'highpass', 5200, 0.55);
         break;
       case 'hype':
-        whoosh(now, 0.46, 1.05);
-        boom(now + 0.34, 1.08);
-        fanfare(now + 0.38, true);
+        whoosh(now, 0.48, 1.08);
+        boom(now + 0.3, 1.15);
+        fanfare(now + 0.34, true);
+        cymbal(now + 0.56, 0.9);
         break;
       case 'applause':
-        for (let i = 0; i < 24; i++) noise(now + i * 0.045 + Math.random() * 0.018, 0.045, 0.105, 'bandpass', 1600 + Math.random() * 1800, 0.85);
-        sparkleRun(now + 0.22, 6, 988);
+        for (let i = 0; i < 34; i++) noise(now + i * 0.034 + Math.random() * 0.022, 0.045, 0.12, 'bandpass', 1400 + Math.random() * 2600, 0.9);
+        sparkleRun(now + 0.18, 8, 988);
         break;
       case 'wrong':
-        tone(now, 190, 0.26, 'sawtooth', 0.19, 128);
-        tone(now + 0.22, 142, 0.35, 'sawtooth', 0.21, 88);
-        noise(now, 0.42, 0.065, 'lowpass', 500, 0.8);
+        tone(now, 190, 0.26, 'sawtooth', 0.21, 128);
+        tone(now + 0.18, 142, 0.36, 'sawtooth', 0.23, 88);
+        noise(now, 0.44, 0.08, 'lowpass', 500, 0.8);
         break;
       case 'timesup':
-        [988, 988, 740, 554].forEach((freq, i) => tone(now + i * 0.15, freq, 0.12, 'sine', 0.105));
-        boom(now + 0.55, 0.72);
+        for (let i = 0; i < 5; i++) tone(now + i * 0.18, 1046, 0.08, 'square', 0.09);
+        tone(now + 0.12, 1318, 0.08, 'square', 0.08);
+        tone(now + 0.3, 1318, 0.08, 'square', 0.08);
+        tone(now + 0.48, 1318, 0.08, 'square', 0.08);
+        boom(now + 0.88, 0.8);
+        cymbal(now + 0.92, 0.75);
         break;
       case 'quiet':
-        whoosh(now, 0.38, 0.35);
-        noise(now + 0.04, 0.72, 0.085, 'highpass', 2400, 0.45);
+        whoosh(now, 0.42, 0.42);
+        noise(now + 0.04, 0.78, 0.09, 'highpass', 2600, 0.46);
         if ('speechSynthesis' in window) {
           try {
             window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance('Shhh. Quiet please.');
-            utter.rate = 0.78;
-            utter.pitch = 0.68;
-            utter.volume = Math.min(1, 0.78 * volume);
+            const utter = new SpeechSynthesisUtterance('Shhhhhhh.');
+            utter.rate = 0.64;
+            utter.pitch = 0.6;
+            utter.volume = Math.min(1, 0.9 * volume);
             window.speechSynthesis.speak(utter);
           } catch (error) {}
         }
         break;
       case 'micdrop':
-        whoosh(now, 0.26, 0.55);
-        tone(now + 0.08, 360, 0.12, 'triangle', 0.11, 180);
-        boom(now + 0.27, 1.25);
-        noise(now + 0.31, 0.34, 0.12, 'lowpass', 260, 0.65);
+        whoosh(now, 0.28, 0.6);
+        tone(now + 0.08, 360, 0.12, 'triangle', 0.12, 180);
+        boom(now + 0.28, 1.3);
+        noise(now + 0.32, 0.36, 0.13, 'lowpass', 260, 0.65);
         break;
       case 'curtain':
-        whoosh(now, 0.72, 1.05);
-        chord(now + 0.16, [196, 247, 330], 0.38, 'triangle', 0.085);
-        chord(now + 0.52, [392, 494, 659, 784], 0.42, 'triangle', 0.085);
-        cymbal(now + 0.78, 0.7);
+        whoosh(now, 0.75, 1.12);
+        chord(now + 0.14, [196, 247, 330], 0.42, 'triangle', 0.09);
+        chord(now + 0.48, [392, 494, 659, 784], 0.46, 'triangle', 0.09);
+        cymbal(now + 0.8, 0.82);
         break;
       case 'bubbles':
-        [784, 932, 1046, 1174, 1396, 1568].forEach((freq, i) => tone(now + i * 0.075, freq, 0.09, 'sine', 0.055, freq * 1.16));
-        noise(now + 0.18, 0.32, 0.035, 'highpass', 4800, 0.5);
+        [784, 932, 1046, 1174, 1396, 1568, 1760].forEach((freq, i) => tone(now + i * 0.065, freq, 0.1, 'sine', 0.06, freq * 1.18));
+        noise(now + 0.16, 0.42, 0.04, 'highpass', 5200, 0.55);
         break;
       case 'spotlight':
-        whoosh(now, 0.42, 0.7);
-        tone(now + 0.22, 520, 0.22, 'triangle', 0.09, 760);
-        tone(now + 0.34, 1046, 0.28, 'sine', 0.07);
+        whoosh(now, 0.44, 0.78);
+        tone(now + 0.18, 520, 0.18, 'triangle', 0.1, 760);
+        tone(now + 0.34, 1046, 0.24, 'sine', 0.08);
         break;
       case 'freeze':
-        [1046, 880, 740, 622].forEach((freq, i) => tone(now + i * 0.07, freq, 0.15, 'sine', 0.06));
-        noise(now + 0.18, 0.36, 0.055, 'highpass', 6000, 0.75);
-        tone(now + 0.42, 330, 0.28, 'triangle', 0.075, 220);
+        [1174, 988, 880, 740, 622].forEach((freq, i) => tone(now + i * 0.06, freq, 0.16, 'sine', 0.065));
+        noise(now + 0.16, 0.42, 0.06, 'highpass', 6200, 0.78);
+        tone(now + 0.42, 330, 0.3, 'triangle', 0.08, 210);
         break;
       default:
         fanfare(now, false);
