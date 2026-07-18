@@ -26,6 +26,9 @@
     activeFile: null,
     activePdf: null,
     activePptxSlides: [],
+    pptxVisualReady: false,
+    pptxRenderedSlides: [],
+    pptxBlobUrl: '',
     currentPage: 1,
     totalPages: 1,
     zoom: 1,
@@ -71,6 +74,9 @@
     await loadLibrary();
     renderLibrary();
     registerServiceWorker();
+    window.addEventListener('resize', () => {
+      if (state.activeFile && state.activeFile.type === 'pptx' && state.pptxVisualReady) showOnlyCurrentPptxSlide();
+    });
   }
 
   function cacheElements() {
@@ -530,6 +536,12 @@
     state.perPageTiming = {};
     state.activePdf = null;
     state.activePptxSlides = [];
+    state.pptxVisualReady = false;
+    state.pptxRenderedSlides = [];
+    if (state.pptxBlobUrl) {
+      URL.revokeObjectURL(state.pptxBlobUrl);
+      state.pptxBlobUrl = '';
+    }
 
     file.lastViewed = new Date().toISOString();
     await dbPut(file);
@@ -549,9 +561,13 @@
         state.activePdf = await pdfjsLib.getDocument({ data: buffer }).promise;
         state.totalPages = state.activePdf.numPages;
       } else {
-        state.activePptxSlides = await parsePptxSlides(file.blob);
-        state.totalPages = state.activePptxSlides.length;
+        await preparePptxVisualRenderer(file.blob);
+        if (!state.pptxVisualReady) {
+          state.activePptxSlides = await parsePptxSlides(file.blob);
+          state.totalPages = state.activePptxSlides.length;
+        }
       }
+      file.pageCount = state.totalPages;
       els.pageTotalLabel.textContent = `/ ${state.totalPages}`;
       els.jumpInput.max = state.totalPages;
       renderThumbnailSidebar();
@@ -575,10 +591,144 @@
     if (state.activePdf && state.activePdf.destroy) state.activePdf.destroy();
     state.activePdf = null;
     state.activePptxSlides = [];
+    state.pptxVisualReady = false;
+    state.pptxRenderedSlides = [];
+    if (state.pptxBlobUrl) {
+      URL.revokeObjectURL(state.pptxBlobUrl);
+      state.pptxBlobUrl = '';
+    }
     state.activeFile = null;
     els.viewerView.classList.add('hidden');
     els.homeView.classList.remove('hidden');
     renderLibrary();
+  }
+
+  async function preparePptxVisualRenderer(blob) {
+    state.pptxVisualReady = false;
+    state.pptxRenderedSlides = [];
+    els.pptxSlide.classList.remove('hidden');
+    els.pptxSlide.classList.add('visual-pptx');
+    els.pptxSlide.style.transform = '';
+    els.pptxSlide.innerHTML = '<div class="viewer-message">Rendering PowerPoint visually...</div>';
+
+    if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.pptxToHtml) {
+      console.warn('PPTXjs visual renderer is not available. Falling back to text preview.');
+      return;
+    }
+
+    try {
+      state.pptxBlobUrl = URL.createObjectURL(blob);
+      await new Promise((resolve, reject) => {
+        const host = window.jQuery(els.pptxSlide);
+        host.empty();
+
+        try {
+          host.pptxToHtml({
+            pptxFileUrl: state.pptxBlobUrl,
+            slidesScale: '100%',
+            slideMode: false,
+            keyBoardShortCut: false,
+            mediaProcess: true,
+            themeProcess: true,
+            incSlide: { height: 2, width: 2 },
+            jsZipV2: 'https://cdn.jsdelivr.net/gh/meshesha/PPTXjs@master/js/jszip.min.js',
+          });
+        } catch (error) {
+          reject(error);
+          return;
+        }
+
+        let tries = 0;
+        const timer = setInterval(() => {
+          const slides = collectPptxRenderedSlides();
+          if (slides.length) {
+            clearInterval(timer);
+            state.pptxRenderedSlides = slides;
+            state.pptxVisualReady = true;
+            state.totalPages = slides.length;
+            slides.forEach((slide, index) => {
+              slide.classList.add('pptx-rendered-slide');
+              slide.dataset.pageNumber = String(index + 1);
+            });
+            resolve();
+            return;
+          }
+
+          tries += 1;
+          if (tries > 140) {
+            clearInterval(timer);
+            reject(new Error('PPTX visual renderer timed out.'));
+          }
+        }, 150);
+      });
+    } catch (error) {
+      console.warn('PPTX visual rendering failed:', error);
+      state.pptxVisualReady = false;
+      state.pptxRenderedSlides = [];
+      els.pptxSlide.classList.remove('visual-pptx');
+    }
+  }
+
+  function collectPptxRenderedSlides() {
+    const host = els.pptxSlide;
+    if (!host) return [];
+
+    const selector = [
+      '.slide',
+      '.pptx-slide',
+      '.pptxjs-slide',
+      '.slide-wrapper',
+      '.slideContainer',
+      '.pptx-page',
+      '.presentation-slide',
+      '.reveal section',
+    ].join(',');
+
+    let candidates = Array.from(host.querySelectorAll(selector))
+      .filter((el) => el !== host && !el.closest('.thumb-item'));
+
+    if (!candidates.length) {
+      candidates = Array.from(host.children).filter((el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 250 || rect.height > 150 || /px|%/.test(style.width + style.height);
+      });
+    }
+
+    const unique = [];
+    for (const el of candidates) {
+      if (unique.some((item) => item.contains(el))) continue;
+      unique.push(el);
+    }
+    return unique;
+  }
+
+  function showOnlyCurrentPptxSlide() {
+    if (!state.pptxVisualReady || !state.pptxRenderedSlides.length) return;
+    const current = state.pptxRenderedSlides[state.currentPage - 1] || state.pptxRenderedSlides[0];
+    const maxWidth = Math.max(320, window.innerWidth - 300);
+    const maxHeight = Math.max(240, window.innerHeight - 110);
+
+    state.pptxRenderedSlides.forEach((slide) => {
+      slide.style.display = 'none';
+      slide.style.visibility = 'visible';
+      slide.style.transformOrigin = 'center center';
+    });
+
+    current.style.display = 'block';
+    current.style.transform = 'none';
+    current.style.margin = '0 auto';
+
+    const rect = current.getBoundingClientRect();
+    const naturalWidth = current.offsetWidth || rect.width || 960;
+    const naturalHeight = current.offsetHeight || rect.height || 540;
+    const fitScale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight, 1.3);
+    const finalScale = Math.max(0.15, fitScale * state.zoom);
+
+    current.style.transform = `scale(${finalScale})`;
+    els.pptxSlide.style.width = `${naturalWidth * finalScale}px`;
+    els.pptxSlide.style.height = `${naturalHeight * finalScale}px`;
+    els.pptxSlide.style.transform = '';
   }
 
   async function renderCurrentPage() {
@@ -604,13 +754,18 @@
     } else {
       els.pdfCanvas.classList.add('hidden');
       els.pptxSlide.classList.remove('hidden');
-      const slide = state.activePptxSlides[state.currentPage - 1] || { title: `Slide ${state.currentPage}`, lines: [] };
-      els.pptxSlide.style.transform = `scale(${state.zoom})`;
-      els.pptxSlide.innerHTML = `
-        <h2>${escapeHtml(slide.title)}</h2>
-        ${slide.lines.slice(0, 8).map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
-        <div class="pptx-note">Static PPTX preview. Convert PPTX to PDF for exact layout, images, and formatting.</div>
-      `;
+      if (state.pptxVisualReady) {
+        showOnlyCurrentPptxSlide();
+      } else {
+        els.pptxSlide.classList.remove('visual-pptx');
+        const slide = state.activePptxSlides[state.currentPage - 1] || { title: `Slide ${state.currentPage}`, lines: [] };
+        els.pptxSlide.style.transform = `scale(${state.zoom})`;
+        els.pptxSlide.innerHTML = `
+          <h2>${escapeHtml(slide.title)}</h2>
+          ${slide.lines.slice(0, 8).map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+          <div class="pptx-note">Visual PPTX renderer did not load. For perfect layout, export this PowerPoint as PDF and upload the PDF.</div>
+        `;
+      }
     }
     updateZoomLabel();
     publishSessionState();
@@ -660,11 +815,24 @@
       await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
       wrap.appendChild(canvas);
     } else {
-      const slide = state.activePptxSlides[pageNumber - 1] || { title: `Slide ${pageNumber}` };
-      const img = document.createElement('img');
-      img.alt = `Slide ${pageNumber}`;
-      img.src = createPptxThumbDataUrl(slide.title, pageNumber);
-      wrap.appendChild(img);
+      if (state.pptxVisualReady && state.pptxRenderedSlides[pageNumber - 1]) {
+        const clone = state.pptxRenderedSlides[pageNumber - 1].cloneNode(true);
+        clone.style.display = 'block';
+        clone.style.transformOrigin = 'top left';
+        clone.style.transform = 'scale(0.16)';
+        clone.style.margin = '0';
+        clone.style.pointerEvents = 'none';
+        const thumbShell = document.createElement('div');
+        thumbShell.className = 'pptx-thumb-shell';
+        thumbShell.appendChild(clone);
+        wrap.appendChild(thumbShell);
+      } else {
+        const slide = state.activePptxSlides[pageNumber - 1] || { title: `Slide ${pageNumber}` };
+        const img = document.createElement('img');
+        img.alt = `Slide ${pageNumber}`;
+        img.src = createPptxThumbDataUrl(slide.title, pageNumber);
+        wrap.appendChild(img);
+      }
     }
   }
 
@@ -898,6 +1066,14 @@
         return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 0.16);
       }
       if (state.activeFile.type === 'pptx') {
+        if (state.pptxVisualReady && window.html2canvas && state.pptxRenderedSlides[state.currentPage - 1]) {
+          const canvas = await window.html2canvas(state.pptxRenderedSlides[state.currentPage - 1], {
+            backgroundColor: null,
+            scale: 0.35,
+            logging: false,
+          });
+          return canvas.toDataURL('image/jpeg', 0.72);
+        }
         const slide = state.activePptxSlides[state.currentPage - 1];
         return createPptxThumbDataUrl(slide ? slide.title : `Slide ${state.currentPage}`, state.currentPage);
       }

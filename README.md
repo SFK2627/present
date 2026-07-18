@@ -1,70 +1,40 @@
-# Presentation Hub - Static Website Version
+# Presentation Hub - Website Only Version
 
-Ito yung **website lang** version. Hindi ito React/Vite project, kaya hindi kailangan ng `npm install` or `npm run dev`.
+This is the static website version of Presentation Hub. You can open `index.html` directly or upload the folder to static hosting.
 
-## Paano gamitin
+## What works locally
 
-1. I-extract ang ZIP.
-2. Buksan ang folder.
-3. I-double click ang `index.html`.
-4. Upload ng PDF or PPTX.
+- Upload multiple PDF and PPTX files
+- Search and sort presentation cards
+- Open presentations
+- PDF rendering with real page layout, images, colors, and thumbnails using PDF.js
+- PPTX visual rendering using PPTXjs when online/CDN scripts are available
+- Next / Previous / Jump page
+- Fullscreen
+- Auto-slide timing
+- Timer overlay
+- Dark mode
 
-Pwede rin i-upload ang buong folder sa Netlify, Firebase Hosting, GitHub Pages, Hostinger, cPanel, or kahit anong static hosting.
+## Important PPTX note
 
-## Important notes
+The app now attempts to render PowerPoint slides visually, including colors, images, and layouts, through PPTXjs.
 
-### PDF
-PDF files are fully viewable using PDF.js:
+However, browser-only PowerPoint rendering is still not as perfect as PowerPoint itself. For the most accurate output, especially for complex PowerPoint files with custom fonts, animations, SmartArt, or unusual layouts, export the PPTX as PDF first and upload the PDF. PDF mode is the most accurate mode.
 
-- high quality page rendering
-- thumbnails
-- next/previous
-- jump to page
-- fullscreen
-- zoom
-- auto slide
-- timer overlay
+## Firebase remote setup
 
-### PPTX
-PPTX is supported in **static fallback mode**:
+Your Firebase config is already placed in `firebase-config.js`.
 
-- app reads PPTX slide count
-- app extracts slide text
-- app displays simplified slide previews
+To make phone remote work:
 
-But for exact PowerPoint layout, images, animations, fonts, and formatting, convert the PPTX to PDF first, then upload the PDF. This is a browser limitation. Accurate PowerPoint rendering normally needs a conversion backend like LibreOffice or Microsoft Office rendering.
-
-## Phone remote control
-
-The app includes QR remote support, but phone-to-desktop syncing needs Firebase because two different devices need a realtime backend.
-
-To enable:
-
-1. Create a Firebase project.
-2. Create a Web App.
-3. Enable Firestore Database.
-4. Enable Anonymous Authentication.
-5. Edit `firebase-config.js` and paste your Firebase web config.
-6. Upload the website folder to a static host.
-7. Open a presentation, click **Remote QR**, then scan from phone.
-
-Example `firebase-config.js`:
-
-```js
-window.PRESENTATION_HUB_FIREBASE_CONFIG = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-```
-
-Recommended Firestore rules for testing:
+1. Open Firebase Console.
+2. Enable Authentication > Anonymous.
+3. Create Firestore Database.
+4. Add these Firestore rules:
 
 ```txt
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     match /presentationHubSessions/{sessionId} {
@@ -74,21 +44,6 @@ service cloud.firestore {
 }
 ```
 
-For production, tighten the rules with session ownership or access tokens.
+## Best way to use with phone remote
 
-## Files
-
-- `index.html` - main website
-- `styles.css` - full responsive UI design
-- `app.js` - presentation logic
-- `firebase-config.js` - optional Firebase config
-- `manifest.webmanifest` - PWA metadata
-- `sw.js` - offline shell caching
-- `icon.svg` - app icon
-
-## Keyboard shortcuts
-
-- Arrow Right: next page/slide
-- Arrow Left: previous page/slide
-- F: fullscreen
-- Esc: exit fullscreen
+Upload the whole folder to Netlify, Firebase Hosting, GitHub Pages, or any web host. Phone remote works best when both laptop and phone open the same hosted website URL.
