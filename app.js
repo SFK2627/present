@@ -2339,6 +2339,52 @@
     return '';
   }
 
+
+  function removeRemoteFullscreenPrompt() {
+    const old = document.getElementById('fullscreenRequestPrompt');
+    if (old) old.remove();
+  }
+
+  function showRemoteFullscreenRequestPrompt() {
+    removeRemoteFullscreenPrompt();
+    if (!els.viewerView) return;
+    const prompt = document.createElement('div');
+    prompt.id = 'fullscreenRequestPrompt';
+    prompt.className = 'fullscreen-request-prompt';
+    prompt.innerHTML = `
+      <div class="fullscreen-request-card">
+        <strong>Phone requested fullscreen</strong>
+        <span>Browsers require one tap on this desktop screen before entering fullscreen.</span>
+        <div class="fullscreen-request-actions">
+          <button id="fullscreenRequestEnter" type="button">Enter Fullscreen</button>
+          <button id="fullscreenRequestDismiss" type="button">Dismiss</button>
+        </div>
+      </div>
+    `;
+    const root = document.fullscreenElement || els.viewerView || document.body;
+    root.appendChild(prompt);
+    revealToolbarTemporarily();
+    const enter = prompt.querySelector('#fullscreenRequestEnter');
+    const dismiss = prompt.querySelector('#fullscreenRequestDismiss');
+    if (enter) enter.addEventListener('click', async () => {
+      try { await toggleFullscreen(); } finally { removeRemoteFullscreenPrompt(); }
+    });
+    if (dismiss) dismiss.addEventListener('click', removeRemoteFullscreenPrompt);
+    window.setTimeout(() => {
+      if (document.getElementById('fullscreenRequestPrompt')) revealToolbarTemporarily();
+    }, 120);
+  }
+
+  function handleRemoteFullscreenToggle() {
+    if (isPresentationFullscreen() || document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+    // A remote phone/Firebase command is not considered a user gesture by desktop browsers,
+    // so entering fullscreen silently is blocked. Show a desktop-side one-tap prompt instead.
+    showRemoteFullscreenRequestPrompt();
+  }
+
   async function applyRemoteCommand(command) {
     switch (command.action) {
       case 'next': nextPage(); break;
@@ -2354,7 +2400,7 @@
       case 'zoomIn': setZoom(state.zoom + 0.1); break;
       case 'zoomOut': setZoom(state.zoom - 0.1); break;
       case 'resetZoom': setZoom(1, { centerX: 0.5, centerY: 0.5 }); break;
-      case 'toggleFullscreen': toggleFullscreen(); break;
+      case 'toggleFullscreen': handleRemoteFullscreenToggle(); break;
       case 'setZoom': setZoom(Number(command.value) || 1); break;
       case 'setViewport': setViewportTransform(command.value || {}); break;
       case 'autoStart': startAutoPlay(); break;
@@ -2857,7 +2903,7 @@
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
         applyRemoteFullPreviewTransform(remoteViewport);
-        renderRemoteSlidesGrid(data, ref, isHost);
+        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost);
         renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
       });
 
@@ -2867,10 +2913,28 @@
           sendRemoteCommand(ref, button.dataset.command);
         });
       });
+
+      const allSlidesBtn = $('remoteAllSlidesBtn');
+      const slidesPanel = $('remoteSlidesPanel');
+      const closeSlidesBtn = $('remoteCloseSlides');
+      if (allSlidesBtn && slidesPanel) {
+        allSlidesBtn.addEventListener('click', () => {
+          if (!isHost) return;
+          slidesPanel.classList.remove('hidden');
+          renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost);
+          sendRemoteCommand(ref, 'requestSlideThumbs');
+        });
+      }
+      if (closeSlidesBtn && slidesPanel) {
+        closeSlidesBtn.addEventListener('click', () => {
+          slidesPanel.classList.add('hidden');
+        });
+      }
+
       attachRemotePreviewControls(ref, isHost, () => remoteViewport, (next) => {
         remoteViewport = next;
         applyRemoteFullPreviewTransform(remoteViewport);
-        renderRemoteSlidesGrid(data, ref, isHost);
+        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost);
         renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
       });
       $('remoteTimingMode').addEventListener('change', () => {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-annotate-slides-1';
+const CACHE_NAME = 'presentation-hub-button-restore-v1';
 const APP_SHELL = [
   './',
   './index.html',

@@ -2424,3 +2424,57 @@ body.remote-fullscreen-open .remote-portrait-preview .remote-full-stage img {
   .remote-draw-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .remote-slide-choice { min-height: 92px; }
 }
+
+
+/* Remote fullscreen request prompt shown on the desktop viewer when phone host asks to enter fullscreen. */
+.fullscreen-request-prompt {
+  position: absolute;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, .28);
+  backdrop-filter: blur(5px);
+}
+.fullscreen-request-card {
+  width: min(420px, calc(100vw - 32px));
+  padding: 20px;
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: linear-gradient(155deg, rgba(15,23,42,.96), rgba(30,41,59,.92));
+  color: #fff;
+  box-shadow: 0 24px 90px rgba(0,0,0,.45);
+  display: grid;
+  gap: 10px;
+  text-align: center;
+}
+.fullscreen-request-card strong {
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+.fullscreen-request-card span {
+  color: rgba(226,232,240,.82);
+  line-height: 1.45;
+}
+.fullscreen-request-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 6px;
+}
+.fullscreen-request-actions button {
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.10);
+  color: #fff;
+  font-weight: 900;
+}
+.fullscreen-request-actions button:first-child {
+  background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+  border-color: transparent;
+}
+.viewer-view { position: relative; }
+.remote-slides-panel { z-index: 100001; }
+.remote-full-preview { z-index: 100002; }
