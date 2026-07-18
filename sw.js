@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-pinch-first-v1';
+const CACHE_NAME = 'presentation-hub-pro-v10-magic-effects-v1';
 const CORE_ASSETS = [
   './',
   './index.html',

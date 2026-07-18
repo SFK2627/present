@@ -89,9 +89,35 @@
     remoteSlideThumbs: {},
     remoteSlideThumbsCount: 0,
     remoteSlideThumbsBusy: false,
+    magicEffectTimer: null,
   };
 
 
+
+
+  const MAGIC_EFFECTS = [
+    { id: 'drumroll', label: 'Drumroll', emoji: '🥁', shortcut: 'D', hint: 'Suspense before reveal' },
+    { id: 'confetti', label: 'Confetti', emoji: '🎉', shortcut: 'C', hint: 'Celebration burst' },
+    { id: 'micdrop', label: 'Mic Drop', emoji: '🎤', shortcut: 'M', hint: 'Strong ending moment' },
+    { id: 'curtain', label: 'Curtain Reveal', emoji: '🎭', shortcut: 'U', hint: 'Reveal with curtains' },
+    { id: 'bubbles', label: 'Bubbles', emoji: '🫧', shortcut: 'O', hint: 'Light floating effect' },
+    { id: 'quiet', label: 'Quiet / Shoosh', emoji: '🤫', shortcut: 'Q', hint: 'Calm class reminder' },
+    { id: 'applause', label: 'Applause', emoji: '👏', shortcut: 'P', hint: 'Clap for students' },
+    { id: 'spotlight', label: 'Spotlight', emoji: '🔦', shortcut: 'S', hint: 'Focus attention' },
+    { id: 'correct', label: 'Correct Stamp', emoji: '✅', shortcut: 'A', hint: 'Correct answer' },
+    { id: 'wrong', label: 'Wrong Buzzer', emoji: '❌', shortcut: 'X', hint: 'Fun wrong answer' },
+    { id: 'timesup', label: "Time's Up", emoji: '⏰', shortcut: 'T', hint: 'End of time' },
+    { id: 'sparkle', label: 'Sparkle', emoji: '✨', shortcut: 'K', hint: 'Highlight moment' },
+    { id: 'stars', label: 'Star Rain', emoji: '🌟', shortcut: 'R', hint: 'Soft celebration' },
+    { id: 'hype', label: 'Hype Burst', emoji: '🔥', shortcut: 'H', hint: 'Energy boost' },
+    { id: 'freeze', label: 'Freeze', emoji: '🧊', shortcut: 'Z', hint: 'Pause for suspense' },
+  ];
+
+  const MAGIC_EFFECT_MAP = MAGIC_EFFECTS.reduce((acc, effect) => {
+    acc[effect.id] = effect;
+    acc[effect.shortcut.toLowerCase()] = effect;
+    return acc;
+  }, {});
 
   const COUNTDOWN_VOICE_STYLES = {
     'soft-female': {
@@ -1603,12 +1629,149 @@
     els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
   }
 
+
+  function getMagicEffectByShortcut(key) {
+    if (!key || key.length !== 1) return null;
+    return MAGIC_EFFECT_MAP[key.toLowerCase()] || null;
+  }
+
+  function createMagicLayer() {
+    let layer = document.getElementById('magicEffectLayer');
+    if (layer) return layer;
+    layer = document.createElement('div');
+    layer.id = 'magicEffectLayer';
+    layer.className = 'magic-effect-layer hidden';
+    const host = els.viewerStage || els.viewerView || document.body;
+    host.appendChild(layer);
+    return layer;
+  }
+
+  function makeParticles(count, className, symbols = []) {
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const x = Math.round(Math.random() * 100);
+      const delay = (Math.random() * 0.85).toFixed(2);
+      const drift = Math.round((Math.random() - 0.5) * 140);
+      const size = Math.round(10 + Math.random() * 18);
+      const symbol = symbols.length ? symbols[i % symbols.length] : '';
+      items.push(`<i class="${className}" style="--x:${x}%;--d:${delay}s;--drift:${drift}px;--s:${size}px">${symbol}</i>`);
+    }
+    return items.join('');
+  }
+
+  function magicEffectMarkup(effectId) {
+    const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
+    switch (effect.id) {
+      case 'drumroll':
+        return `<div class="magic-center magic-drum"><div class="magic-emoji">🥁</div><strong>Drumroll...</strong><span></span><span></span><span></span></div>`;
+      case 'confetti':
+        return `<div class="magic-center magic-pop"><div class="magic-emoji">🎉</div><strong>Celebrate!</strong></div><div class="magic-particles">${makeParticles(72, 'magic-confetti')}</div>`;
+      case 'micdrop':
+        return `<div class="magic-center magic-drop"><div class="magic-emoji">🎤</div><strong>Mic Drop</strong></div>`;
+      case 'curtain':
+        return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-center magic-reveal"><strong>Reveal</strong></div>`;
+      case 'bubbles':
+        return `<div class="magic-particles bubbles">${makeParticles(32, 'magic-bubble')}</div>`;
+      case 'quiet':
+        return `<div class="magic-center magic-quiet"><div class="magic-emoji">🤫</div><strong>Quiet please</strong><small>Eyes on the screen</small></div>`;
+      case 'applause':
+        return `<div class="magic-center magic-pop"><div class="magic-emoji">👏</div><strong>Applause!</strong></div><div class="magic-particles">${makeParticles(34, 'magic-symbol', ['👏','👏','✨'])}</div>`;
+      case 'spotlight':
+        return `<div class="magic-spotlight"></div><div class="magic-center magic-small"><strong>Spotlight</strong></div>`;
+      case 'correct':
+        return `<div class="magic-center magic-stamp correct"><div class="magic-emoji">✅</div><strong>Correct!</strong></div>`;
+      case 'wrong':
+        return `<div class="magic-center magic-stamp wrong"><div class="magic-emoji">❌</div><strong>Try again</strong></div>`;
+      case 'timesup':
+        return `<div class="magic-center magic-time"><div class="magic-emoji">⏰</div><strong>Time's Up!</strong></div>`;
+      case 'sparkle':
+        return `<div class="magic-center magic-small"><div class="magic-emoji">✨</div><strong>Sparkle</strong></div><div class="magic-particles">${makeParticles(46, 'magic-symbol', ['✨','✦','✧'])}</div>`;
+      case 'stars':
+        return `<div class="magic-particles">${makeParticles(54, 'magic-symbol', ['🌟','⭐','✦'])}</div>`;
+      case 'hype':
+        return `<div class="magic-center magic-pop"><div class="magic-emoji">🔥</div><strong>Hype!</strong></div><div class="magic-particles">${makeParticles(46, 'magic-symbol', ['🔥','⚡','✨'])}</div>`;
+      case 'freeze':
+        return `<div class="magic-freeze"></div><div class="magic-center magic-stamp freeze"><div class="magic-emoji">🧊</div><strong>Freeze</strong></div>`;
+      default:
+        return `<div class="magic-center magic-pop"><div class="magic-emoji">${effect.emoji}</div><strong>${escapeHtml(effect.label)}</strong></div>`;
+    }
+  }
+
+  function triggerMagicEffect(effectId) {
+    const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
+    const layer = createMagicLayer();
+    layer.className = `magic-effect-layer magic-${effect.id}`;
+    layer.innerHTML = magicEffectMarkup(effect.id);
+    void layer.offsetWidth;
+    layer.classList.add('show');
+    playMagicEffectSound(effect.id);
+    clearTimeout(state.magicEffectTimer);
+    state.magicEffectTimer = setTimeout(() => {
+      layer.classList.remove('show');
+      layer.classList.add('hidden');
+      layer.innerHTML = '';
+    }, effect.id === 'curtain' ? 2600 : 2200);
+  }
+
+  function playMagicEffectSound(effectId) {
+    primePresentationAudio();
+    if (!state.audioContext) return;
+    const ctx = state.audioContext;
+    const now = ctx.currentTime;
+    const beep = (time, freq, duration = 0.11, type = 'sine', gainValue = 0.055) => {
+      try {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, time);
+        gain.gain.setValueAtTime(0.0001, time);
+        gain.gain.exponentialRampToValueAtTime(gainValue, time + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(time);
+        osc.stop(time + duration + 0.02);
+      } catch (error) {}
+    };
+    if (effectId === 'drumroll') {
+      for (let i = 0; i < 10; i++) beep(now + i * 0.09, i % 2 ? 96 : 132, 0.055, 'square', 0.04);
+    } else if (effectId === 'confetti' || effectId === 'correct' || effectId === 'sparkle' || effectId === 'stars' || effectId === 'hype') {
+      [523, 659, 784, 1046].forEach((f, i) => beep(now + i * 0.08, f, 0.12, 'triangle', 0.045));
+    } else if (effectId === 'wrong') {
+      beep(now, 180, 0.18, 'sawtooth', 0.05); beep(now + 0.18, 120, 0.22, 'sawtooth', 0.05);
+    } else if (effectId === 'timesup' || effectId === 'bell') {
+      [880, 880, 660].forEach((f, i) => beep(now + i * 0.18, f, 0.14, 'sine', 0.045));
+    } else if (effectId === 'quiet') {
+      if ('speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance('Shhh');
+          utter.rate = 0.78;
+          utter.pitch = 0.75;
+          utter.volume = 0.7;
+          window.speechSynthesis.speak(utter);
+        } catch (error) { beep(now, 300, 0.25, 'sine', 0.025); }
+      } else beep(now, 300, 0.25, 'sine', 0.025);
+    } else if (effectId === 'micdrop') {
+      beep(now, 260, 0.12, 'triangle', 0.045); beep(now + 0.22, 80, 0.24, 'sine', 0.065);
+    } else {
+      beep(now, 440, 0.1, 'sine', 0.035);
+    }
+  }
+
   function handleKeyboard(event) {
     if (!els.viewerView || els.viewerView.classList.contains('hidden')) return;
 
     const key = event.key;
-    const isPresentationKey = key === 'ArrowRight' || key === 'PageDown' || key === ' ' || key === 'ArrowLeft' || key === 'PageUp' || key.toLowerCase() === 'f' || key === 'Escape';
+    const magicEffect = getMagicEffectByShortcut(key);
+    const isPresentationKey = key === 'ArrowRight' || key === 'PageDown' || key === ' ' || key === 'ArrowLeft' || key === 'PageUp' || key.toLowerCase() === 'f' || key === 'Escape' || !!magicEffect;
     if (!isPresentationKey) return;
+
+    if (magicEffect && !shouldIgnoreKeyboardForTyping()) {
+      event.preventDefault();
+      event.stopPropagation();
+      triggerMagicEffect(magicEffect.id);
+      return;
+    }
 
     if (key === 'Escape' && document.fullscreenElement) {
       event.preventDefault();
@@ -2412,6 +2575,7 @@
       case 'last': jumpToPage(state.totalPages); break;
       case 'jumpTo': jumpToPage(command.value); break;
       case 'requestSlideThumbs': generateRemoteSlideThumbs(); break;
+      case 'magicEffect': triggerMagicEffect(command.value); break;
       case 'addInkStroke': addInkStroke(command.value); break;
       case 'clearInk': clearInkStrokes(); break;
       case 'undoInk': undoInkStroke(); break;
@@ -2744,6 +2908,13 @@
           <button class="remote-small-action" data-command="last" data-host-only="true">Last</button>
         </section>
 
+        <section class="remote-section remote-premium-section remote-magic-section" data-host-only="true">
+          <div class="remote-section-title"><span>Magic Effects</span><small>Tap to show on desktop</small></div>
+          <div class="remote-magic-grid">
+            ${MAGIC_EFFECTS.map((effect) => `<button type="button" class="remote-magic-btn" data-magic-effect="${effect.id}" data-host-only="true"><span>${effect.emoji}</span><strong>${effect.label}</strong><small>${effect.shortcut}</small></button>`).join('')}
+          </div>
+        </section>
+
         <section class="remote-section remote-premium-section">
           <div class="remote-section-title"><span>Presentation</span><small>Desktop screen</small></div>
           <div class="remote-control-row remote-segment-row">
@@ -2967,6 +3138,13 @@
         button.addEventListener('click', () => {
           if (!isHost) return;
           sendRemoteCommand(ref, button.dataset.command);
+        });
+      });
+
+      els.remoteApp.querySelectorAll('[data-magic-effect]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!isHost) return;
+          sendRemoteCommand(ref, 'magicEffect', button.dataset.magicEffect);
         });
       });
 

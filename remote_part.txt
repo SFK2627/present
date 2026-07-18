@@ -1,0 +1,1328 @@
+  }
+
+  async function setupRemoteSessionIfPossible() {
+    if (!state.firebaseReady || !state.activeFile) return;
+    if (state.unsubscribeSession) state.unsubscribeSession();
+    state.sessionId = state.sessionId || makeSessionId();
+    state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+    state.lastCommandId = null;
+    // v10.6 cleanup: old builds stored every slide thumbnail inside the live
+    // session document. That made every phone command feel delayed. Remove it
+    // once, then keep thumbnails in a lightweight subcollection instead.
+    try {
+      if (window.firebase && window.firebase.firestore && window.firebase.firestore.FieldValue) {
+        await state.sessionRef.set({ slideThumbs: window.firebase.firestore.FieldValue.delete() }, { merge: true });
+      }
+    } catch (error) {}
+    await publishSessionState(true);
+    state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
+      if (!snap.exists) return;
+      const data = snap.data();
+      if (!data || !data.command || data.command.id === state.lastCommandId) return;
+      state.lastCommandId = data.command.id;
+      applyRemoteCommand(data.command);
+    });
+  }
+
+  function makeSessionId() {
+    return Math.random().toString(36).slice(2, 6).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+  }
+
+  async function publishSessionState(force = false) {
+    if (!state.sessionRef || !state.activeFile || (state.publishLock && !force)) return;
+    state.publishLock = true;
+    setTimeout(() => { state.publishLock = false; }, force ? 0 : 120);
+
+    // Keep the hot remote-control path light: write slide/control state first,
+    // then upload the heavier thumbnail preview in a short deferred task.
+    const payload = {
+      fileName: state.activeFile.name,
+      type: state.activeFile.type,
+      currentPage: state.currentPage,
+      totalPages: state.totalPages,
+      zoom: state.zoom,
+      viewportCenterX: state.viewportCenterX,
+      viewportCenterY: state.viewportCenterY,
+      autoPlaying: state.autoPlaying,
+      autoPaused: state.autoPaused,
+      autoElapsed: getAutoElapsedSeconds(false),
+      autoDuration: state.autoCurrentDuration || getCurrentTimingSeconds(),
+      timingMode: state.timingMode,
+      globalTiming: getGlobalTimingSeconds(),
+      currentTiming: getCurrentTimingSeconds(),
+      perPageTiming: state.perPageTiming,
+      timerVisible: state.timer.visible,
+      timerOpacity: state.timer.opacity,
+      timerSize: state.timer.size,
+      timerMode: state.timer.mode,
+      timerPosition: state.timer.position,
+      countdownAlert: state.countdownAlert,
+      countdownVoiceGender: state.countdownVoiceGender,
+      countdownVoiceStart: getCountdownVoiceStart(),
+      transitionEffect: state.transitionEffect,
+      inkStrokes: state.inkStrokes.slice(-220),
+      slideThumbsCount: state.remoteSlideThumbsCount || 0,
+      slideThumbsReadyAt: state.remoteSlideThumbsReadyAt || 0,
+      updatedAt: Date.now(),
+    };
+
+    try {
+      await state.sessionRef.set(payload, { merge: true });
+      scheduleRemotePreviewPublish(force ? 60 : 220);
+    } catch (error) {
+      console.warn('Could not publish session:', error);
+    }
+  }
+
+  function scheduleRemotePreviewPublish(delay = 260) {
+    if (!state.sessionRef || !state.activeFile) return;
+    clearTimeout(state.remoteThumbTimer);
+    state.remoteThumbTimer = setTimeout(async () => {
+      try {
+        const thumb = await getCurrentThumbForRemote();
+        if (thumb && state.sessionRef) {
+          await state.sessionRef.set({ thumb, thumbUpdatedAt: Date.now() }, { merge: true });
+        }
+      } catch (error) {}
+    }, delay);
+  }
+
+  async function getCurrentThumbForRemote() {
+    const key = `${state.activeFile ? state.activeFile.id : ''}:${state.currentPage}:base`;
+    if (!state.remotePreviewBusy && state.lastRemoteThumbKey === key && !isPresentationFullscreen()) return '';
+    state.remotePreviewBusy = true;
+    try {
+      state.lastRemoteThumbKey = key;
+      if (state.activeFile.type === 'pdf' && state.activePdf) {
+        return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 680, 0.72);
+      }
+      if (state.activeFile.type === 'canva') {
+        return state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
+      }
+      if (state.activeFile.type === 'pptx') {
+        if (state.pptxVisualReady && window.html2canvas && state.pptxRenderedSlides[state.currentPage - 1]) {
+          const canvas = await window.html2canvas(state.pptxRenderedSlides[state.currentPage - 1], {
+            backgroundColor: '#ffffff',
+            scale: 0.9,
+            logging: false,
+            useCORS: true,
+          });
+          return canvas.toDataURL('image/jpeg', 0.86);
+        }
+        return createPptxThumbDataUrl(`Slide ${state.currentPage}`, state.currentPage);
+      }
+    } catch (error) {
+      return '';
+    } finally {
+      state.remotePreviewBusy = false;
+    }
+    return '';
+  }
+
+
+  function removeRemoteFullscreenPrompt() {
+    const old = document.getElementById('fullscreenRequestPrompt');
+    if (old) old.remove();
+  }
+
+  function showRemoteFullscreenRequestPrompt() {
+    removeRemoteFullscreenPrompt();
+    if (!els.viewerView) return;
+    const prompt = document.createElement('div');
+    prompt.id = 'fullscreenRequestPrompt';
+    prompt.className = 'fullscreen-request-prompt';
+    prompt.innerHTML = `
+      <div class="fullscreen-request-card">
+        <strong>Phone requested fullscreen</strong>
+        <span>Browsers require one tap on this desktop screen before entering fullscreen.</span>
+        <div class="fullscreen-request-actions">
+          <button id="fullscreenRequestEnter" type="button">Enter Fullscreen</button>
+          <button id="fullscreenRequestDismiss" type="button">Dismiss</button>
+        </div>
+      </div>
+    `;
+    const root = document.fullscreenElement || els.viewerView || document.body;
+    root.appendChild(prompt);
+    revealToolbarTemporarily();
+    const enter = prompt.querySelector('#fullscreenRequestEnter');
+    const dismiss = prompt.querySelector('#fullscreenRequestDismiss');
+    if (enter) enter.addEventListener('click', async () => {
+      try { await toggleFullscreen(); } finally { removeRemoteFullscreenPrompt(); }
+    });
+    if (dismiss) dismiss.addEventListener('click', removeRemoteFullscreenPrompt);
+    window.setTimeout(() => {
+      if (document.getElementById('fullscreenRequestPrompt')) revealToolbarTemporarily();
+    }, 120);
+  }
+
+  function handleRemoteFullscreenToggle() {
+    if (isPresentationFullscreen() || document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+    // A remote phone/Firebase command is not considered a user gesture by desktop browsers,
+    // so entering fullscreen silently is blocked. Show a desktop-side one-tap prompt instead.
+    showRemoteFullscreenRequestPrompt();
+  }
+
+  async function applyRemoteCommand(command) {
+    switch (command.action) {
+      case 'next': nextPage(); break;
+      case 'prev': previousPage(); break;
+      case 'first': jumpToPage(1); break;
+      case 'last': jumpToPage(state.totalPages); break;
+      case 'jumpTo': jumpToPage(command.value); break;
+      case 'requestSlideThumbs': generateRemoteSlideThumbs(); break;
+      case 'addInkStroke': addInkStroke(command.value); break;
+      case 'clearInk': clearInkStrokes(); break;
+      case 'undoInk': undoInkStroke(); break;
+      case 'eraseInkAt': eraseInkAt(command.value); break;
+      case 'zoomIn': setZoom(state.zoom + 0.1); break;
+      case 'zoomOut': setZoom(state.zoom - 0.1); break;
+      case 'resetZoom': setZoom(1, { centerX: 0.5, centerY: 0.5 }); break;
+      case 'toggleFullscreen': handleRemoteFullscreenToggle(); break;
+      case 'setZoom': setZoom(Number(command.value) || 1); break;
+      case 'setViewport': setViewportTransform(command.value || {}); break;
+      case 'autoStart': startAutoPlay(); break;
+      case 'autoPause': pauseAutoPlay(); break;
+      case 'autoStop': stopAutoPlay(); break;
+      case 'setGlobalTiming':
+        state.timingMode = 'global';
+        updateTimingModeUI();
+        setGlobalTimingSeconds(command.value);
+        publishSessionState();
+        break;
+      case 'setCurrentSlideTiming':
+        setCurrentSlideTimingSeconds(command.value);
+        publishSessionState();
+        break;
+      case 'setTimingMode':
+        state.timingMode = command.value === 'per-slide' ? 'per-slide' : 'global';
+        updateTimingModeUI();
+        resetAutoClockForCurrentSlide();
+        updateTimerText();
+        publishSessionState();
+        break;
+      case 'setTiming':
+        state.timingMode = 'global';
+        updateTimingModeUI();
+        setGlobalTimingSeconds(command.value);
+        publishSessionState();
+        break;
+      case 'timerShow': showTimer(); break;
+      case 'timerHide': hideTimer(); break;
+      case 'timerReset': resetTimer(); break;
+      case 'setTimerPosition':
+        state.timer.position = ['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(command.value) ? command.value : 'bottom-right';
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setTimerMode':
+        state.timer.mode = command.value === 'down' ? 'down' : 'up';
+        resetTimer();
+        publishSessionState();
+        break;
+      case 'setTimerOpacity':
+        state.timer.opacity = Number(command.value);
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setTimerSize':
+        state.timer.size = Math.max(16, Math.min(72, Number(command.value) || 28));
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setCountdownAlert':
+        state.countdownAlert = ['off', 'sound', 'voice', 'both'].includes(command.value) ? command.value : 'off';
+        state.lastCountdownAlertSecond = null;
+        if (state.countdownAlert !== 'off') primePresentationAudio();
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setCountdownVoiceGender':
+        state.countdownVoiceGender = normalizeCountdownVoiceStyle(command.value);
+        primePresentationAudio();
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setCountdownVoiceStart':
+        state.countdownVoiceStart = Number(command.value) === 3 ? 3 : 5;
+        state.lastCountdownAlertSecond = null;
+        primePresentationAudio();
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'testCountdownAlert': {
+        const mode = ['sound', 'voice', 'both'].includes(command.value) ? command.value : (state.countdownAlert === 'off' ? 'both' : state.countdownAlert);
+        primePresentationAudio();
+        runCountdownAlertPreview(mode);
+        break;
+      }
+      case 'setTransitionEffect':
+        state.transitionEffect = command.value || 'fade';
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      default: break;
+    }
+  }
+
+
+  function normalizeStroke(raw = {}) {
+    const page = Math.min(Math.max(1, Number(raw.page) || state.currentPage || 1), state.totalPages || 1);
+    const tool = raw.tool === 'highlighter' ? 'highlighter' : 'pen';
+    const points = Array.isArray(raw.points)
+      ? raw.points.map((pt) => ({ x: clamp01(pt.x), y: clamp01(pt.y) })).filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y))
+      : [];
+    if (points.length < 2) return null;
+    return {
+      id: raw.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      page,
+      tool,
+      color: typeof raw.color === 'string' && raw.color ? raw.color : (tool === 'highlighter' ? '#facc15' : '#ef4444'),
+      size: Math.max(2, Math.min(28, Number(raw.size) || (tool === 'highlighter' ? 18 : 6))),
+      points,
+      createdAt: Number(raw.createdAt) || Date.now(),
+    };
+  }
+
+  function addInkStroke(raw) {
+    const stroke = normalizeStroke(raw);
+    if (!stroke) return;
+    state.inkStrokes = state.inkStrokes.filter((item) => item.id !== stroke.id).concat(stroke).slice(-350);
+    renderInkOverlay();
+    publishSessionState(true);
+  }
+
+  function clearInkStrokes(pageOnly = true) {
+    if (pageOnly) state.inkStrokes = state.inkStrokes.filter((stroke) => stroke.page !== state.currentPage);
+    else state.inkStrokes = [];
+    renderInkOverlay();
+    publishSessionState(true);
+  }
+
+  function undoInkStroke() {
+    const idx = [...state.inkStrokes].map((stroke, index) => ({ stroke, index })).reverse().find((item) => item.stroke.page === state.currentPage)?.index;
+    if (idx === undefined) return;
+    state.inkStrokes.splice(idx, 1);
+    renderInkOverlay();
+    publishSessionState(true);
+  }
+
+  function eraseInkAt(value = {}) {
+    const page = Math.min(Math.max(1, Number(value.page) || state.currentPage), state.totalPages || 1);
+    const x = clamp01(value.x);
+    const y = clamp01(value.y);
+    const radius = Math.max(0.01, Math.min(0.09, Number(value.radius) || 0.035));
+    const before = state.inkStrokes.length;
+    state.inkStrokes = state.inkStrokes.filter((stroke) => {
+      if (stroke.page !== page) return true;
+      return !stroke.points.some((pt) => Math.hypot(pt.x - x, pt.y - y) <= radius);
+    });
+    if (state.inkStrokes.length !== before) {
+      renderInkOverlay();
+      publishSessionState(true);
+    }
+  }
+
+  function getActiveSlideSurface() {
+    if (state.activeFile && state.activeFile.type === 'pdf') return state.activePdfCanvas || els.pdfCanvas;
+    if (state.activeFile && state.activeFile.type === 'pptx') return state.pptxRenderedSlides[state.currentPage - 1] || els.pptxSlide;
+    if (state.activeFile && state.activeFile.type === 'canva') return els.canvaFrame;
+    return null;
+  }
+
+  function renderInkOverlay() {
+    const canvas = els.inkCanvas;
+    const wrap = els.viewerCanvasWrap;
+    const surface = getActiveSlideSurface();
+    if (!canvas || !wrap || !surface || !surface.isConnected || !state.inkStrokes.length) {
+      if (canvas) canvas.classList.add('hidden');
+      return;
+    }
+    const wrapRect = wrap.getBoundingClientRect();
+    const surfRect = surface.getBoundingClientRect();
+    const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    const width = Math.max(1, wrap.scrollWidth || wrap.clientWidth);
+    const height = Math.max(1, wrap.scrollHeight || wrap.clientHeight);
+    canvas.classList.remove('hidden');
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const offsetX = surfRect.left - wrapRect.left + wrap.scrollLeft;
+    const offsetY = surfRect.top - wrapRect.top + wrap.scrollTop;
+    const surfW = Math.max(1, surfRect.width);
+    const surfH = Math.max(1, surfRect.height);
+    state.inkStrokes.filter((stroke) => stroke.page === state.currentPage).forEach((stroke) => {
+      if (!stroke.points || stroke.points.length < 2) return;
+      ctx.save();
+      ctx.globalAlpha = stroke.tool === 'highlighter' ? 0.35 : 0.95;
+      ctx.globalCompositeOperation = stroke.tool === 'highlighter' ? 'multiply' : 'source-over';
+      ctx.strokeStyle = stroke.color || (stroke.tool === 'highlighter' ? '#facc15' : '#ef4444');
+      ctx.lineWidth = Math.max(2, Number(stroke.size) || 6);
+      ctx.beginPath();
+      stroke.points.forEach((pt, index) => {
+        const x = offsetX + pt.x * surfW;
+        const y = offsetY + pt.y * surfH;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  async function generateRemoteSlideThumbs() {
+    if (!state.sessionRef || !state.activeFile || state.remoteSlideThumbsBusy) return;
+    state.remoteSlideThumbsBusy = true;
+    // Keep this safe for Firestore's 1 MiB document limit and for phone speed.
+    // For classroom decks this shows real slide previews; for huge PDFs it still
+    // allows number-jump placeholders after the cap.
+    const maxPages = Math.min(state.totalPages || 1, 60);
+    const lite = {};
+    try {
+      let thumbsRef = null;
+      try { thumbsRef = state.sessionRef.collection('slideThumbs'); } catch (error) { thumbsRef = null; }
+      for (let page = 1; page <= maxPages; page++) {
+        let src = '';
+        if (state.activeFile.type === 'pdf' && state.activePdf) {
+          src = await renderPdfPageToDataUrl(state.activePdf, page, 120, 0.34);
+        } else if (state.activeFile.type === 'pptx') {
+          src = createPptxThumbDataUrl(`Slide ${page}`, page);
+        } else if (state.activeFile.type === 'canva') {
+          src = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
+        }
+        if (!src) continue;
+        lite[String(page)] = src;
+        // Try subcollection for projects with broader rules, but never depend on it.
+        if (thumbsRef) {
+          try { await thumbsRef.doc(String(page)).set({ page, src, updatedAt: Date.now() }, { merge: true }); } catch (error) { thumbsRef = null; }
+        }
+        if (page === 1 || page % 4 === 0 || page === maxPages) {
+          state.remoteSlideThumbsCount = page;
+          state.remoteSlideThumbsReadyAt = Date.now();
+          await state.sessionRef.set({
+            slideThumbsLite: lite,
+            slideThumbsCount: page,
+            slideThumbsTotal: maxPages,
+            slideThumbsReadyAt: state.remoteSlideThumbsReadyAt
+          }, { merge: true });
+        }
+      }
+      if (maxPages < (state.totalPages || 1)) {
+        await state.sessionRef.set({ slideThumbsTruncated: true }, { merge: true });
+      }
+    } catch (error) {
+      console.warn('Could not generate all slide thumbnails:', error);
+    } finally {
+      state.remoteSlideThumbsBusy = false;
+    }
+  }
+
+  async function openQrModal() {
+    if (!state.activeFile) return;
+    if (!state.firebaseReady) {
+      els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
+    } else {
+      await setupRemoteSessionIfPossible();
+      els.qrHelp.textContent = `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
+    }
+
+    const session = state.sessionId || 'NO-FIREBASE';
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+    const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls`;
+    const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview`;
+
+    els.hostRemoteLink.value = hostUrl;
+    els.viewerRemoteLink.value = viewerUrl;
+    els.hostQr.innerHTML = '';
+    els.viewerQr.innerHTML = '';
+    new QRCode(els.hostQr, { text: hostUrl, width: 210, height: 210 });
+    new QRCode(els.viewerQr, { text: viewerUrl, width: 210, height: 210 });
+    showModal(els.qrModal);
+  }
+
+  function renderRemoteApp() {
+    document.documentElement.classList.add('presentation-hub-remote-mode');
+    document.body.classList.add('presentation-hub-remote-mode');
+    document.body.classList.remove('remote-fullscreen-open');
+    if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (error) {} }
+    els.app.classList.add('hidden');
+    els.remoteApp.classList.remove('hidden');
+    const sessionId = qs.get('session') || '';
+    const requestedRole = (qs.get('role') || 'host').toLowerCase();
+    const role = requestedRole === 'viewer' ? 'viewer' : 'host';
+    const isHost = role === 'host';
+    let remoteViewport = { zoom: 1, centerX: 0.5, centerY: 0.5 };
+    let latestThumb = '';
+    let latestRemoteData = null;
+    let remoteSlideThumbs = {};
+    let remoteSlideThumbsLoading = false;
+    let remoteLastThumbsReadyAt = 0;
+
+    els.remoteApp.innerHTML = `
+      <main id="remoteControlDashboard" class="remote-card remote-premium-card ${isHost ? '' : 'remote-viewer-only'}">
+        <div class="remote-head remote-premium-head">
+          <div class="remote-title-block">
+            <span class="remote-eyebrow">${isHost ? 'HOST REMOTE' : 'VIEW ONLY'}</span>
+            <h1>Presentation Hub Pro</h1>
+            <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Host control' : 'Preview only'} • low-latency mode</p>
+          </div>
+          <span id="remoteStatusPill" class="remote-status-pill">Connecting</span>
+        </div>
+
+        <section class="remote-now-card">
+          <div class="remote-slide-meta">
+            <div>
+              <span class="remote-mini-label">Now showing</span>
+              <h2 id="remoteSlideLabel">Slide -- / --</h2>
+            </div>
+            <p id="remoteAutoLabel" class="remote-sub remote-auto-label">Auto Play idle</p>
+          </div>
+          <div class="remote-preview-shell">
+            <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
+            <div class="remote-preview-actions">
+              <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Portrait Preview</button>
+              <button id="remoteAllSlidesBtn" class="remote-preview-full-btn remote-all-slides-btn" data-host-only="true">All Slides</button>
+            </div>
+          </div>
+          <p id="remoteFileLabel" class="remote-sub remote-file-label">Connect to an active desktop session.</p>
+        </section>
+
+        <div class="remote-control-banner ${isHost ? '' : 'viewer'}">${isHost ? 'Host control active. Tap commands first; preview updates after for lower delay.' : 'Viewer mode: preview is visible, but controls are disabled.'}</div>
+        <p class="remote-hint">Portrait preview is supported. Pinch and drag only after opening the preview screen.</p>
+
+        <section class="remote-nav-pad" aria-label="Presentation navigation">
+          <button class="remote-small-action" data-command="first" data-host-only="true">First</button>
+          <button class="remote-main-action remote-prev-action" data-command="prev" data-host-only="true">← Prev</button>
+          <button class="remote-main-action remote-next-action" data-command="next" data-host-only="true">Next →</button>
+          <button class="remote-small-action" data-command="last" data-host-only="true">Last</button>
+        </section>
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Presentation</span><small>Desktop screen</small></div>
+          <div class="remote-control-row remote-segment-row">
+            <button data-command="toggleFullscreen" data-host-only="true">Fullscreen</button>
+            <button data-command="resetZoom" data-host-only="true">Fit Slide</button>
+            <button data-command="timerReset" data-host-only="true">Reset Time</button>
+          </div>
+          <div class="remote-wide remote-timing-box remote-form-grid two">
+            <select id="remoteTransition" data-host-only="true">
+              <option value="fade">Fade transition</option>
+              <option value="slide-left">Slide left</option>
+              <option value="slide-right">Slide right</option>
+              <option value="slide-up">Slide up</option>
+              <option value="zoom-in">Zoom in</option>
+              <option value="zoom-out">Zoom out</option>
+              <option value="soft-blur">Soft blur</option>
+              <option value="none">No transition</option>
+            </select>
+            <select id="remoteTimerPosition" data-host-only="true">
+              <option value="bottom-right">Timer bottom right</option>
+              <option value="bottom-left">Timer bottom left</option>
+              <option value="top-right">Timer top right</option>
+              <option value="top-left">Timer top left</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Zoom</span><small>Desktop viewer</small></div>
+          <div class="remote-control-row remote-segment-row">
+            <button data-command="zoomOut" data-host-only="true">− Out</button>
+            <button data-command="resetZoom" data-host-only="true">Reset</button>
+            <button data-command="zoomIn" data-host-only="true">+ In</button>
+          </div>
+        </section>
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Auto Play</span><small>Global or per-slide</small></div>
+          <div class="remote-control-row remote-segment-row">
+            <button data-command="autoStart" data-host-only="true">Start</button>
+            <button data-command="autoPause" data-host-only="true">Pause</button>
+            <button data-command="autoStop" data-host-only="true">Stop</button>
+          </div>
+          <div class="remote-wide remote-timing-box remote-form-grid">
+            <select id="remoteTimingMode" data-host-only="true">
+              <option value="global">Global - all slides</option>
+              <option value="per-slide">Per-slide - current slide</option>
+            </select>
+            <input id="remoteTiming" type="number" min="1" value="10" placeholder="Seconds">
+            <button id="remoteSetTiming" data-host-only="true">Apply Timing</button>
+          </div>
+          <div class="remote-wide remote-timing-box remote-form-grid two">
+            <select id="remoteCountdownAlert" data-host-only="true">
+              <option value="off">Alert off</option>
+              <option value="sound">Sound only</option>
+              <option value="voice">Voice count</option>
+              <option value="both">Sound + voice</option>
+            </select>
+            <select id="remoteCountdownVoice" data-host-only="true">
+              <option value="soft-female">Soft Female</option>
+              <option value="bright-female">Bright Female</option>
+              <option value="calm-male">Calm Male</option>
+              <option value="deep-male">Deep Male</option>
+              <option value="teacher">Teacher Voice</option>
+              <option value="announcer">Announcer Voice</option>
+            </select>
+            <select id="remoteCountdownVoiceStart" data-host-only="true">
+              <option value="5">Voice from 5 sec</option>
+              <option value="3">Voice from 3 sec</option>
+            </select>
+            <button id="remoteTestAlert" data-host-only="true">Test Sound/Voice</button>
+          </div>
+        </section>
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Timer</span><small>Overlay controls</small></div>
+          <div class="remote-control-row remote-segment-row">
+            <button data-command="timerShow" data-host-only="true">Show</button>
+            <button data-command="timerHide" data-host-only="true">Hide</button>
+            <button data-command="timerReset" data-host-only="true">Reset</button>
+          </div>
+          <div class="remote-wide remote-timing-box remote-form-grid two">
+            <select id="remoteTimerMode" data-host-only="true">
+              <option value="up">Timer count up</option>
+              <option value="down">Timer countdown</option>
+            </select>
+            <button data-command="timerReset" data-host-only="true">Sync Timer Reset</button>
+          </div>
+          <div class="remote-slider-stack remote-premium-sliders">
+            <label>Opacity <span id="remoteOpacityLabel">75%</span>
+              <input id="remoteOpacity" type="range" min="0" max="100" step="1" value="75" data-host-only="true">
+            </label>
+            <label>Timer size <span id="remoteTimerSizeLabel">28px</span>
+              <input id="remoteTimerSize" type="range" min="16" max="72" step="1" value="28" data-host-only="true">
+            </label>
+          </div>
+        </section>
+      </main>
+      <div id="remoteSlidesPanel" class="remote-slides-panel hidden" data-host-only="true">
+        <div class="remote-slides-head">
+          <div>
+            <strong>All Slides</strong>
+            <span id="remoteSlidesHelp">Choose a slide to show on desktop.</span>
+          </div>
+          <button id="remoteCloseSlides" type="button">Close</button>
+        </div>
+        <div id="remoteSlidesGrid" class="remote-slides-grid"></div>
+      </div>
+
+      <div id="remoteFullPreview" class="remote-full-preview remote-portrait-preview hidden">
+        <div class="remote-full-toolbar">
+          <span id="remoteFullLabel">Slide Preview</span>
+          <button id="remoteBackToControls" class="remote-back-controls">Controls</button>
+          <button id="remoteClosePreview">Close</button>
+        </div>
+        <div class="remote-draw-toolbar" data-host-only="true" aria-label="Drawing tools. Pinch and drag always zooms/pans unless Pen, Highlight, or Erase is active.">
+          <button id="remoteToolPen" type="button">Pen</button>
+          <button id="remoteToolHighlighter" type="button">Highlight</button>
+          <button id="remoteToolErase" type="button">Erase</button>
+          <button id="remoteUndoInk" type="button">Undo</button>
+          <button id="remoteClearInk" type="button">Clear</button>
+        </div>
+        <div id="remoteFullStage" class="remote-full-stage remote-monitor-stage">
+          <div class="remote-monitor-frame" aria-label="Desktop monitor preview">
+            <div class="remote-monitor-camera"></div>
+            <div class="remote-monitor-screen">
+              <img id="remoteFullImg" alt="Desktop monitor preview of current slide" />
+              <canvas id="remoteInkPreview" class="remote-ink-preview" aria-hidden="true"></canvas>
+            </div>
+            <div class="remote-monitor-neck"></div>
+            <div class="remote-monitor-base"></div>
+          </div>
+        </div>
+        <div class="remote-full-help">Pinch to zoom. Drag to pan when zoomed. Tap Pen/Highlight/Erase only when you want to draw.</div>
+      </div>
+    `;
+
+    if (!isHost) {
+      els.remoteApp.querySelectorAll('[data-host-only="true"]').forEach((node) => {
+        node.setAttribute('aria-disabled', 'true');
+        if ('disabled' in node) node.disabled = true;
+      });
+    }
+
+    if (!hasFirebaseConfig()) {
+      $('remoteFileLabel').textContent = 'Remote needs firebase-config.js because phones need realtime sync across devices.';
+      $('remoteStatusPill').textContent = 'Setup needed';
+      return;
+    }
+
+    initFirebaseIfConfigured().then(() => {
+      if (!state.firebaseReady || !sessionId) {
+        $('remoteFileLabel').textContent = 'Could not connect to Firebase or missing session.';
+        $('remoteStatusPill').textContent = 'Offline';
+        return;
+      }
+      const ref = state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
+      ref.onSnapshot((snap) => {
+        if (!snap.exists) {
+          $('remoteFileLabel').textContent = 'Session not found. Open QR from the desktop viewer first.';
+          $('remoteStatusPill').textContent = 'No session';
+          return;
+        }
+        const data = snap.data();
+        latestRemoteData = data;
+        window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
+        window.__phRemoteInkStrokes = Array.isArray(data.inkStrokes) ? data.inkStrokes : [];
+        $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
+        $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteFileLabel').textContent = data.fileName || 'Active presentation';
+        if (data.thumb) latestThumb = data.thumb;
+        const preview = $('remotePreview');
+        preview.innerHTML = latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>';
+        const fullImg = $('remoteFullImg');
+        if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
+        if (!window.__presentationHubRemoteGestureActive) {
+          remoteViewport = {
+            zoom: Number(data.zoom) || 1,
+            centerX: Number.isFinite(Number(data.viewportCenterX)) ? Number(data.viewportCenterX) : 0.5,
+            centerY: Number.isFinite(Number(data.viewportCenterY)) ? Number(data.viewportCenterY) : 0.5,
+          };
+        }
+        $('remoteTimingMode').value = data.timingMode || 'global';
+        $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
+        if ($('remoteCountdownAlert')) $('remoteCountdownAlert').value = data.countdownAlert || 'off';
+        if ($('remoteCountdownVoice')) $('remoteCountdownVoice').value = normalizeCountdownVoiceStyle(data.countdownVoiceGender);
+        if ($('remoteCountdownVoiceStart')) $('remoteCountdownVoiceStart').value = String(Number(data.countdownVoiceStart) === 3 ? 3 : 5);
+        if ($('remoteTransition')) $('remoteTransition').value = data.transitionEffect || 'fade';
+        if ($('remoteTimerPosition')) $('remoteTimerPosition').value = data.timerPosition || 'bottom-right';
+        if ($('remoteTimerMode')) $('remoteTimerMode').value = data.timerMode || 'up';
+        $('remoteOpacity').value = data.timerOpacity ?? 75;
+        if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${data.timerOpacity ?? 75}%`;
+        $('remoteTimerSize').value = data.timerSize ?? 28;
+        if ($('remoteTimerSizeLabel')) $('remoteTimerSizeLabel').textContent = `${data.timerSize ?? 28}px`;
+        $('remoteAutoLabel').textContent = data.autoPlaying
+          ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
+          : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
+        applyRemoteFullPreviewTransform(remoteViewport);
+        if (data.slideThumbsLite && typeof data.slideThumbsLite === 'object') {
+          // Reliable fallback for existing simple Firestore rules: thumbnails are
+          // stored as tiny data URLs on the session document only after the host
+          // taps All Slides. This avoids blank grids when subcollections are not
+          // allowed by the user's current Firebase rules.
+          remoteSlideThumbs = { ...remoteSlideThumbs, ...data.slideThumbsLite };
+        }
+        if (data.slideThumbsReadyAt && data.slideThumbsReadyAt !== remoteLastThumbsReadyAt) {
+          remoteLastThumbsReadyAt = data.slideThumbsReadyAt;
+          if ($('remoteSlidesPanel') && !$('remoteSlidesPanel').classList.contains('hidden')) {
+            loadRemoteSlideThumbs(ref, true).then((thumbs) => {
+              remoteSlideThumbs = { ...remoteSlideThumbs, ...thumbs };
+              renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+            });
+          }
+        }
+        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+        renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
+      });
+
+      els.remoteApp.querySelectorAll('[data-command]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!isHost) return;
+          sendRemoteCommand(ref, button.dataset.command);
+        });
+      });
+
+      const allSlidesBtn = $('remoteAllSlidesBtn');
+      const slidesPanel = $('remoteSlidesPanel');
+      const closeSlidesBtn = $('remoteCloseSlides');
+      if (allSlidesBtn && slidesPanel) {
+        allSlidesBtn.addEventListener('click', () => {
+          if (!isHost) return;
+          slidesPanel.classList.remove('hidden');
+          renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+          loadRemoteSlideThumbs(ref).then((thumbs) => {
+            remoteSlideThumbs = { ...remoteSlideThumbs, ...thumbs };
+            renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+          });
+          sendRemoteCommand(ref, 'requestSlideThumbs');
+          window.setTimeout(() => loadRemoteSlideThumbs(ref, true).then((thumbs) => {
+            remoteSlideThumbs = { ...remoteSlideThumbs, ...thumbs };
+            renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+          }), 1400);
+        });
+      }
+      if (closeSlidesBtn && slidesPanel) {
+        closeSlidesBtn.addEventListener('click', () => {
+          slidesPanel.classList.add('hidden');
+        });
+      }
+
+      // Keep button handlers direct and single-fire. Heavy All Slides data is loaded separately
+      // so normal host commands stay fast.
+
+      attachRemotePreviewControls(ref, isHost, () => remoteViewport, (next) => {
+        remoteViewport = next;
+        applyRemoteFullPreviewTransform(remoteViewport);
+        renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
+        renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
+      });
+      $('remoteTimingMode').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTimingMode', $('remoteTimingMode').value);
+      });
+      $('remoteSetTiming').addEventListener('click', () => {
+        if (!isHost) return;
+        const seconds = Number($('remoteTiming').value) || 10;
+        const mode = $('remoteTimingMode').value;
+        sendRemoteCommand(ref, mode === 'per-slide' ? 'setCurrentSlideTiming' : 'setGlobalTiming', seconds);
+      });
+      if ($('remoteCountdownAlert')) $('remoteCountdownAlert').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setCountdownAlert', $('remoteCountdownAlert').value);
+      });
+      if ($('remoteCountdownVoice')) $('remoteCountdownVoice').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setCountdownVoiceGender', $('remoteCountdownVoice').value);
+      });
+      if ($('remoteCountdownVoiceStart')) $('remoteCountdownVoiceStart').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setCountdownVoiceStart', Number($('remoteCountdownVoiceStart').value) === 3 ? 3 : 5);
+      });
+      if ($('remoteTestAlert')) $('remoteTestAlert').addEventListener('click', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'testCountdownAlert', $('remoteCountdownAlert') ? $('remoteCountdownAlert').value : 'both');
+      });
+      if ($('remoteTransition')) $('remoteTransition').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTransitionEffect', $('remoteTransition').value);
+      });
+      if ($('remoteTimerPosition')) $('remoteTimerPosition').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTimerPosition', $('remoteTimerPosition').value);
+      });
+      if ($('remoteTimerMode')) $('remoteTimerMode').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTimerMode', $('remoteTimerMode').value);
+      });
+      $('remoteOpacity').addEventListener('input', () => {
+        if (!isHost) return;
+        const value = Number($('remoteOpacity').value);
+        if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${value}%`;
+        sendRemoteCommand(ref, 'setTimerOpacity', value);
+      });
+      $('remoteTimerSize').addEventListener('input', () => {
+        if (!isHost) return;
+        const value = Number($('remoteTimerSize').value);
+        if ($('remoteTimerSizeLabel')) $('remoteTimerSizeLabel').textContent = `${value}px`;
+        sendRemoteCommand(ref, 'setTimerSize', value);
+      });
+    });
+  }
+
+
+  async function loadRemoteSlideThumbs(ref, force = false) {
+    if (!ref || remoteSlideThumbsLoading) return remoteSlideThumbs || {};
+    if (!force && remoteSlideThumbs && Object.keys(remoteSlideThumbs).length) return remoteSlideThumbs;
+    remoteSlideThumbsLoading = true;
+    try {
+      const snap = await ref.collection('slideThumbs').orderBy('page').limit(180).get();
+      const next = {};
+      snap.forEach((doc) => {
+        const item = doc.data() || {};
+        if (item.page && item.src) next[item.page] = item.src;
+      });
+      return next;
+    } catch (error) {
+      console.warn('Could not load slide thumbnails:', error);
+      return remoteSlideThumbs || {};
+    } finally {
+      remoteSlideThumbsLoading = false;
+    }
+  }
+
+  function renderRemoteSlidesGrid(data = {}, ref, isHost, localThumbs = {}) {
+    const grid = $('remoteSlidesGrid');
+    const panel = $('remoteSlidesPanel');
+    if (!grid || !panel || panel.classList.contains('hidden')) return;
+    const total = Math.max(1, Number(data.totalPages) || 1);
+    const current = Math.max(1, Number(data.currentPage) || 1);
+    const thumbs = localThumbs || {};
+    const availableCount = Object.keys(thumbs).length || Number(data.slideThumbsCount) || 0;
+    const help = $('remoteSlidesHelp');
+    if (help) help.textContent = availableCount
+      ? `Tap any slide. Thumbnails loaded: ${Math.min(availableCount, total)} / ${total}.`
+      : 'Loading real slide previews from desktop... numbers still work while waiting.';
+    const limit = Math.min(total, 180);
+    const parts = [];
+    for (let i = 1; i <= limit; i++) {
+      const src = thumbs[String(i)] || thumbs[i] || '';
+      parts.push(`
+        <button class="remote-slide-choice${i === current ? ' active' : ''}" data-jump-slide="${i}" type="button">
+          <span class="remote-slide-num">${i}</span>
+          ${src ? `<img src="${src}" alt="Slide ${i} thumbnail">` : `<span class="remote-slide-placeholder">${i}</span>`}
+        </button>
+      `);
+    }
+    if (total > limit) {
+      parts.push(`<div class="remote-slide-note">Showing first ${limit} of ${total}. Use First/Last/Next for far pages.</div>`);
+    }
+    grid.innerHTML = parts.join('');
+    grid.querySelectorAll('[data-jump-slide]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'jumpTo', Number(button.dataset.jumpSlide));
+      });
+    });
+  }
+
+  function renderRemoteInkPreview(strokes = [], page = 1, viewport = {}) {
+    const canvas = $('remoteInkPreview');
+    const img = $('remoteFullImg');
+    const screen = img ? (img.closest('.remote-monitor-screen') || $('remoteFullStage')) : null;
+    if (!canvas || !img || !screen) return;
+    const screenW = Math.max(1, screen.clientWidth || screen.getBoundingClientRect().width || 1);
+    const screenH = Math.max(1, screen.clientHeight || screen.getBoundingClientRect().height || 1);
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.style.width = `${screenW}px`;
+    canvas.style.height = `${screenH}px`;
+    canvas.width = Math.round(screenW * dpr);
+    canvas.height = Math.round(screenH * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, screenW, screenH);
+    const left = Number(img.dataset.remoteLeft) || 0;
+    const top = Number(img.dataset.remoteTop) || 0;
+    const contentW = Number(img.dataset.remoteContentW) || screenW;
+    const contentH = Number(img.dataset.remoteContentH) || screenH;
+    const all = Array.isArray(strokes) ? strokes.slice() : [];
+    if (window.__phRemoteTempStroke) all.push(window.__phRemoteTempStroke);
+    all.filter((stroke) => Number(stroke.page) === Number(page)).forEach((stroke) => {
+      if (!stroke.points || stroke.points.length < 2) return;
+      ctx.save();
+      ctx.globalAlpha = stroke.tool === 'highlighter' ? 0.35 : 0.95;
+      ctx.globalCompositeOperation = stroke.tool === 'highlighter' ? 'multiply' : 'source-over';
+      ctx.strokeStyle = stroke.color || (stroke.tool === 'highlighter' ? '#facc15' : '#ef4444');
+      ctx.lineWidth = Math.max(2, Math.min(22, Number(stroke.size) || 6));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      stroke.points.forEach((pt, index) => {
+        const x = left + clamp01(pt.x) * contentW;
+        const y = top + clamp01(pt.y) * contentH;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function remoteScreenPointToSlide(clientX, clientY) {
+    const img = $('remoteFullImg');
+    const screen = img ? (img.closest('.remote-monitor-screen') || $('remoteFullStage')) : null;
+    if (!img || !screen) return { x: 0.5, y: 0.5 };
+    const rect = screen.getBoundingClientRect();
+    const left = Number(img.dataset.remoteLeft) || 0;
+    const top = Number(img.dataset.remoteTop) || 0;
+    const contentW = Math.max(1, Number(img.dataset.remoteContentW) || rect.width || 1);
+    const contentH = Math.max(1, Number(img.dataset.remoteContentH) || rect.height || 1);
+    return {
+      x: clamp01(((clientX - rect.left) - left) / contentW),
+      y: clamp01(((clientY - rect.top) - top) / contentH),
+    };
+  }
+
+  function applyRemoteFullPreviewTransform(viewport) {
+    const img = $('remoteFullImg');
+    if (!img) return;
+    const screen = img.closest('.remote-monitor-screen') || $('remoteFullStage');
+    if (!screen) return;
+
+    const zoom = Math.min(4, Math.max(1, Number(viewport.zoom) || 1));
+    let centerX = Math.max(0, Math.min(1, Number(viewport.centerX) || 0.5));
+    let centerY = Math.max(0, Math.min(1, Number(viewport.centerY) || 0.5));
+    const screenRect = screen.getBoundingClientRect();
+    const screenW = Math.max(1, screen.clientWidth || screenRect.width || 1);
+    const screenH = Math.max(1, screen.clientHeight || screenRect.height || 1);
+    const naturalW = Math.max(1, img.naturalWidth || 16);
+    const naturalH = Math.max(1, img.naturalHeight || 9);
+    const aspect = naturalW / naturalH;
+
+    let fitW = screenW;
+    let fitH = fitW / aspect;
+    if (fitH > screenH) {
+      fitH = screenH;
+      fitW = fitH * aspect;
+    }
+
+    const contentW = fitW * zoom;
+    const contentH = fitH * zoom;
+    const minCenterX = contentW > screenW ? screenW / (2 * contentW) : 0.5;
+    const maxCenterX = contentW > screenW ? 1 - minCenterX : 0.5;
+    const minCenterY = contentH > screenH ? screenH / (2 * contentH) : 0.5;
+    const maxCenterY = contentH > screenH ? 1 - minCenterY : 0.5;
+    centerX = Math.max(minCenterX, Math.min(maxCenterX, centerX));
+    centerY = Math.max(minCenterY, Math.min(maxCenterY, centerY));
+
+    const left = (screenW / 2) - (centerX * contentW);
+    const top = (screenH / 2) - (centerY * contentH);
+
+    // Pixel layout mirrors the desktop scroll viewport: fit image first, then
+    // enlarge and position it by normalized center. This makes the phone monitor
+    // crop match the desktop crop instead of using a separate percent transform.
+    img.style.setProperty('--remote-full-transform', 'none');
+    img.style.setProperty('transform', 'none', 'important');
+    img.style.position = 'absolute';
+    img.style.left = `${left}px`;
+    img.style.top = `${top}px`;
+    img.style.width = `${contentW}px`;
+    img.style.height = `${contentH}px`;
+    img.style.maxWidth = 'none';
+    img.style.maxHeight = 'none';
+    img.dataset.remoteLeft = String(left);
+    img.dataset.remoteTop = String(top);
+    img.dataset.remoteContentW = String(contentW);
+    img.dataset.remoteContentH = String(contentH);
+    img.dataset.actualCenterX = String(centerX);
+    img.dataset.actualCenterY = String(centerY);
+    renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, { zoom, centerX, centerY });
+  }
+
+  function clampViewportToRemoteScreen(viewport) {
+    const img = $('remoteFullImg');
+    const screen = img ? (img.closest('.remote-monitor-screen') || $('remoteFullStage')) : null;
+    if (!img || !screen) {
+      return {
+        zoom: Math.min(4, Math.max(1, Number(viewport.zoom) || 1)),
+        centerX: Math.max(0, Math.min(1, Number(viewport.centerX) || 0.5)),
+        centerY: Math.max(0, Math.min(1, Number(viewport.centerY) || 0.5)),
+      };
+    }
+    const zoom = Math.min(4, Math.max(1, Number(viewport.zoom) || 1));
+    const screenW = Math.max(1, screen.clientWidth || screen.getBoundingClientRect().width || 1);
+    const screenH = Math.max(1, screen.clientHeight || screen.getBoundingClientRect().height || 1);
+    const naturalW = Math.max(1, img.naturalWidth || 16);
+    const naturalH = Math.max(1, img.naturalHeight || 9);
+    const aspect = naturalW / naturalH;
+    let fitW = screenW;
+    let fitH = fitW / aspect;
+    if (fitH > screenH) {
+      fitH = screenH;
+      fitW = fitH * aspect;
+    }
+    const contentW = fitW * zoom;
+    const contentH = fitH * zoom;
+    const minX = contentW > screenW ? screenW / (2 * contentW) : 0.5;
+    const maxX = contentW > screenW ? 1 - minX : 0.5;
+    const minY = contentH > screenH ? screenH / (2 * contentH) : 0.5;
+    const maxY = contentH > screenH ? 1 - minY : 0.5;
+    return {
+      zoom,
+      centerX: Math.max(minX, Math.min(maxX, Number(viewport.centerX) || 0.5)),
+      centerY: Math.max(minY, Math.min(maxY, Number(viewport.centerY) || 0.5)),
+    };
+  }
+
+
+  function attachRemotePreviewControls(ref, isHost, getViewport, setLocalViewport) {
+    const openBtn = $('remotePreviewFullBtn');
+    const closeBtn = $('remoteClosePreview');
+    const backBtn = $('remoteBackToControls');
+    const full = $('remoteFullPreview');
+    const stage = $('remoteFullStage');
+    if (!openBtn || !full || !stage) return;
+
+    const safeViewport = (value) => clampViewportToRemoteScreen(value || {});
+
+    let localViewport = safeViewport(getViewport());
+    let rafId = 0;
+    let gestureSettleTimer = null;
+
+    const sendViewport = throttle((viewport) => {
+      if (!isHost) return;
+      sendRemoteCommand(ref, 'setViewport', safeViewport(viewport));
+    }, 110);
+
+    function renderLocal(viewport) {
+      localViewport = safeViewport(viewport);
+      setLocalViewport(localViewport);
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        applyRemoteFullPreviewTransform(localViewport);
+      });
+    }
+
+    function beginGesture() {
+      window.__presentationHubRemoteGestureActive = true;
+      clearTimeout(gestureSettleTimer);
+    }
+
+    function endGesture() {
+      clearTimeout(gestureSettleTimer);
+      gestureSettleTimer = setTimeout(() => {
+        window.__presentationHubRemoteGestureActive = false;
+        sendViewport(localViewport);
+      }, 220);
+    }
+
+    function openFullPreview() {
+      localViewport = safeViewport(getViewport());
+      renderLocal(localViewport);
+      full.classList.remove('hidden');
+      document.body.classList.add('remote-fullscreen-open');
+      if (full.requestFullscreen) full.requestFullscreen().catch(() => {});
+    }
+
+    function closeFullPreview() {
+      window.__presentationHubRemoteGestureActive = false;
+      full.classList.add('hidden');
+      document.body.classList.remove('remote-fullscreen-open');
+      document.documentElement.classList.add('presentation-hub-remote-mode');
+      document.body.classList.add('presentation-hub-remote-mode');
+      if (document.fullscreenElement === full) document.exitFullscreen().catch(() => {});
+      requestAnimationFrame(() => {
+        document.body.classList.remove('remote-fullscreen-open');
+      });
+    }
+
+    openBtn.addEventListener('click', openFullPreview);
+    if (closeBtn) closeBtn.addEventListener('click', closeFullPreview);
+    if (backBtn) backBtn.addEventListener('click', closeFullPreview);
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement && !full.classList.contains('hidden')) closeFullPreview();
+    });
+
+    if (!isHost) return;
+
+    let startDistance = 0;
+    let startZoom = 1;
+    let startCenter = { centerX: 0.5, centerY: 0.5 };
+    let startMid = { x: 0.5, y: 0.5 };
+    let startPoint = null;
+
+    const distance = (touches) => {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    };
+
+    const midpoint = (touches, rect) => ({
+      x: ((touches[0].clientX + touches[1].clientX) / 2 - rect.left) / Math.max(1, rect.width),
+      y: ((touches[0].clientY + touches[1].clientY) / 2 - rect.top) / Math.max(1, rect.height),
+    });
+
+    const gestureRect = () => {
+      const screen = stage.querySelector('.remote-monitor-screen');
+      return (screen || stage).getBoundingClientRect();
+    };
+
+    const screenGeometry = (zoomValue) => {
+      const img = $('remoteFullImg');
+      const screen = stage.querySelector('.remote-monitor-screen') || stage;
+      const rect = screen.getBoundingClientRect();
+      const naturalW = Math.max(1, img && img.naturalWidth ? img.naturalWidth : 16);
+      const naturalH = Math.max(1, img && img.naturalHeight ? img.naturalHeight : 9);
+      const aspect = naturalW / naturalH;
+      let fitW = Math.max(1, rect.width);
+      let fitH = fitW / aspect;
+      if (fitH > rect.height) {
+        fitH = Math.max(1, rect.height);
+        fitW = fitH * aspect;
+      }
+      return { rect, fitW, fitH, contentW: fitW * zoomValue, contentH: fitH * zoomValue };
+    };
+
+    // No separate Move tool: the normal state is zoom/pan.
+    // Tap Pen/Highlight/Erase to draw; tap the same tool again to return to zoom/pan.
+    let activeTool = null;
+    let currentStroke = null;
+    const toolButtons = {
+      pen: $('remoteToolPen'),
+      highlighter: $('remoteToolHighlighter'),
+      erase: $('remoteToolErase'),
+    };
+    const isDrawingTool = (tool) => tool === 'pen' || tool === 'highlighter' || tool === 'erase';
+
+    function setActiveTool(tool) {
+      activeTool = activeTool === tool ? null : tool;
+      Object.entries(toolButtons).forEach(([name, button]) => {
+        if (button) button.classList.toggle('active', name === activeTool);
+      });
+      const screen = stage.querySelector('.remote-monitor-screen');
+      if (screen) {
+        if (activeTool) screen.dataset.tool = activeTool;
+        else delete screen.dataset.tool;
+      }
+    }
+
+    Object.entries(toolButtons).forEach(([tool, button]) => {
+      if (button) button.addEventListener('click', () => setActiveTool(tool));
+    });
+    const undoBtn = $('remoteUndoInk');
+    const clearBtn = $('remoteClearInk');
+    if (undoBtn) undoBtn.addEventListener('click', () => sendRemoteCommand(ref, 'undoInk'));
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      if (confirm('Clear drawings on this slide?')) sendRemoteCommand(ref, 'clearInk');
+    });
+
+    const sendErase = throttle((point) => sendRemoteCommand(ref, 'eraseInkAt', {
+      page: window.__phRemoteCurrentPage || 1,
+      x: point.x,
+      y: point.y,
+      radius: 0.035,
+    }), 120);
+
+    stage.addEventListener('touchstart', (event) => {
+      if (event.touches.length) event.preventDefault();
+      if (isDrawingTool(activeTool) && event.touches.length === 1) {
+        const point = remoteScreenPointToSlide(event.touches[0].clientX, event.touches[0].clientY);
+        if (activeTool === 'erase') {
+          sendErase(point);
+          return;
+        }
+        currentStroke = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          page: window.__phRemoteCurrentPage || 1,
+          tool: activeTool === 'highlighter' ? 'highlighter' : 'pen',
+          color: activeTool === 'highlighter' ? '#facc15' : '#ef4444',
+          size: activeTool === 'highlighter' ? 18 : 6,
+          points: [point],
+          createdAt: Date.now(),
+        };
+        window.__phRemoteTempStroke = currentStroke;
+        renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+        return;
+      }
+      beginGesture();
+      const current = safeViewport(localViewport || getViewport());
+      startZoom = current.zoom;
+      startCenter = { centerX: current.centerX, centerY: current.centerY };
+      const rect = gestureRect();
+      if (event.touches.length === 2) {
+        startDistance = Math.max(1, distance(event.touches));
+        startMid = midpoint(event.touches, rect);
+        startPoint = null;
+      } else if (event.touches.length === 1) {
+        startPoint = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+        startDistance = 0;
+      }
+    }, { passive: false });
+
+    stage.addEventListener('touchmove', (event) => {
+      if (event.touches.length !== 1 && event.touches.length !== 2) return;
+      event.preventDefault();
+      if (isDrawingTool(activeTool) && event.touches.length === 1) {
+        const point = remoteScreenPointToSlide(event.touches[0].clientX, event.touches[0].clientY);
+        if (activeTool === 'erase') {
+          sendErase(point);
+          return;
+        }
+        if (currentStroke) {
+          const last = currentStroke.points[currentStroke.points.length - 1];
+          if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.0025) currentStroke.points.push(point);
+          window.__phRemoteTempStroke = currentStroke;
+          renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+        }
+        return;
+      }
+      beginGesture();
+      const rect = gestureRect();
+      let next = safeViewport(localViewport || getViewport());
+
+      if (event.touches.length === 2 && startDistance) {
+        const ratio = distance(event.touches) / startDistance;
+        const mid = midpoint(event.touches, rect);
+        const nextZoom = Math.min(4, Math.max(1, startZoom * ratio));
+        const geometry = screenGeometry(nextZoom);
+        const dragX = ((mid.x - startMid.x) * geometry.rect.width) / Math.max(1, geometry.contentW);
+        const dragY = ((mid.y - startMid.y) * geometry.rect.height) / Math.max(1, geometry.contentH);
+        next = safeViewport({
+          zoom: nextZoom,
+          centerX: startCenter.centerX - dragX,
+          centerY: startCenter.centerY - dragY,
+        });
+      } else if (event.touches.length === 1 && startPoint) {
+        const dx = event.touches[0].clientX - startPoint.x;
+        const dy = event.touches[0].clientY - startPoint.y;
+        const geometry = screenGeometry(startZoom);
+        next = safeViewport({
+          zoom: startZoom,
+          centerX: startCenter.centerX - dx / Math.max(1, geometry.contentW),
+          centerY: startCenter.centerY - dy / Math.max(1, geometry.contentH),
+        });
+      }
+
+      renderLocal(next);
+      sendViewport(next);
+    }, { passive: false });
+
+    stage.addEventListener('touchend', () => {
+      if (currentStroke) {
+        const finished = currentStroke;
+        currentStroke = null;
+        window.__phRemoteTempStroke = null;
+        if (finished.points && finished.points.length > 1) sendRemoteCommand(ref, 'addInkStroke', finished);
+        renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+        return;
+      }
+      endGesture();
+    }, { passive: true });
+    stage.addEventListener('touchcancel', () => {
+      currentStroke = null;
+      window.__phRemoteTempStroke = null;
+      renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+      endGesture();
+    }, { passive: true });
+
+    stage.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      beginGesture();
+      const current = safeViewport(localViewport || getViewport());
+      const rect = gestureRect();
+      const next = safeViewport({
+        zoom: current.zoom + (event.deltaY < 0 ? 0.12 : -0.12),
+        centerX: (event.clientX - rect.left) / Math.max(1, rect.width),
+        centerY: (event.clientY - rect.top) / Math.max(1, rect.height),
+      });
+      renderLocal(next);
+      sendViewport(next);
+      endGesture();
+    }, { passive: false });
+  }
+
+  function throttle(fn, delay) {
+    let last = 0;
+    let trailing = null;
+    return (...args) => {
+      const now = Date.now();
+      if (now - last >= delay) {
+        last = now;
+        fn(...args);
+        return;
+      }
+      clearTimeout(trailing);
+      trailing = setTimeout(() => {
+        last = Date.now();
+        fn(...args);
+      }, delay - (now - last));
+    };
+  }
+
+  function sendRemoteCommand(ref, action, value) {
+    return ref.set({
+      command: {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        action,
+        value: value ?? null,
+        issuedAt: Date.now(),
+        v: 10,
+      }
+    }, { merge: true });
+  }
+
+  function registerServiceWorker() {
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  }
+})();
