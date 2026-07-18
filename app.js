@@ -2620,31 +2620,42 @@
   async function generateRemoteSlideThumbs() {
     if (!state.sessionRef || !state.activeFile || state.remoteSlideThumbsBusy) return;
     state.remoteSlideThumbsBusy = true;
-    const maxPages = Math.min(state.totalPages || 1, 160);
+    // Keep this safe for Firestore's 1 MiB document limit and for phone speed.
+    // For classroom decks this shows real slide previews; for huge PDFs it still
+    // allows number-jump placeholders after the cap.
+    const maxPages = Math.min(state.totalPages || 1, 60);
+    const lite = {};
     try {
-      const thumbsRef = state.sessionRef.collection('slideThumbs');
+      let thumbsRef = null;
+      try { thumbsRef = state.sessionRef.collection('slideThumbs'); } catch (error) { thumbsRef = null; }
       for (let page = 1; page <= maxPages; page++) {
         let src = '';
         if (state.activeFile.type === 'pdf' && state.activePdf) {
-          // Tiny thumbnails are stored separately from the live session document
-          // so normal host commands stay low-latency.
-          src = await renderPdfPageToDataUrl(state.activePdf, page, 150, 0.46);
+          src = await renderPdfPageToDataUrl(state.activePdf, page, 120, 0.34);
         } else if (state.activeFile.type === 'pptx') {
           src = createPptxThumbDataUrl(`Slide ${page}`, page);
         } else if (state.activeFile.type === 'canva') {
           src = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
         }
         if (!src) continue;
-        await thumbsRef.doc(String(page)).set({ page, src, updatedAt: Date.now() }, { merge: true });
-        if (page === 1 || page % 8 === 0 || page === maxPages) {
+        lite[String(page)] = src;
+        // Try subcollection for projects with broader rules, but never depend on it.
+        if (thumbsRef) {
+          try { await thumbsRef.doc(String(page)).set({ page, src, updatedAt: Date.now() }, { merge: true }); } catch (error) { thumbsRef = null; }
+        }
+        if (page === 1 || page % 4 === 0 || page === maxPages) {
           state.remoteSlideThumbsCount = page;
           state.remoteSlideThumbsReadyAt = Date.now();
           await state.sessionRef.set({
+            slideThumbsLite: lite,
             slideThumbsCount: page,
             slideThumbsTotal: maxPages,
             slideThumbsReadyAt: state.remoteSlideThumbsReadyAt
           }, { merge: true });
         }
+      }
+      if (maxPages < (state.totalPages || 1)) {
+        await state.sessionRef.set({ slideThumbsTruncated: true }, { merge: true });
       }
     } catch (error) {
       console.warn('Could not generate all slide thumbnails:', error);
@@ -2933,11 +2944,18 @@
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
         applyRemoteFullPreviewTransform(remoteViewport);
+        if (data.slideThumbsLite && typeof data.slideThumbsLite === 'object') {
+          // Reliable fallback for existing simple Firestore rules: thumbnails are
+          // stored as tiny data URLs on the session document only after the host
+          // taps All Slides. This avoids blank grids when subcollections are not
+          // allowed by the user's current Firebase rules.
+          remoteSlideThumbs = { ...remoteSlideThumbs, ...data.slideThumbsLite };
+        }
         if (data.slideThumbsReadyAt && data.slideThumbsReadyAt !== remoteLastThumbsReadyAt) {
           remoteLastThumbsReadyAt = data.slideThumbsReadyAt;
           if ($('remoteSlidesPanel') && !$('remoteSlidesPanel').classList.contains('hidden')) {
             loadRemoteSlideThumbs(ref, true).then((thumbs) => {
-              remoteSlideThumbs = thumbs;
+              remoteSlideThumbs = { ...remoteSlideThumbs, ...thumbs };
               renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
             });
           }
@@ -2962,12 +2980,12 @@
           slidesPanel.classList.remove('hidden');
           renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
           loadRemoteSlideThumbs(ref).then((thumbs) => {
-            remoteSlideThumbs = thumbs;
+            remoteSlideThumbs = { ...remoteSlideThumbs, ...thumbs };
             renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
           });
           sendRemoteCommand(ref, 'requestSlideThumbs');
           window.setTimeout(() => loadRemoteSlideThumbs(ref, true).then((thumbs) => {
-            remoteSlideThumbs = thumbs;
+            remoteSlideThumbs = { ...remoteSlideThumbs, ...thumbs };
             renderRemoteSlidesGrid(latestRemoteData || {}, ref, isHost, remoteSlideThumbs);
           }), 1400);
         });
@@ -3070,7 +3088,9 @@
     const thumbs = localThumbs || {};
     const availableCount = Object.keys(thumbs).length || Number(data.slideThumbsCount) || 0;
     const help = $('remoteSlidesHelp');
-    if (help) help.textContent = availableCount ? `Tap any slide. Thumbnails loaded: ${Math.min(availableCount, total)} / ${total}.` : 'Loading thumbnails from desktop... tap numbers while waiting.';
+    if (help) help.textContent = availableCount
+      ? `Tap any slide. Thumbnails loaded: ${Math.min(availableCount, total)} / ${total}.`
+      : 'Loading real slide previews from desktop... numbers still work while waiting.';
     const limit = Math.min(total, 180);
     const parts = [];
     for (let i = 1; i <= limit; i++) {

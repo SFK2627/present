@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-6-stability';
+const CACHE_NAME = 'presentation-hub-pro-v10-repair-fit-tools-v1';
 const CORE_ASSETS = [
   './',
   './index.html',

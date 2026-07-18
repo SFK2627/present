@@ -2620,3 +2620,167 @@ body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteFullPrevie
 body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteControlDashboard {
   touch-action: pan-y !important;
 }
+
+/* Pro v10.7 repair: restore clean desktop fit and compact phone preview tools.
+   This block intentionally overrides the experimental annotation sizing that made
+   the normal viewer and portrait preview look broken. */
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-stage {
+  padding: 76px 18px 18px !important;
+  box-sizing: border-box !important;
+  display: grid !important;
+  place-items: center !important;
+  overflow: hidden !important;
+  align-content: center !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-canvas-wrap {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 18px !important;
+  display: grid !important;
+  place-items: center !important;
+  overflow: hidden !important;
+  background: rgba(2, 6, 23, .18) !important;
+  box-sizing: border-box !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .pdf-page-layer,
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .pdf-canvas,
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .pptx-rendered-slide {
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
+.viewer-view:not(.presentation-fullscreen):not(:fullscreen) .ink-canvas {
+  pointer-events: none !important;
+}
+@media (max-width: 780px) {
+  .viewer-view:not(.presentation-fullscreen):not(:fullscreen) .viewer-stage {
+    padding: 78px 10px 10px !important;
+  }
+}
+
+/* Portrait preview: tools are a compact overlay, never giant grid buttons. */
+.remote-full-preview.remote-portrait-preview:not(.hidden) {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  min-height: 100svh !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  overflow: hidden !important;
+  background: #000 !important;
+}
+.remote-portrait-preview .remote-full-toolbar {
+  position: relative !important;
+  z-index: 30 !important;
+  min-height: 48px !important;
+  padding: calc(7px + env(safe-area-inset-top, 0px)) 10px 7px !important;
+}
+.remote-portrait-preview .remote-full-toolbar span {
+  font-size: .95rem !important;
+  white-space: nowrap !important;
+}
+.remote-portrait-preview .remote-full-toolbar button {
+  min-height: 34px !important;
+  padding: .38rem .68rem !important;
+  border-radius: 999px !important;
+  font-size: .82rem !important;
+}
+.remote-portrait-preview .remote-draw-toolbar {
+  position: absolute !important;
+  top: calc(52px + env(safe-area-inset-top, 0px)) !important;
+  left: 8px !important;
+  right: 8px !important;
+  z-index: 28 !important;
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  padding: 6px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+  border-radius: 999px !important;
+  background: rgba(2, 6, 23, .70) !important;
+  backdrop-filter: blur(14px) !important;
+  -webkit-overflow-scrolling: touch !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,.28) !important;
+}
+.remote-portrait-preview .remote-draw-toolbar button {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 0 .72rem !important;
+  border-radius: 999px !important;
+  font-size: .72rem !important;
+  line-height: 1 !important;
+  box-shadow: none !important;
+}
+.remote-portrait-preview .remote-full-stage.remote-monitor-stage {
+  position: relative !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  padding: 48px 8px 10px !important;
+  display: grid !important;
+  place-items: center !important;
+  overflow: hidden !important;
+  touch-action: none !important;
+}
+.remote-portrait-preview .remote-monitor-frame {
+  width: min(94vw, 520px) !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  transform: translateZ(0) !important;
+}
+.remote-portrait-preview .remote-monitor-screen {
+  width: 100% !important;
+  aspect-ratio: 16 / 9 !important;
+  border-radius: 18px !important;
+  overflow: hidden !important;
+  background: #020617 !important;
+}
+.remote-portrait-preview .remote-full-help {
+  min-height: 30px !important;
+  padding: 6px 10px calc(7px + env(safe-area-inset-bottom, 0px)) !important;
+  font-size: .78rem !important;
+  line-height: 1.25 !important;
+}
+@media (max-height: 690px) {
+  .remote-portrait-preview .remote-draw-toolbar {
+    top: calc(46px + env(safe-area-inset-top, 0px)) !important;
+  }
+  .remote-portrait-preview .remote-full-stage.remote-monitor-stage {
+    padding-top: 42px !important;
+  }
+  .remote-monitor-neck { height: 16px !important; }
+  .remote-monitor-base { height: 11px !important; }
+}
+
+/* All Slides should show image thumbnails when available, with compact placeholders while loading. */
+.remote-slides-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 9px !important;
+}
+.remote-slide-choice {
+  aspect-ratio: 16 / 10 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  padding: 0 !important;
+}
+.remote-slide-choice img,
+.remote-slide-placeholder {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  object-fit: contain !important;
+}
+.remote-slide-placeholder {
+  display: grid !important;
+  place-items: center !important;
+  background: linear-gradient(135deg, rgba(30,41,59,.92), rgba(49,46,129,.74)) !important;
+}
