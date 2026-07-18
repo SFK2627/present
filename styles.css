@@ -3808,3 +3808,113 @@ body > .magic-effect-layer { position: fixed !important; }
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Pro v10.16: full-screen SHSS, single search spotlight, canvas particles */
+.magic-effect-layer {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  z-index: 2147483000 !important;
+  isolation: isolate;
+}
+
+.magic-fx-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 30;
+  pointer-events: none;
+  display: block;
+}
+
+.magic-effect-layer.magic-quiet {
+  background: transparent !important;
+}
+.magic-effect-layer.magic-quiet::before {
+  content: none !important;
+}
+.magic-quiet-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(0, 0, 0, .82);
+  backdrop-filter: brightness(.46) saturate(.68);
+  -webkit-backdrop-filter: brightness(.46) saturate(.68);
+}
+.magic-effect-layer.magic-quiet .magic-center {
+  z-index: 5 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+.magic-effect-layer.magic-quiet .magic-quiet-hero .magic-emoji {
+  font-size: clamp(7rem, 23vw, 15rem) !important;
+  animation: quietEmojiEntrance .52s cubic-bezier(.18, 1.45, .28, 1) both,
+             quietEmojiBreathe 1.05s ease-in-out .52s infinite alternate !important;
+}
+
+.magic-effect-layer.magic-spotlight {
+  background: transparent !important;
+}
+.magic-spotlight-dark {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgba(0, 0, 0, .88);
+}
+.magic-effect-layer.magic-spotlight .magic-moving-spotlight {
+  position: absolute !important;
+  inset: auto !important;
+  left: 0 !important;
+  top: 0 !important;
+  width: clamp(190px, 30vmin, 360px) !important;
+  aspect-ratio: 1 !important;
+  height: auto !important;
+  z-index: 3 !important;
+  border-radius: 50% !important;
+  opacity: 1 !important;
+  background: radial-gradient(circle,
+    rgba(255,255,235,.96) 0%,
+    rgba(255,252,214,.88) 48%,
+    rgba(255,248,190,.48) 70%,
+    rgba(255,248,190,0) 100%) !important;
+  background-size: 100% 100% !important;
+  box-shadow: 0 0 38px rgba(255,247,190,.30), 0 0 90px rgba(255,247,190,.15) !important;
+  filter: none !important;
+  mix-blend-mode: screen !important;
+  transform: translate3d(8vw, 10vh, 0);
+  will-change: transform;
+  animation: searchingSpotlight 6s linear both !important;
+}
+
+@keyframes searchingSpotlight {
+  0%, 12% {
+    transform: translate3d(8vw, 10vh, 0);
+    animation-timing-function: cubic-bezier(.55, 0, .25, 1);
+  }
+  28%, 39% {
+    transform: translate3d(calc(92vw - min(30vmin, 360px)), 16vh, 0);
+    animation-timing-function: cubic-bezier(.55, 0, .25, 1);
+  }
+  56%, 67% {
+    transform: translate3d(18vw, calc(86vh - min(30vmin, 360px)), 0);
+    animation-timing-function: cubic-bezier(.55, 0, .25, 1);
+  }
+  84%, 92% {
+    transform: translate3d(calc(75vw - min(30vmin, 360px)), calc(70vh - min(30vmin, 360px)), 0);
+    animation-timing-function: cubic-bezier(.45, 0, .2, 1);
+  }
+  100% {
+    transform: translate3d(calc(50vw - min(15vmin, 180px)), calc(46vh - min(15vmin, 180px)), 0);
+  }
+}
+
+@media (max-width: 640px) {
+  .magic-effect-layer.magic-spotlight .magic-moving-spotlight {
+    width: clamp(150px, 42vmin, 250px) !important;
+  }
+}

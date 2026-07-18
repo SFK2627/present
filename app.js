@@ -1640,7 +1640,7 @@
 
   function createMagicLayer() {
     let layer = document.getElementById('magicEffectLayer');
-    const host = document.fullscreenElement || els.viewerView || document.body;
+    const host = document.fullscreenElement || document.body;
     if (!layer) {
       layer = document.createElement('div');
       layer.id = 'magicEffectLayer';
@@ -1687,19 +1687,19 @@
       case 'drumroll':
         return `<div class="magic-stage-flash subtle"></div><div class="magic-center magic-plain magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-stick right"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span></div></div>`;
       case 'confetti':
-        return `<div class="magic-particles confetti-full">${makeParticles(180, 'magic-confetti')}</div>`;
+        return `<canvas class="magic-fx-canvas magic-confetti-canvas" aria-hidden="true"></canvas>`;
       case 'micdrop':
         return `<div class="magic-stage-flash"></div><div class="magic-center magic-plain magic-micdrop-hero"><span class="magic-mic">🎤</span><span class="magic-mic-shadow"></span></div>`;
       case 'curtain':
         return `<div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-reveal-shine"></div>`;
       case 'bubbles':
-        return `<div class="magic-particles bubbles-full">${makeParticles(82, 'magic-bubble')}</div>`;
+        return `<canvas class="magic-fx-canvas magic-bubbles-canvas" aria-hidden="true"></canvas>`;
       case 'quiet':
-        return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji" role="img" aria-label="Be Quiet">🤫</div></div>`;
+        return `<div class="magic-quiet-screen"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji" role="img" aria-label="Be Quiet">🤫</div></div>`;
       case 'applause':
         return `<div class="magic-particles applause-full">${makeParticles(120, 'magic-symbol', ['👏','👏','👏','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div></div>`;
       case 'spotlight':
-        return `<div class="magic-moving-spotlight"></div>`;
+        return `<div class="magic-spotlight-dark"></div><div class="magic-moving-spotlight"></div>`;
       case 'correct':
         return `<div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct"><div class="magic-mark">✅</div></div><div class="magic-particles">${makeParticles(72, 'magic-symbol', ['✅','✨','★'])}</div>`;
       case 'wrong':
@@ -1719,6 +1719,115 @@
     }
   }
 
+  function startMagicCanvas(effectId, layer) {
+    const canvas = layer.querySelector('.magic-fx-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    let width = 0;
+    let height = 0;
+    const resize = () => {
+      const rect = layer.getBoundingClientRect();
+      width = Math.max(1, rect.width);
+      height = Math.max(1, rect.height);
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+
+    const colors = ['#ff375f', '#ffcc00', '#34c759', '#0a84ff', '#bf5af2', '#ff9f0a', '#64d2ff'];
+    const isConfetti = effectId === 'confetti';
+    const count = isConfetti ? Math.min(190, Math.max(120, Math.round(width / 7))) : Math.min(64, Math.max(38, Math.round(width / 22)));
+    const particles = Array.from({ length: count }, (_, i) => {
+      if (isConfetti) {
+        return {
+          x: Math.random() * width,
+          y: -20 - Math.random() * height * .48,
+          vx: (Math.random() - .5) * 2.3,
+          vy: 3.2 + Math.random() * 4.7,
+          gravity: .035 + Math.random() * .045,
+          w: 7 + Math.random() * 10,
+          h: 4 + Math.random() * 9,
+          rotation: Math.random() * Math.PI * 2,
+          spin: (Math.random() - .5) * .22,
+          color: colors[i % colors.length],
+          wave: Math.random() * Math.PI * 2,
+          waveSpeed: .025 + Math.random() * .035
+        };
+      }
+      const radius = 9 + Math.random() * 18;
+      return {
+        x: radius + Math.random() * Math.max(1, width - radius * 2),
+        y: height + radius + Math.random() * height * .8,
+        radius,
+        speed: .75 + Math.random() * 1.45,
+        drift: (Math.random() - .5) * .38,
+        phase: Math.random() * Math.PI * 2,
+        alpha: .34 + Math.random() * .38
+      };
+    });
+
+    const started = performance.now();
+    const maxLife = isConfetti ? 3800 : 5000;
+    const draw = (now) => {
+      if (!canvas.isConnected || !layer.classList.contains('show')) return;
+      const elapsed = now - started;
+      ctx.clearRect(0, 0, width, height);
+
+      if (isConfetti) {
+        for (const p of particles) {
+          p.vy += p.gravity;
+          p.wave += p.waveSpeed;
+          p.x += p.vx + Math.sin(p.wave) * .7;
+          p.y += p.vy;
+          p.rotation += p.spin;
+          if (p.x < -30) p.x = width + 20;
+          if (p.x > width + 30) p.x = -20;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation);
+          ctx.fillStyle = p.color;
+          ctx.globalAlpha = Math.min(1, Math.max(0, (maxLife - elapsed) / 450));
+          ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+          ctx.restore();
+        }
+      } else {
+        for (const p of particles) {
+          p.phase += .018;
+          p.y -= p.speed;
+          p.x += p.drift + Math.sin(p.phase) * .22;
+          if (p.y < -p.radius * 2) {
+            p.y = height + p.radius + Math.random() * height * .22;
+            p.x = p.radius + Math.random() * Math.max(1, width - p.radius * 2);
+          }
+          const gradient = ctx.createRadialGradient(
+            p.x - p.radius * .34, p.y - p.radius * .38, p.radius * .08,
+            p.x, p.y, p.radius
+          );
+          gradient.addColorStop(0, `rgba(255,255,255,${Math.min(.95, p.alpha + .35)})`);
+          gradient.addColorStop(.2, `rgba(255,255,255,${p.alpha * .38})`);
+          gradient.addColorStop(.68, `rgba(96,165,250,${p.alpha * .38})`);
+          gradient.addColorStop(1, 'rgba(59,130,246,0)');
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          ctx.fillStyle = gradient;
+          ctx.fill();
+          ctx.strokeStyle = `rgba(255,255,255,${p.alpha * .72})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+
+      if (elapsed < maxLife) requestAnimationFrame(draw);
+    };
+    requestAnimationFrame(draw);
+  }
+
   function triggerMagicEffect(effectId) {
     const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
     const layer = createMagicLayer();
@@ -1726,10 +1835,11 @@
     layer.innerHTML = magicEffectMarkup(effect.id);
     void layer.offsetWidth;
     layer.classList.add('show');
+    if (effect.id === 'confetti' || effect.id === 'bubbles') startMagicCanvas(effect.id, layer);
     if (effect.id === 'quiet') speakQuietPrompt();
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 2600, confetti: 3400, micdrop: 2200, curtain: 2700, bubbles: 4400, quiet: 2200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 2600, confetti: 3800, micdrop: 2200, curtain: 2700, bubbles: 5000, quiet: 2400, applause: 2400, spotlight: 6000, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       layer.classList.remove('show');
       layer.classList.add('hidden');
