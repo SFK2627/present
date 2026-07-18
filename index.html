@@ -44,7 +44,7 @@
       <section class="toolbar-card glass">
         <div class="search-wrap">
           <span>⌕</span>
-          <input id="searchInput" type="search" placeholder="Search presentations..." />
+          <input id="searchInput" type="search" placeholder="Search presentations, folders, or Canva links..." />
         </div>
         <div class="select-wrap">
           <label for="sortSelect">Sort by</label>
@@ -53,6 +53,33 @@
             <option value="date">Date uploaded</option>
             <option value="name">Name</option>
           </select>
+        </div>
+      </section>
+
+      <section class="library-tools glass">
+        <div class="folders-panel">
+          <div class="mini-section-head">
+            <div>
+              <h3>Folders</h3>
+              <p>Organize files and Canva presentation links.</p>
+            </div>
+            <button id="createFolderBtn" type="button">+ Folder</button>
+          </div>
+          <div id="folderList" class="folder-list"></div>
+        </div>
+        <div class="canva-panel">
+          <div class="mini-section-head compact">
+            <div>
+              <h3>Add Canva link</h3>
+              <p>Paste a public view or embed link to open it inside the viewer.</p>
+            </div>
+          </div>
+          <div class="canva-add-row">
+            <input id="canvaTitleInput" type="text" placeholder="Optional title" />
+            <input id="canvaLinkInput" type="url" placeholder="Paste Canva public view / embed link" />
+            <button id="addCanvaBtn" type="button">Add Canva</button>
+          </div>
+          <p class="help-text small">Tip: for best results, use Canva Share → Embed or Public view link. Private links may ask viewers to log in.</p>
         </div>
       </section>
 
@@ -190,6 +217,7 @@
         <div id="viewerCanvasWrap" class="viewer-canvas-wrap">
           <canvas id="pdfCanvas" class="pdf-canvas hidden"></canvas>
           <div id="pptxSlide" class="pptx-slide hidden"></div>
+          <iframe id="canvaFrame" class="canva-frame hidden" title="Canva presentation viewer" allowfullscreen></iframe>
         </div>
         <div id="timerOverlay" class="timer-overlay bottom-right hidden">00:00:00</div>
       </section>

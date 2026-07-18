@@ -127,3 +127,11 @@ This version fixes the phone fullscreen preview so the top title bar and bottom 
 
 ## Sound/Voice alert note
 If the last-5-second alert does not play, open Controls and press **Test alert** once on the desktop viewer. Browsers require one user action before WebAudio or voice countdown can play, especially when Auto Play is started from a phone remote.
+
+## Folder organization
+
+This version adds local folders. Use **+ Folder** on the dashboard, click a folder chip to view it, and use the folder selector on each card to move files or Canva links into a folder. Folder names can be renamed with the pencil button. Deleting a folder does not delete the presentations; it moves them back to **Unfiled**.
+
+## Canva link viewer
+
+Use **Add Canva link** and paste a Canva public view link, smart embed link, or embed iframe code. The app will open the Canva design in the viewer with fullscreen support. Because Canva is embedded as an external website, the app cannot reliably control Canva's internal slide transitions or read its private slide thumbnails; use Canva's public view/embed settings for best results.

@@ -23,6 +23,8 @@
 
   const state = {
     files: [],
+    folders: [],
+    activeFolderId: localStorage.getItem('presentationHubActiveFolder') || 'all',
     activeFile: null,
     activePdf: null,
     activePptxSlides: [],
@@ -96,6 +98,8 @@
     }
 
     await loadLibrary();
+    loadFolders();
+    renderFolderList();
     renderLibrary();
     registerServiceWorker();
     window.addEventListener('resize', () => {
@@ -109,9 +113,10 @@
     [
       'app', 'remoteApp', 'homeView', 'viewerView', 'fileInput', 'uploadZone', 'searchInput', 'sortSelect',
       'cardsGrid', 'emptyState', 'libraryCount', 'clearLibraryBtn', 'themeToggle', 'firebaseStatus',
+      'createFolderBtn', 'folderList', 'canvaTitleInput', 'canvaLinkInput', 'addCanvaBtn',
       'thumbnailSidebar', 'viewerStage', 'viewerToolbar', 'controlPanel', 'settingsBtn', 'backHomeBtn',
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
-      'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide',
+      'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'canvaFrame',
       'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
       'countdownAlertSelect', 'soundTestBtn', 'slideTransitionSelect',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
@@ -138,6 +143,9 @@
     if (els.searchInput) els.searchInput.addEventListener('input', renderLibrary);
     if (els.sortSelect) els.sortSelect.addEventListener('change', renderLibrary);
     if (els.clearLibraryBtn) els.clearLibraryBtn.addEventListener('click', clearLibrary);
+    if (els.createFolderBtn) els.createFolderBtn.addEventListener('click', createFolder);
+    if (els.addCanvaBtn) els.addCanvaBtn.addEventListener('click', addCanvaLink);
+    if (els.canvaLinkInput) els.canvaLinkInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') addCanvaLink(); });
     if (els.themeToggle) els.themeToggle.addEventListener('click', toggleTheme);
     if (els.firebaseStatus) els.firebaseStatus.addEventListener('click', () => showModal(els.setupModal));
     if (els.closeSetupBtn) els.closeSetupBtn.addEventListener('click', () => hideModal(els.setupModal));
@@ -433,12 +441,212 @@
     }
   }
 
+
+  function loadFolders() {
+    try {
+      const raw = localStorage.getItem('presentationHubFolders');
+      state.folders = raw ? JSON.parse(raw).filter((folder) => folder && folder.id && folder.name) : [];
+    } catch (error) {
+      state.folders = [];
+    }
+    if (state.activeFolderId !== 'all' && !state.folders.some((folder) => folder.id === state.activeFolderId)) {
+      state.activeFolderId = 'all';
+      localStorage.setItem('presentationHubActiveFolder', 'all');
+    }
+  }
+
+  function saveFolders() {
+    localStorage.setItem('presentationHubFolders', JSON.stringify(state.folders));
+    localStorage.setItem('presentationHubActiveFolder', state.activeFolderId || 'all');
+  }
+
+  function getFolderName(folderId) {
+    if (!folderId) return 'Unfiled';
+    const folder = state.folders.find((item) => item.id === folderId);
+    return folder ? folder.name : 'Unfiled';
+  }
+
+  function createFolder() {
+    const name = prompt('Folder name:');
+    if (!name || !name.trim()) return;
+    const folder = {
+      id: crypto.randomUUID ? crypto.randomUUID() : `folder-${Date.now()}`,
+      name: name.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    state.folders.push(folder);
+    state.activeFolderId = folder.id;
+    saveFolders();
+    renderFolderList();
+    renderLibrary();
+  }
+
+  function renameFolder(folderId) {
+    const folder = state.folders.find((item) => item.id === folderId);
+    if (!folder) return;
+    const name = prompt('Rename folder:', folder.name);
+    if (!name || !name.trim()) return;
+    folder.name = name.trim();
+    saveFolders();
+    renderFolderList();
+    renderLibrary();
+  }
+
+  async function deleteFolder(folderId) {
+    const folder = state.folders.find((item) => item.id === folderId);
+    if (!folder) return;
+    if (!confirm(`Delete folder "${folder.name}"? Files will stay in Unfiled.`)) return;
+    state.folders = state.folders.filter((item) => item.id !== folderId);
+    state.files.forEach((file) => {
+      if (file.folderId === folderId) file.folderId = '';
+    });
+    await Promise.all(state.files.map((file) => dbPut(file)));
+    if (state.activeFolderId === folderId) state.activeFolderId = 'all';
+    saveFolders();
+    renderFolderList();
+    renderLibrary();
+  }
+
+  function setActiveFolder(folderId) {
+    state.activeFolderId = folderId || 'all';
+    saveFolders();
+    renderFolderList();
+    renderLibrary();
+  }
+
+  function getFolderCounts() {
+    const counts = { all: state.files.length, unfiled: state.files.filter((file) => !file.folderId).length };
+    state.folders.forEach((folder) => {
+      counts[folder.id] = state.files.filter((file) => file.folderId === folder.id).length;
+    });
+    return counts;
+  }
+
+  function renderFolderList() {
+    if (!els.folderList) return;
+    const counts = getFolderCounts();
+    const chips = [
+      `<button class="folder-chip ${state.activeFolderId === 'all' ? 'active' : ''}" data-folder="all"><span>All</span><b>${counts.all || 0}</b></button>`,
+      `<button class="folder-chip ${state.activeFolderId === 'unfiled' ? 'active' : ''}" data-folder="unfiled"><span>Unfiled</span><b>${counts.unfiled || 0}</b></button>`,
+      ...state.folders.map((folder) => `
+        <div class="folder-chip-wrap ${state.activeFolderId === folder.id ? 'active' : ''}">
+          <button class="folder-chip folder-main ${state.activeFolderId === folder.id ? 'active' : ''}" data-folder="${folder.id}">
+            <span>${escapeHtml(folder.name)}</span><b>${counts[folder.id] || 0}</b>
+          </button>
+          <button class="folder-mini-btn" data-rename-folder="${folder.id}" title="Rename folder">✎</button>
+          <button class="folder-mini-btn danger" data-delete-folder="${folder.id}" title="Delete folder">×</button>
+        </div>`),
+    ];
+    els.folderList.innerHTML = chips.join('');
+    els.folderList.querySelectorAll('[data-folder]').forEach((button) => {
+      button.addEventListener('click', () => setActiveFolder(button.dataset.folder));
+    });
+    els.folderList.querySelectorAll('[data-rename-folder]').forEach((button) => {
+      button.addEventListener('click', () => renameFolder(button.dataset.renameFolder));
+    });
+    els.folderList.querySelectorAll('[data-delete-folder]').forEach((button) => {
+      button.addEventListener('click', () => deleteFolder(button.dataset.deleteFolder));
+    });
+  }
+
+  function getUploadFolderId() {
+    return state.activeFolderId && !['all', 'unfiled'].includes(state.activeFolderId) ? state.activeFolderId : '';
+  }
+
+  function folderSelectOptions(selectedId) {
+    const base = [`<option value="">Unfiled</option>`];
+    state.folders.forEach((folder) => {
+      base.push(`<option value="${folder.id}" ${selectedId === folder.id ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`);
+    });
+    return base.join('');
+  }
+
+  async function movePresentationToFolder(id, folderId) {
+    const file = state.files.find((item) => item.id === id);
+    if (!file) return;
+    file.folderId = folderId || '';
+    await dbPut(file);
+    renderFolderList();
+    renderLibrary();
+  }
+
+  function normalizeCanvaUrl(raw) {
+    let value = String(raw || '').trim();
+    const srcMatch = value.match(/src=["']([^"']+)["']/i);
+    if (srcMatch) value = srcMatch[1];
+    if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+    let url;
+    try { url = new URL(value); } catch (error) { return null; }
+    const host = url.hostname.toLowerCase();
+    if (!host.endsWith('canva.com') && !host.endsWith('canva.site') && !host.endsWith('canva.cn')) return null;
+    if (host.endsWith('canva.com') || host.endsWith('canva.cn')) {
+      if (!url.searchParams.has('embed')) url.searchParams.set('embed', '');
+    }
+    return url.toString();
+  }
+
+  async function addCanvaLink() {
+    const raw = els.canvaLinkInput ? els.canvaLinkInput.value : '';
+    const embedUrl = normalizeCanvaUrl(raw);
+    if (!embedUrl) {
+      alert('Please paste a valid Canva public view or embed link.');
+      return;
+    }
+    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+    const now = new Date().toISOString();
+    let title = els.canvaTitleInput && els.canvaTitleInput.value.trim();
+    if (!title) title = 'Canva presentation';
+    const record = {
+      id,
+      name: title,
+      type: 'canva',
+      url: raw.trim(),
+      embedUrl,
+      uploadedAt: now,
+      lastViewed: now,
+      pageCount: 1,
+      folderId: getUploadFolderId(),
+      thumbnail: createCanvaThumbDataUrl(title),
+      note: 'Canva links are embedded in the viewer. Use a public view or embed link; private Canva links may require login.',
+    };
+    state.files.unshift(record);
+    await dbPut(record);
+    if (els.canvaTitleInput) els.canvaTitleInput.value = '';
+    if (els.canvaLinkInput) els.canvaLinkInput.value = '';
+    renderFolderList();
+    renderLibrary();
+  }
+
+  function createCanvaThumbDataUrl(name) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, 640, 400);
+    gradient.addColorStop(0, '#00c4cc');
+    gradient.addColorStop(0.55, '#7d2ae8');
+    gradient.addColorStop(1, '#ff66c4');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 640, 400);
+    ctx.fillStyle = 'rgba(255,255,255,.18)';
+    roundRect(ctx, 54, 54, 532, 292, 30);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 48px Inter, Arial';
+    ctx.fillText('CANVA', 86, 150);
+    ctx.font = '26px Inter, Arial';
+    ctx.fillText('Embedded presentation link', 86, 198);
+    ctx.font = '22px Inter, Arial';
+    wrapCanvasText(ctx, name, 86, 255, 460, 30, 2);
+    return canvas.toDataURL('image/jpeg', 0.86);
+  }
+
   async function handleFiles(fileList) {
     const files = Array.from(fileList || []).filter((file) => /\.(pdf|pptx)$/i.test(file.name));
     if (!files.length) return;
 
     for (const file of files) {
-      const record = await createPresentationRecord(file);
+      const record = await createPresentationRecord(file, getUploadFolderId());
       state.files.unshift(record);
       await dbPut(record);
       renderLibrary();
@@ -446,7 +654,7 @@
     if (els.fileInput) els.fileInput.value = '';
   }
 
-  async function createPresentationRecord(file) {
+  async function createPresentationRecord(file, folderId = '') {
     const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
     const now = new Date().toISOString();
     const type = file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'pptx';
@@ -480,6 +688,7 @@
       lastViewed: now,
       pageCount,
       thumbnail,
+      folderId,
       blob: file,
       note,
     };
@@ -610,7 +819,15 @@
     const sort = els.sortSelect.value;
     let files = [...state.files];
 
-    if (query) files = files.filter((file) => file.name.toLowerCase().includes(query));
+    if (state.activeFolderId === 'unfiled') files = files.filter((file) => !file.folderId);
+    else if (state.activeFolderId && state.activeFolderId !== 'all') files = files.filter((file) => file.folderId === state.activeFolderId);
+
+    if (query) {
+      files = files.filter((file) => {
+        const haystack = [file.name, file.type, file.url, getFolderName(file.folderId)].join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
+    }
     files.sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name);
       if (sort === 'date') return new Date(b.uploadedAt) - new Date(a.uploadedAt);
@@ -619,7 +836,8 @@
 
     els.cardsGrid.innerHTML = files.map(cardTemplate).join('');
     els.emptyState.classList.toggle('hidden', files.length > 0);
-    els.libraryCount.textContent = `${state.files.length} file${state.files.length === 1 ? '' : 's'} saved locally`;
+    const folderText = state.activeFolderId === 'all' ? 'all folders' : state.activeFolderId === 'unfiled' ? 'Unfiled' : getFolderName(state.activeFolderId);
+    els.libraryCount.textContent = `${files.length} shown • ${state.files.length} total • ${folderText}`;
 
     els.cardsGrid.querySelectorAll('[data-open]').forEach((button) => {
       button.addEventListener('click', () => openPresentation(button.dataset.open));
@@ -627,21 +845,32 @@
     els.cardsGrid.querySelectorAll('[data-delete]').forEach((button) => {
       button.addEventListener('click', () => deletePresentation(button.dataset.delete));
     });
+    els.cardsGrid.querySelectorAll('[data-move-folder]').forEach((select) => {
+      select.addEventListener('change', () => movePresentationToFolder(select.dataset.moveFolder, select.value));
+    });
   }
 
   function cardTemplate(file) {
     const date = new Date(file.uploadedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-    const typeLabel = file.type === 'pdf' ? 'PDF' : 'PPTX';
+    const typeLabel = file.type === 'pdf' ? 'PDF' : file.type === 'pptx' ? 'PPTX' : 'CANVA';
+    const countLabel = file.type === 'pdf' ? `${file.pageCount} pages` : file.type === 'pptx' ? `${file.pageCount} slides` : 'Canva link';
     return `
       <article class="presentation-card glass">
-        <span class="file-badge">${typeLabel}</span>
+        <span class="file-badge ${file.type === 'canva' ? 'canva-badge' : ''}">${typeLabel}</span>
         <div class="card-thumb"><img src="${file.thumbnail || createGenericThumbDataUrl(file.name, file.type)}" alt="${escapeHtml(file.name)} thumbnail"></div>
         <div class="card-body">
           <h4 title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</h4>
           <div class="card-meta">
-            <span>${file.pageCount} ${file.type === 'pdf' ? 'pages' : 'slides'}</span>
+            <span>${countLabel}</span>
             <span>${date}</span>
           </div>
+          <div class="card-folder-row">
+            <span>${escapeHtml(getFolderName(file.folderId))}</span>
+            <select data-move-folder="${file.id}" title="Move to folder">
+              ${folderSelectOptions(file.folderId)}
+            </select>
+          </div>
+          ${file.note ? `<p class="card-note">${escapeHtml(file.note)}</p>` : ''}
           <div class="card-actions">
             <button data-open="${file.id}">Open</button>
             <button class="delete-btn" data-delete="${file.id}">Delete</button>
@@ -658,6 +887,7 @@
   async function deletePresentation(id) {
     state.files = state.files.filter((file) => file.id !== id);
     await dbDelete(id);
+    renderFolderList();
     renderLibrary();
   }
 
@@ -665,6 +895,7 @@
     if (!confirm('Clear all locally saved presentations?')) return;
     state.files = [];
     await dbClear();
+    renderFolderList();
     renderLibrary();
   }
 
@@ -703,6 +934,10 @@
     els.viewerView.classList.remove('hidden');
     els.pdfCanvas.classList.add('hidden');
     els.pptxSlide.classList.add('hidden');
+    if (els.canvaFrame) {
+      els.canvaFrame.classList.add('hidden');
+      els.canvaFrame.removeAttribute('src');
+    }
     els.pageTotalLabel.textContent = `/ ${state.totalPages}`;
     els.jumpInput.max = state.totalPages;
     els.jumpInput.value = '1';
@@ -714,12 +949,14 @@
         const buffer = await file.blob.arrayBuffer();
         state.activePdf = await pdfjsLib.getDocument({ data: buffer }).promise;
         state.totalPages = state.activePdf.numPages;
-      } else {
+      } else if (file.type === 'pptx') {
         await preparePptxVisualRenderer(file.blob);
         if (!state.pptxVisualReady) {
           state.activePptxSlides = await parsePptxSlides(file.blob);
           state.totalPages = state.activePptxSlides.length;
         }
+      } else if (file.type === 'canva') {
+        state.totalPages = 1;
       }
       file.pageCount = state.totalPages;
       els.pageTotalLabel.textContent = `/ ${state.totalPages}`;
@@ -755,6 +992,10 @@
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
       state.pptxBlobUrl = '';
+    }
+    if (els.canvaFrame) {
+      els.canvaFrame.classList.add('hidden');
+      els.canvaFrame.removeAttribute('src');
     }
     state.activeFile = null;
     els.viewerView.classList.add('hidden');
@@ -933,7 +1174,16 @@
     }
 
     try {
-      if (state.activeFile.type === 'pdf') {
+      if (state.activeFile.type === 'canva') {
+        els.pdfCanvas.classList.add('hidden');
+        els.pptxSlide.classList.add('hidden');
+        if (els.canvaFrame) {
+          els.canvaFrame.classList.remove('hidden');
+          if (els.canvaFrame.getAttribute('src') !== state.activeFile.embedUrl) els.canvaFrame.setAttribute('src', state.activeFile.embedUrl);
+        }
+        applyViewportScroll();
+      } else if (state.activeFile.type === 'pdf') {
+        if (els.canvaFrame) els.canvaFrame.classList.add('hidden');
         els.pptxSlide.classList.add('hidden');
         els.pdfCanvas.classList.remove('hidden');
         const page = await getCachedPdfPage(state.currentPage);
@@ -959,6 +1209,7 @@
         warmAdjacentPdfPages();
         applyViewportScroll();
       } else {
+        if (els.canvaFrame) els.canvaFrame.classList.add('hidden');
         els.pdfCanvas.classList.add('hidden');
         els.pptxSlide.classList.remove('hidden');
         if (state.pptxVisualReady) {
@@ -994,7 +1245,7 @@
       item.dataset.page = String(i);
       item.innerHTML = `
         <div class="thumb-canvas-wrap" data-thumb-wrap="${i}"><span>Loading...</span></div>
-        <div class="thumb-label"><span>${state.activeFile.type === 'pdf' ? 'Page' : 'Slide'} ${i}</span><span>${state.perPageTiming[i] ? state.perPageTiming[i] + 's' : ''}</span></div>
+        <div class="thumb-label"><span>${state.activeFile.type === 'pdf' ? 'Page' : state.activeFile.type === 'canva' ? 'Canva' : 'Slide'} ${i}</span><span>${state.perPageTiming[i] ? state.perPageTiming[i] + 's' : ''}</span></div>
       `;
       item.addEventListener('click', () => jumpToPage(i));
       els.thumbnailSidebar.appendChild(item);
@@ -1018,7 +1269,12 @@
     wrap.dataset.rendered = '1';
     wrap.innerHTML = '';
 
-    if (state.activeFile.type === 'pdf') {
+    if (state.activeFile.type === 'canva') {
+      const img = document.createElement('img');
+      img.alt = 'Canva presentation link';
+      img.src = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
+      wrap.appendChild(img);
+    } else if (state.activeFile.type === 'pdf') {
       const page = await state.activePdf.getPage(pageNumber);
       const viewportBase = page.getViewport({ scale: 1 });
       const scale = 170 / viewportBase.width;
@@ -1603,6 +1859,9 @@
       if (state.activeFile.type === 'pdf' && state.activePdf) {
         return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 900);
       }
+      if (state.activeFile.type === 'canva') {
+        return state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
+      }
       if (state.activeFile.type === 'pptx') {
         if (state.pptxVisualReady && window.html2canvas && state.pptxRenderedSlides[state.currentPage - 1]) {
           const canvas = await window.html2canvas(state.pptxRenderedSlides[state.currentPage - 1], {
@@ -1833,8 +2092,8 @@
         }
         const data = snap.data();
         $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
-        $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
-        $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFileLabel').textContent = data.fileName || 'Active presentation';
         if (data.thumb) latestThumb = data.thumb;
         const preview = $('remotePreview');
