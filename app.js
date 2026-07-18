@@ -2631,8 +2631,13 @@
     const offsetStrength = Math.max(0, zoom - 1);
     const translateX = (0.5 - centerX) * 100 * offsetStrength;
     const translateY = (0.5 - centerY) * 100 * offsetStrength;
+    const transformValue = `translate3d(${translateX}%, ${translateY}%, 0) scale(${zoom})`;
     img.style.transformOrigin = 'center center';
-    img.style.transform = `translate3d(${translateX}%, ${translateY}%, 0) scale(${zoom})`;
+    // Keep the phone portrait preview visually synced while pinching.
+    // The CSS uses an !important transform for GPU stability, so update the
+    // custom property it reads instead of only setting style.transform.
+    img.style.setProperty('--remote-full-transform', transformValue);
+    img.style.setProperty('transform', transformValue, 'important');
   }
 
   function attachRemotePreviewControls(ref, isHost, getViewport, setLocalViewport) {

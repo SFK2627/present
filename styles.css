@@ -1842,7 +1842,7 @@ body.dark select option:checked,
 .remote-portrait-preview .remote-full-stage img {
   will-change: transform !important;
   transition: none !important;
-  transform: translateZ(0) !important;
+  transform: var(--remote-full-transform, translate3d(0, 0, 0) scale(1)) !important;
   backface-visibility: hidden !important;
 }
 .remote-portrait-preview .remote-full-stage {
