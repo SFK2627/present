@@ -4193,83 +4193,111 @@
     renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
   }
   function normalizeClassHeader(value) {
-    return String(value || '').trim().toLowerCase().replace(/[\s_\-]+/g, '');
+    return String(value || '').replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+  function cleanStudentName(value) {
+    return String(value == null ? '' : value)
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+  function cleanClassValue(value) {
+    return String(value == null ? '' : value).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
   }
   function findClassColumn(row, aliases) {
     const keys = Object.keys(row || {});
-    return keys.find((key) => aliases.includes(normalizeClassHeader(key))) || '';
+    const wanted = aliases.map(normalizeClassHeader);
+    return keys.find((key) => wanted.includes(normalizeClassHeader(key))) || '';
   }
   function makeStudentId(sectionId, studentId, name, index) {
     const source = String(studentId || name || index).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     return `${sectionId}-${source || index}`;
+  }
+  function rowsFromClassSheet(sheet) {
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
+    const aliases = new Set(['studentid','studentnumber','studentno','id','lrn','name','studentname','fullname','learnername','firstname','middlename','lastname','surname','gender','sex','section','class','classname','gradeandsection']);
+    let headerIndex = matrix.findIndex((row) => Array.isArray(row) && row.some((cell) => aliases.has(normalizeClassHeader(cell))));
+    if (headerIndex < 0) headerIndex = matrix.findIndex((row) => Array.isArray(row) && row.some((cell) => cleanClassValue(cell)));
+    if (headerIndex < 0) return [];
+    const headers = matrix[headerIndex].map((cell, i) => cleanClassValue(cell) || `Column${i + 1}`);
+    return matrix.slice(headerIndex + 1).map((cells) => {
+      const row = {};
+      headers.forEach((header, i) => { row[header] = cells[i] == null ? '' : cells[i]; });
+      return row;
+    }).filter((row) => Object.values(row).some((value) => cleanClassValue(value)));
   }
   async function importClassListFile(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
     if (els.classImportStatus) els.classImportStatus.textContent = 'Reading class list...';
     try {
+      if (!window.XLSX) throw new Error('Excel reader is not available. Connect to the internet once, then reload the app.');
       let rows = [];
       const lower = file.name.toLowerCase();
       if (lower.endsWith('.csv')) {
         const text = await file.text();
-        if (window.XLSX) {
-          const workbook = XLSX.read(text, { type: 'string' });
-          rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
-        } else {
-          const lines = text.split(/\r?\n/).filter(Boolean);
-          const headers = (lines.shift() || '').split(',').map(x => x.trim());
-          rows = lines.map(line => Object.fromEntries(line.split(',').map((v, i) => [headers[i] || `Column${i+1}`, v.trim()])));
-        }
+        const workbook = XLSX.read(text, { type: 'string' });
+        for (const sheetName of workbook.SheetNames) rows.push(...rowsFromClassSheet(workbook.Sheets[sheetName]));
       } else {
-        if (!window.XLSX) throw new Error('Excel reader is not available. Connect to the internet once, then reload the app.');
         const data = await file.arrayBuffer();
-        const workbook = XLSX.read(data, { type: 'array' });
-        for (const sheetName of workbook.SheetNames) {
-          const sheetRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '', raw: false });
-          rows.push(...sheetRows);
-        }
+        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
+        for (const sheetName of workbook.SheetNames) rows.push(...rowsFromClassSheet(workbook.Sheets[sheetName]));
       }
-      rows = rows.filter(row => Object.values(row || {}).some(value => String(value || '').trim()));
-      if (!rows.length) throw new Error('No student rows were found.');
-      const sample = rows[0] || {};
-      const idKey = findClassColumn(sample, ['studentid','studentnumber','id','lrn']);
-      const nameKey = findClassColumn(sample, ['name','studentname','fullname','learnername']);
+      if (!rows.length) throw new Error('No student rows were found. Make sure the file has a header row.');
+      const sample = rows.find(row => Object.values(row || {}).some(value => cleanClassValue(value))) || {};
+      const idKey = findClassColumn(sample, ['student id','student number','student no','id','lrn']);
+      const nameKey = findClassColumn(sample, ['name','student name','full name','learner name']);
+      const firstNameKey = findClassColumn(sample, ['first name','firstname','given name']);
+      const middleNameKey = findClassColumn(sample, ['middle name','middlename','middle initial']);
+      const lastNameKey = findClassColumn(sample, ['last name','lastname','surname','family name']);
       const genderKey = findClassColumn(sample, ['gender','sex']);
-      const sectionKey = findClassColumn(sample, ['section','class','classname','gradeandsection']);
-      if (!nameKey) throw new Error('A Name column is required. Use: Student ID | Name | Gender | Section');
+      const sectionKey = findClassColumn(sample, ['section','class','class name','grade and section']);
+      if (!nameKey && !firstNameKey && !lastNameKey) throw new Error('A Name column is required. Use: Student ID | Name | Gender | Section');
       const grouped = new Map();
       for (const row of rows) {
-        const name = String(row[nameKey] || '').trim();
+        let name = nameKey ? cleanStudentName(row[nameKey]) : '';
+        if (!name) name = [firstNameKey && row[firstNameKey], middleNameKey && row[middleNameKey], lastNameKey && row[lastNameKey]].map(cleanStudentName).filter(Boolean).join(' ');
+        name = cleanStudentName(name);
         if (!name) continue;
-        const sectionName = String((sectionKey && row[sectionKey]) || 'Imported Section').trim() || 'Imported Section';
+        const sectionName = cleanClassValue((sectionKey && row[sectionKey]) || 'Imported Section') || 'Imported Section';
         if (!grouped.has(sectionName)) grouped.set(sectionName, []);
         grouped.get(sectionName).push({
-          studentId: idKey ? String(row[idKey] || '').trim() : '',
+          studentId: idKey ? cleanClassValue(row[idKey]) : '',
           name,
-          gender: genderKey ? String(row[genderKey] || '').trim() : ''
+          gender: genderKey ? cleanClassValue(row[genderKey]) : ''
         });
       }
+      if (!grouped.size) throw new Error('No complete student names were found in the file.');
       let importedStudents = 0;
-      let importedSections = 0;
+      let updatedStudents = 0;
       for (const [sectionName, students] of grouped.entries()) {
-        let section = state.classroom.sections.find(s => s.name.trim().toLowerCase() === sectionName.toLowerCase());
+        let section = state.classroom.sections.find(s => cleanClassValue(s.name).toLowerCase() === sectionName.toLowerCase());
         if (!section) {
           section = { id: `sec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`, name: sectionName, students: [] };
           state.classroom.sections.push(section);
-          importedSections++;
         }
-        const byKey = new Map(section.students.map(s => [String(s.studentId || s.name).trim().toLowerCase(), s]));
+        section.students = (section.students || []).map(s => ({ ...s, name: cleanStudentName(s.name) }));
+        const byKey = new Map();
+        section.students.forEach((s) => {
+          const idKeyValue = cleanClassValue(s.studentId).toLowerCase();
+          const nameKeyValue = cleanStudentName(s.name).toLowerCase();
+          if (idKeyValue) byKey.set(`id:${idKeyValue}`, s);
+          if (nameKeyValue) byKey.set(`name:${nameKeyValue}`, s);
+        });
         for (const student of students) {
-          const key = String(student.studentId || student.name).trim().toLowerCase();
-          const existing = byKey.get(key);
+          const idLookup = student.studentId ? `id:${student.studentId.toLowerCase()}` : '';
+          const nameLookup = `name:${student.name.toLowerCase()}`;
+          const existing = (idLookup && byKey.get(idLookup)) || byKey.get(nameLookup);
           if (existing) {
             existing.name = student.name;
-            existing.studentId = student.studentId;
-            existing.gender = student.gender;
+            if (student.studentId) existing.studentId = student.studentId;
+            if (student.gender) existing.gender = student.gender;
+            updatedStudents++;
           } else {
             const record = { id: makeStudentId(section.id, student.studentId, student.name, section.students.length), ...student };
             section.students.push(record);
-            byKey.set(key, record);
+            if (student.studentId) byKey.set(`id:${student.studentId.toLowerCase()}`, record);
+            byKey.set(nameLookup, record);
             importedStudents++;
           }
         }
@@ -4282,7 +4310,7 @@
       renderClassroomTools();
       scheduleClassroomSave();
       publishSessionState(true);
-      if (els.classImportStatus) els.classImportStatus.textContent = `Imported ${importedStudents} student${importedStudents === 1 ? '' : 's'} across ${grouped.size} section${grouped.size === 1 ? '' : 's'}. Existing matches were updated.`;
+      if (els.classImportStatus) els.classImportStatus.textContent = `Imported ${importedStudents} new student${importedStudents === 1 ? '' : 's'}${updatedStudents ? ` and updated ${updatedStudents}` : ''} across ${grouped.size} section${grouped.size === 1 ? '' : 's'}.`;
     } catch (error) {
       console.warn('Class list import failed', error);
       if (els.classImportStatus) els.classImportStatus.textContent = error.message || 'Could not import this file.';
@@ -4293,7 +4321,7 @@
   }
   function saveClassroomNames() {
     const sec = activeClassSection(); if (!sec) return alert('Create or select a section first.');
-    const names = (els.studentNamesInput.value || '').split(/\n|,/).map(x => x.trim()).filter(Boolean);
+    const names = (els.studentNamesInput.value || '').split(/\r?\n/).map(cleanStudentName).filter(Boolean);
     sec.students = names.map((name, i) => ({ id: `${sec.id}-${i}-${name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`, name }));
     state.classroom.pickedIds = []; state.classroom.assignments = {}; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
   }
@@ -4303,13 +4331,13 @@
     if (!state.classroom.activeSectionId && state.classroom.sections[0]) state.classroom.activeSectionId = state.classroom.sections[0].id;
     els.sectionSelect.value = state.classroom.activeSectionId || '';
     const sec = activeClassSection();
-    els.studentNamesInput.value = sec ? sec.students.map(s => s.name).join('\n') : '';
+    els.studentNamesInput.value = sec ? sec.students.map(s => cleanStudentName(s.name)).join('\n') : '';
     els.groupCountInput.value = state.classroom.groupCount;
     els.removePickedInput.checked = state.classroom.removePicked;
     els.balancedGroupsInput.checked = state.classroom.balanced;
     els.classroomResult.innerHTML = state.classroom.lastStudent ? `<strong>${escapeHtml(state.classroom.lastStudent.name)}</strong>${state.classroom.lastGroup ? `<span>GROUP ${state.classroom.lastGroup}</span>` : ''}` : '<span>Ready to pick</span>';
     renderClassroomPresentation();
-    els.classroomRoster.innerHTML = sec ? sec.students.map(s => `<div><span>${escapeHtml(s.name)}</span><b>${state.classroom.assignments[s.id] ? 'G'+state.classroom.assignments[s.id] : ''}</b></div>`).join('') : '';
+    els.classroomRoster.innerHTML = sec ? sec.students.map(s => `<div><span title="${escapeHtml(cleanStudentName(s.name))}">${escapeHtml(cleanStudentName(s.name))}</span><b>${state.classroom.assignments[s.id] ? 'G'+state.classroom.assignments[s.id] : ''}</b></div>`).join('') : '';
   }
   function classroomRemoteSnapshot() {
     const sec = activeClassSection();
@@ -4371,7 +4399,7 @@
     if (sectionEl) sectionEl.textContent = sec ? sec.name : 'Select a section';
     if (!main) return;
     if (state.classroom.lastStudent || state.classroom.lastGroup) {
-      main.innerHTML = `${state.classroom.lastStudent ? `<div class="classroom-stage-label">SELECTED STUDENT</div><h1>${escapeHtml(state.classroom.lastStudent.name)}</h1>` : ''}${state.classroom.lastGroup ? `<div class="classroom-stage-final-die">${state.classroom.lastGroup}</div><h2>GROUP ${state.classroom.lastGroup}</h2>` : '<p>Ready to roll a group.</p>'}`;
+      main.innerHTML = `${state.classroom.lastStudent ? `<div class="classroom-stage-label">SELECTED STUDENT</div><h1 class="classroom-single-line-name">${escapeHtml(cleanStudentName(state.classroom.lastStudent.name))}</h1>` : ''}${state.classroom.lastGroup ? `<div class="classroom-stage-final-die">${state.classroom.lastGroup}</div><h2>GROUP ${state.classroom.lastGroup}</h2>` : '<p>Ready to roll a group.</p>'}`;
     } else {
       main.innerHTML = '<div class="classroom-stage-icon">✦</div><h1>Ready for the next pick</h1><p>Use the phone remote or the classroom controls.</p>';
     }
@@ -4399,7 +4427,7 @@
     if (layer.parentElement !== fullscreenHost) fullscreenHost.appendChild(layer);
     const sparkles = Array.from({length:18}, (_,i)=>`<i style="--i:${i};--x:${8+Math.random()*84}%;--y:${8+Math.random()*80}%;--d:${(Math.random()*1.3).toFixed(2)}s"></i>`).join('');
     layer.className = `classroom-reveal-layer show ${group ? 'group-reveal' : 'name-reveal'}`;
-    layer.innerHTML = `<div class="classroom-reveal-bg"></div><div class="classroom-reveal-orbit orbit-one"></div><div class="classroom-reveal-orbit orbit-two"></div><div class="classroom-reveal-sparkles">${sparkles}</div><canvas class="classroom-reveal-confetti"></canvas><div class="classroom-reveal-card"><div class="classroom-reveal-badge">${group ? 'GROUP DICE' : 'RANDOM NAME'}</div>${name?`<h2 data-text="${escapeHtml(name)}">${escapeHtml(name)}</h2>`:''}${group?`<div class="classroom-die"><span>${group}</span></div><h3>GROUP ${group}</h3>`:'<div class="classroom-reveal-line"></div><p>Selected!</p>'}</div>`;
+    layer.innerHTML = `<div class="classroom-reveal-bg"></div><div class="classroom-reveal-orbit orbit-one"></div><div class="classroom-reveal-orbit orbit-two"></div><div class="classroom-reveal-sparkles">${sparkles}</div><canvas class="classroom-reveal-confetti"></canvas><div class="classroom-reveal-card"><div class="classroom-reveal-badge">${group ? 'GROUP DICE' : 'RANDOM NAME'}</div>${name?`<h2 class="classroom-single-line-name" data-text="${escapeHtml(cleanStudentName(name))}">${escapeHtml(cleanStudentName(name))}</h2>`:''}${group?`<div class="classroom-die"><span>${group}</span></div><h3>GROUP ${group}</h3>`:'<div class="classroom-reveal-line"></div><p>Selected!</p>'}</div>`;
     startClassroomRevealConfetti(layer, !!group);
     const duration = group ? 3900 : 3200;
     clearTimeout(layer._hideTimer);

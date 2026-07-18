@@ -271,7 +271,7 @@
           <section class="classroom-editor">
             <label>Section<select id="sectionSelect"></select></label>
             <div class="classroom-inline"><input id="newSectionName" placeholder="New section name"><button id="addSectionBtn">Add</button></div>
-            <label>Student names<textarea id="studentNamesInput" rows="10" placeholder="One name per line"></textarea></label>
+            <label>Student names<textarea id="studentNamesInput" rows="10" wrap="off" spellcheck="false" placeholder="One complete name per line"></textarea><small class="classroom-name-hint">One complete student name per line. Names stay on one line.</small></label>
             <div class="classroom-import-box">
               <input id="classListFileInput" type="file" accept=".xlsx,.xls,.csv" hidden>
               <button id="importClassListBtn" type="button">Import Excel / CSV</button>

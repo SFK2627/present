@@ -3643,3 +3643,15 @@ body > .magic-effect-layer { position: fixed !important; }
 @keyframes classGridDrift{to{transform:perspective(700px) rotateX(62deg) translate(52px,35%)}}@keyframes classAuroraA{to{transform:translate(16vmax,10vmax) scale(1.15)}}@keyframes classAuroraB{to{transform:translate(-14vmax,-8vmax) scale(1.2)}}@keyframes classStars{to{background-position:260px 260px,-330px 330px,290px -290px,-380px -380px}}@keyframes classIconFloat{50%{transform:translateY(-12px) rotate(8deg);filter:drop-shadow(0 18px 25px rgba(167,139,250,.6))}}@keyframes classRevealSpin{to{transform:rotate(360deg)}}@keyframes classOrbit{to{transform:translate(-50%,-50%) rotate(360deg)}}@keyframes classSpark{0%,100%{transform:scale(.35);opacity:.2}50%{transform:scale(1.8);opacity:1}}@keyframes classNameLand{0%{opacity:0;transform:translateY(55px) scale(.72);filter:blur(18px)}65%{opacity:1;transform:translateY(-8px) scale(1.04);filter:blur(0)}100%{transform:none}}@keyframes classLineExpand{from{width:0;opacity:0}to{opacity:1}}@keyframes classDicePremium{0%{opacity:0;transform:translateY(-55vh) rotateX(540deg) rotateY(-420deg) scale(.45)}72%{opacity:1;transform:translateY(18px) rotateX(-18deg) rotateY(22deg) scale(1.09)}86%{transform:translateY(-8px) rotateX(8deg) rotateY(-7deg) scale(.98)}100%{transform:none}}
 @media(max-width:700px){.classroom-stage-content{width:94vw;padding:24px 18px;border-radius:26px}.classroom-reveal-card{width:94vw;padding:30px 16px;border-radius:28px}.classroom-stage-main{min-height:55vh}}
 @media(prefers-reduced-motion:reduce){.classroom-stage-grid,.classroom-stage-aurora,.classroom-stage-stars,.classroom-reveal-bg,.classroom-reveal-orbit,.classroom-reveal-sparkles i{animation:none!important}}
+
+/* v11.3 full-name import and one-line roster fix */
+.classroom-editor textarea#studentNamesInput{white-space:pre;overflow-x:auto;overflow-y:auto;word-break:normal;overflow-wrap:normal;line-height:1.65;font-family:inherit}
+.classroom-name-hint{color:var(--muted);font-size:.78rem;line-height:1.35}
+.classroom-roster{overflow-x:hidden}
+.classroom-roster>div{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;min-width:0}
+.classroom-roster>div>span{display:block;min-width:0;white-space:nowrap;overflow-x:auto;overflow-y:hidden;text-overflow:clip;scrollbar-width:thin;line-height:1.45;padding-bottom:2px}
+.classroom-roster>div>b{white-space:nowrap}
+.classroom-result strong,.classroom-single-line-name{white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;text-wrap:nowrap!important;max-width:96vw}
+.classroom-stage-main h1.classroom-single-line-name{font-size:clamp(1.8rem,7.2vw,8rem);letter-spacing:-.035em}
+.classroom-reveal-card h2.classroom-single-line-name{font-size:clamp(1.9rem,8vw,8.2rem)!important;letter-spacing:-.04em}
+@media(max-width:700px){.classroom-stage-main h1.classroom-single-line-name{font-size:clamp(1.35rem,7.4vw,4rem)}.classroom-reveal-card h2.classroom-single-line-name{font-size:clamp(1.45rem,7.8vw,4.2rem)!important}}
