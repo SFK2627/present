@@ -117,3 +117,10 @@ PowerPoint note: the browser PPTX renderer has been kept visual-only and improve
 ## Phone fullscreen preview fix
 
 This version fixes the phone fullscreen preview so the top title bar and bottom hint bar no longer cover the slide. The whole slide is visible first, then pinch zoom and drag can focus an area and sync that viewport to the desktop viewer.
+
+
+## Latest update
+
+- Added a live Timer size slider in desktop Controls.
+- Added a live Timer size slider in the phone Host remote.
+- Opacity slider now updates live in smaller steps.

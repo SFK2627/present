@@ -369,6 +369,7 @@ input:focus, select:focus {
 .panel-section h4 { margin: 0 0 12px; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .field-grid label { display: grid; gap: 6px; color: #cbd5e1; font-size: .9rem; }
+.range-value { justify-self: end; color: #f8fafc; font-weight: 800; font-size: .8rem; margin-top: -1.4rem; }
 .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .button-row button { box-shadow: none; }
 .viewer-canvas-wrap {
@@ -411,12 +412,12 @@ input:focus, select:focus {
   position: absolute;
   z-index: 12;
   border-radius: 18px;
-  padding: .75rem 1rem;
-  min-width: 142px;
+  padding: var(--timer-pad-y, 12px) var(--timer-pad-x, 16px);
+  min-width: var(--timer-min-width, 142px);
   text-align: center;
   font-variant-numeric: tabular-nums;
   font-weight: 900;
-  font-size: clamp(1rem, 2vw, 1.5rem);
+  font-size: var(--timer-size, 28px);
   color: white;
   background: rgba(15, 23, 42, .75);
   border: 1px solid rgba(255,255,255,.14);
@@ -797,6 +798,26 @@ input:focus, select:focus {
   opacity: .45;
   pointer-events: none;
 }
+
+.remote-slider-stack {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+.remote-slider-stack label {
+  display: grid;
+  gap: 7px;
+  color: #cbd5e1;
+  font-weight: 800;
+}
+.remote-slider-stack span {
+  color: #f8fafc;
+  font-size: .9rem;
+}
+.remote-slider-stack input[type="range"] {
+  width: 100%;
+}
+
 .remote-full-preview {
   position: fixed;
   inset: 0;
@@ -893,6 +914,26 @@ body.remote-fullscreen-open {
 @keyframes phSoftBlur { from { opacity: .2; filter: blur(12px); transform: scale(.99); } to { opacity: 1; filter: blur(0); transform: scale(1); } }
 
 /* Smoother phone fullscreen preview: full dynamic viewport, no clipped bottom */
+
+.remote-slider-stack {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+.remote-slider-stack label {
+  display: grid;
+  gap: 7px;
+  color: #cbd5e1;
+  font-weight: 800;
+}
+.remote-slider-stack span {
+  color: #f8fafc;
+  font-size: .9rem;
+}
+.remote-slider-stack input[type="range"] {
+  width: 100%;
+}
+
 .remote-full-preview {
   height: 100dvh;
   min-height: 100svh;
@@ -958,6 +999,26 @@ body.remote-fullscreen-open {
 }
 
 /* Phone fullscreen preview fix: bars should not cover the slide */
+
+.remote-slider-stack {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+.remote-slider-stack label {
+  display: grid;
+  gap: 7px;
+  color: #cbd5e1;
+  font-weight: 800;
+}
+.remote-slider-stack span {
+  color: #f8fafc;
+  font-size: .9rem;
+}
+.remote-slider-stack input[type="range"] {
+  width: 100%;
+}
+
 .remote-full-preview {
   height: 100dvh !important;
   min-height: 100svh !important;

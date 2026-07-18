@@ -58,6 +58,7 @@
       countdownSeconds: 600,
       position: 'bottom-right',
       opacity: 75,
+      size: 28,
     },
     toolbarHideTimer: null,
     renderToken: 0,
@@ -113,7 +114,7 @@
       'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
       'countdownAlertSelect', 'slideTransitionSelect',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
-      'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerShowBtn', 'timerHideBtn',
+      'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
       'qrHelp', 'setupModal', 'closeSetupBtn'
     ].forEach((id) => { els[id] = $(id); });
@@ -215,6 +216,11 @@
     });
     if (els.timerOpacityInput) els.timerOpacityInput.addEventListener('input', () => {
       state.timer.opacity = Number(els.timerOpacityInput.value);
+      applyTimerSettings();
+      publishSessionState();
+    });
+    if (els.timerSizeInput) els.timerSizeInput.addEventListener('input', () => {
+      state.timer.size = Math.max(16, Math.min(72, Number(els.timerSizeInput.value) || 28));
       applyTimerSettings();
       publishSessionState();
     });
@@ -1391,9 +1397,16 @@
     els.timerOverlay.classList.remove('bottom-right', 'bottom-left', 'top-right', 'top-left');
     els.timerOverlay.classList.add(state.timer.position);
     els.timerOverlay.style.opacity = String(state.timer.opacity / 100);
+    const timerSize = Math.max(16, Math.min(72, Number(state.timer.size) || 28));
+    els.timerOverlay.style.setProperty('--timer-size', `${timerSize}px`);
+    els.timerOverlay.style.setProperty('--timer-pad-y', `${Math.max(8, Math.round(timerSize * 0.42))}px`);
+    els.timerOverlay.style.setProperty('--timer-pad-x', `${Math.max(12, Math.round(timerSize * 0.58))}px`);
+    els.timerOverlay.style.setProperty('--timer-min-width', `${Math.max(126, Math.round(timerSize * 5.4))}px`);
     els.timerModeSelect.value = state.timer.mode;
     els.timerPositionSelect.value = state.timer.position;
     els.timerOpacityInput.value = state.timer.opacity;
+    if (els.timerSizeInput) els.timerSizeInput.value = timerSize;
+    if (els.timerSizeLabel) els.timerSizeLabel.textContent = `${timerSize}px`;
     if (els.countdownAlertSelect) els.countdownAlertSelect.value = state.countdownAlert || 'off';
     if (els.slideTransitionSelect) els.slideTransitionSelect.value = state.transitionEffect || 'fade';
   }
@@ -1531,6 +1544,7 @@
       perPageTiming: state.perPageTiming,
       timerVisible: state.timer.visible,
       timerOpacity: state.timer.opacity,
+      timerSize: state.timer.size,
       timerMode: state.timer.mode,
       timerPosition: state.timer.position,
       countdownAlert: state.countdownAlert,
@@ -1618,6 +1632,11 @@
       case 'timerReset': resetTimer(); break;
       case 'setTimerOpacity':
         state.timer.opacity = Number(command.value);
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setTimerSize':
+        state.timer.size = Math.max(16, Math.min(72, Number(command.value) || 28));
         applyTimerSettings();
         publishSessionState();
         break;
@@ -1722,9 +1741,13 @@
             <button data-command="timerHide" data-host-only="true">Hide</button>
             <button data-command="timerReset" data-host-only="true">Reset</button>
           </div>
-          <div class="remote-wide">
-            <input id="remoteOpacity" type="range" min="0" max="100" step="25" value="75">
-            <button id="remoteSetOpacity" data-host-only="true">Change Opacity</button>
+          <div class="remote-slider-stack">
+            <label>Opacity <span id="remoteOpacityLabel">75%</span>
+              <input id="remoteOpacity" type="range" min="0" max="100" step="1" value="75" data-host-only="true">
+            </label>
+            <label>Timer size <span id="remoteTimerSizeLabel">28px</span>
+              <input id="remoteTimerSize" type="range" min="16" max="72" step="1" value="28" data-host-only="true">
+            </label>
           </div>
         </section>
       </main>
@@ -1777,6 +1800,9 @@
         $('remoteTimingMode').value = data.timingMode || 'global';
         $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
         $('remoteOpacity').value = data.timerOpacity ?? 75;
+        if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${data.timerOpacity ?? 75}%`;
+        $('remoteTimerSize').value = data.timerSize ?? 28;
+        if ($('remoteTimerSizeLabel')) $('remoteTimerSizeLabel').textContent = `${data.timerSize ?? 28}px`;
         $('remoteAutoLabel').textContent = data.autoPlaying
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
@@ -1803,9 +1829,17 @@
         const mode = $('remoteTimingMode').value;
         sendRemoteCommand(ref, mode === 'per-slide' ? 'setCurrentSlideTiming' : 'setGlobalTiming', seconds);
       });
-      $('remoteSetOpacity').addEventListener('click', () => {
+      $('remoteOpacity').addEventListener('input', () => {
         if (!isHost) return;
-        sendRemoteCommand(ref, 'setTimerOpacity', Number($('remoteOpacity').value));
+        const value = Number($('remoteOpacity').value);
+        if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${value}%`;
+        sendRemoteCommand(ref, 'setTimerOpacity', value);
+      });
+      $('remoteTimerSize').addEventListener('input', () => {
+        if (!isHost) return;
+        const value = Number($('remoteTimerSize').value);
+        if ($('remoteTimerSizeLabel')) $('remoteTimerSizeLabel').textContent = `${value}px`;
+        sendRemoteCommand(ref, 'setTimerSize', value);
       });
     });
   }

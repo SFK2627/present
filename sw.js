@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-phone-preview-fit-v1';
+const CACHE_NAME = 'presentation-hub-timer-size-slider-v1';
 const APP_SHELL = [
   './',
   './index.html',
