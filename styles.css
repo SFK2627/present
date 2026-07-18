@@ -2248,66 +2248,179 @@ body.remote-fullscreen-open .remote-portrait-preview .remote-full-stage img {
   will-change: left, top, width, height !important;
 }
 
-
-/* Remote fullscreen request handshake
-   A phone/Firebase command is not a local desktop user gesture, so browsers may block entering fullscreen.
-   This prompt appears only when the desktop must receive one tap to complete fullscreen. */
-.fullscreen-request-prompt {
+/* Pro v10.5: host slide picker and annotation overlay */
+.viewer-canvas-wrap {
+  position: relative;
+}
+.ink-canvas {
   position: absolute;
-  inset: 0;
-  z-index: 80;
-  display: grid;
-  place-items: center;
+  inset: 0 auto auto 0;
+  z-index: 8;
   pointer-events: none;
-  padding: 24px;
-  background: radial-gradient(circle at center, rgba(17, 24, 39, .18), rgba(0, 0, 0, .48));
+  mix-blend-mode: normal;
 }
-.fullscreen-request-prompt.hidden { display: none !important; }
-.fullscreen-request-card {
-  pointer-events: auto;
-  width: min(520px, calc(100vw - 36px));
-  display: grid;
-  gap: 12px;
-  padding: 22px;
-  border-radius: 26px;
-  border: 1px solid rgba(255,255,255,.24);
-  background: linear-gradient(145deg, rgba(20, 24, 44, .92), rgba(40, 45, 78, .86));
-  color: #fff;
-  box-shadow: 0 28px 80px rgba(0,0,0,.42);
-  text-align: center;
-}
-.fullscreen-request-card strong {
-  font-size: clamp(1.15rem, 2.2vw, 1.7rem);
-  letter-spacing: -.02em;
-}
-.fullscreen-request-card span {
-  color: rgba(255,255,255,.76);
-  line-height: 1.45;
-}
-.fullscreen-request-actions {
+.remote-preview-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-top: 6px;
+  margin-top: 12px;
 }
-.fullscreen-request-actions button {
-  min-height: 48px;
-  border: 0;
-  border-radius: 999px;
-  font-weight: 800;
-  cursor: pointer;
+.remote-all-slides-btn {
+  background: linear-gradient(135deg, rgba(20, 184, 166, .88), rgba(59, 130, 246, .68)) !important;
 }
-#acceptRemoteFullscreenBtn {
+.remote-slides-panel {
+  position: fixed;
+  inset: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 24px;
+  background: linear-gradient(155deg, rgba(15,23,42,.98), rgba(49,46,129,.96));
   color: #fff;
-  background: linear-gradient(135deg, #7c5cff, #22c1c3);
-  box-shadow: 0 16px 34px rgba(124,92,255,.28);
+  box-shadow: 0 24px 80px rgba(0,0,0,.5);
 }
-#dismissRemoteFullscreenBtn {
-  color: rgba(255,255,255,.9);
-  background: rgba(255,255,255,.14);
-  border: 1px solid rgba(255,255,255,.2);
+.remote-slides-panel.hidden { display: none !important; }
+.remote-slides-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
-.viewer-view.presentation-fullscreen .fullscreen-request-prompt,
-.viewer-view:fullscreen .fullscreen-request-prompt {
-  display: none !important;
+.remote-slides-head strong {
+  display: block;
+  font-size: 1.05rem;
+}
+.remote-slides-head span {
+  display: block;
+  color: rgba(226,232,240,.78);
+  font-size: .8rem;
+  margin-top: 2px;
+}
+.remote-slides-head button {
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  padding: 10px 15px;
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  font-weight: 800;
+}
+.remote-slides-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px;
+  padding: 2px 2px 24px;
+}
+.remote-slide-choice {
+  position: relative;
+  overflow: hidden;
+  min-height: 100px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 18px;
+  background: rgba(15,23,42,.72);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+.remote-slide-choice.active {
+  border-color: rgba(129,140,248,.95);
+  box-shadow: 0 0 0 2px rgba(129,140,248,.35), 0 12px 34px rgba(0,0,0,.22);
+}
+.remote-slide-choice img {
+  width: 100%;
+  height: 100%;
+  min-height: 100px;
+  object-fit: contain;
+  display: block;
+  background: #fff;
+}
+.remote-slide-num {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  background: rgba(15,23,42,.82);
+  color: #fff;
+  font-size: .82rem;
+}
+.remote-slide-placeholder {
+  display: grid;
+  place-items: center;
+  min-height: 112px;
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: rgba(255,255,255,.68);
+}
+.remote-slide-note {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: rgba(226,232,240,.75);
+  padding: 12px;
+}
+.remote-draw-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 10px 6px;
+  background: rgba(2, 6, 23, .9);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.remote-draw-toolbar button {
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  padding: 9px 8px;
+  background: rgba(255,255,255,.09);
+  color: #fff;
+  font-weight: 850;
+  font-size: .78rem;
+}
+.remote-draw-toolbar button.active {
+  background: linear-gradient(135deg, #8b5cf6, #14b8a6);
+  border-color: rgba(255,255,255,.28);
+  box-shadow: 0 10px 24px rgba(20,184,166,.18);
+}
+.remote-monitor-screen[data-tool="pen"],
+.remote-monitor-screen[data-tool="highlighter"] {
+  cursor: crosshair;
+}
+.remote-monitor-screen[data-tool="erase"] {
+  cursor: cell;
+}
+.remote-ink-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 4;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.remote-monitor-screen img {
+  z-index: 1;
+}
+.remote-monitor-screen::after {
+  z-index: 5;
+}
+@media (min-width: 520px) {
+  .remote-slides-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 420px) {
+  .remote-preview-actions { grid-template-columns: 1fr; }
+  .remote-draw-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .remote-slide-choice { min-height: 92px; }
 }

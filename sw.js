@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-pro-v10-remote-fullscreen-fix';
+const CACHE_NAME = 'presentation-hub-pro-v10-annotate-slides-1';
 const APP_SHELL = [
   './',
   './index.html',

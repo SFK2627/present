@@ -85,6 +85,10 @@
     unsubscribeSession: null,
     lastCommandId: null,
     publishLock: false,
+    inkStrokes: [],
+    remoteSlideThumbs: {},
+    remoteSlideThumbsCount: 0,
+    remoteSlideThumbsBusy: false,
   };
 
 
@@ -186,13 +190,13 @@
       'createFolderBtn', 'folderList', 'canvaTitleInput', 'canvaLinkInput', 'addCanvaBtn',
       'thumbnailSidebar', 'viewerStage', 'viewerToolbar', 'controlPanel', 'settingsBtn', 'backHomeBtn',
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
-      'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'canvaFrame',
+      'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'canvaFrame', 'inkCanvas',
       'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
       'countdownAlertSelect', 'countdownVoiceSelect', 'countdownVoiceStartSelect', 'soundTestBtn', 'slideTransitionSelect',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
-      'qrHelp', 'setupModal', 'closeSetupBtn', 'fullscreenRequestPrompt', 'acceptRemoteFullscreenBtn', 'dismissRemoteFullscreenBtn'
+      'qrHelp', 'setupModal', 'closeSetupBtn'
     ].forEach((id) => { els[id] = $(id); });
   }
 
@@ -228,8 +232,6 @@
     if (els.zoomOutBtn) els.zoomOutBtn.addEventListener('click', () => setZoom(state.zoom - 0.1));
     if (els.resetZoomBtn) els.resetZoomBtn.addEventListener('click', () => setZoom(1));
     if (els.fullscreenBtn) els.fullscreenBtn.addEventListener('click', toggleFullscreen);
-    if (els.acceptRemoteFullscreenBtn) els.acceptRemoteFullscreenBtn.addEventListener('click', enterFullscreenFromPrompt);
-    if (els.dismissRemoteFullscreenBtn) els.dismissRemoteFullscreenBtn.addEventListener('click', hideRemoteFullscreenPrompt);
     if (els.qrBtn) els.qrBtn.addEventListener('click', openQrModal);
     if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => hideModal(els.qrModal));
     if (els.settingsBtn) els.settingsBtn.addEventListener('click', () => els.controlPanel.classList.toggle('hidden'));
@@ -799,7 +801,7 @@
     ctx.fillText('Embedded presentation link', 86, 198);
     ctx.font = '22px Inter, Arial';
     wrapCanvasText(ctx, name, 86, 255, 460, 30, 2);
-    return canvas.toDataURL('image/jpeg', quality);
+    return canvas.toDataURL('image/jpeg', 0.86);
   }
 
   async function handleFiles(fileList, folderIdOverride) {
@@ -971,7 +973,7 @@
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
-    return canvas.toDataURL('image/jpeg', 0.86);
+    return canvas.toDataURL('image/jpeg', quality);
   }
 
   function renderLibrary() {
@@ -1109,6 +1111,9 @@
     state.pptxVisualReady = false;
     state.pptxRenderedSlides = [];
     state.lastCountdownAlertSecond = null;
+    state.inkStrokes = [];
+    state.remoteSlideThumbs = {};
+    state.remoteSlideThumbsCount = 0;
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
       state.pptxBlobUrl = '';
@@ -1177,6 +1182,9 @@
     state.pptxVisualReady = false;
     state.pptxRenderedSlides = [];
     state.lastCountdownAlertSecond = null;
+    state.inkStrokes = [];
+    state.remoteSlideThumbs = {};
+    state.remoteSlideThumbsCount = 0;
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
       state.pptxBlobUrl = '';
@@ -1396,6 +1404,7 @@
           `;
         }
       }
+      renderInkOverlay();
       if (state.slideChangePending && token === state.renderToken) {
         playSlideTransition();
         state.slideChangePending = false;
@@ -1575,6 +1584,7 @@
       const maxTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
       wrap.scrollLeft = Math.max(0, Math.min(maxLeft, (wrap.scrollWidth * state.viewportCenterX) - (wrap.clientWidth / 2)));
       wrap.scrollTop = Math.max(0, Math.min(maxTop, (wrap.scrollHeight * state.viewportCenterY) - (wrap.clientHeight / 2)));
+      renderInkOverlay();
     });
   }
 
@@ -1648,58 +1658,10 @@
       document.activeElement.blur();
     }
     if (!document.fullscreenElement) {
-      try {
-        await els.viewerView.requestFullscreen();
-        hideRemoteFullscreenPrompt();
-      } catch (error) {
-        showRemoteFullscreenPrompt();
-      }
+      await els.viewerView.requestFullscreen().catch(() => {});
     } else {
       await document.exitFullscreen().catch(() => {});
-      hideRemoteFullscreenPrompt();
     }
-  }
-
-  async function handleRemoteFullscreenRequest() {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen().catch(() => {});
-      hideRemoteFullscreenPrompt();
-      return;
-    }
-
-    // Browsers intentionally block entering fullscreen from a remote/Firebase event
-    // because it is not a direct click on the desktop page. Exiting fullscreen is
-    // allowed, which is why the phone button could exit but not enter. We still
-    // attempt once, then show a desktop confirmation button that has the required
-    // local user gesture.
-    try {
-      await els.viewerView.requestFullscreen();
-      hideRemoteFullscreenPrompt();
-    } catch (error) {
-      showRemoteFullscreenPrompt();
-    }
-  }
-
-  async function enterFullscreenFromPrompt() {
-    if (document.activeElement && typeof document.activeElement.blur === 'function') {
-      document.activeElement.blur();
-    }
-    try {
-      await els.viewerView.requestFullscreen();
-      hideRemoteFullscreenPrompt();
-    } catch (error) {
-      showRemoteFullscreenPrompt();
-    }
-  }
-
-  function showRemoteFullscreenPrompt() {
-    if (!els.fullscreenRequestPrompt || !els.viewerView || els.viewerView.classList.contains('hidden')) return;
-    els.fullscreenRequestPrompt.classList.remove('hidden');
-    revealToolbarTemporarily();
-  }
-
-  function hideRemoteFullscreenPrompt() {
-    if (els.fullscreenRequestPrompt) els.fullscreenRequestPrompt.classList.add('hidden');
   }
 
   function syncFullscreenState() {
@@ -1708,7 +1670,6 @@
     els.viewerView.classList.toggle('presentation-fullscreen', fullscreen);
     if (els.fullscreenBtn) els.fullscreenBtn.textContent = fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
     if (els.controlPanel && fullscreen) els.controlPanel.classList.add('hidden');
-    if (fullscreen) hideRemoteFullscreenPrompt();
     if (fullscreen && document.activeElement && typeof document.activeElement.blur === 'function') {
       document.activeElement.blur();
     }
@@ -2319,6 +2280,9 @@
       countdownVoiceGender: state.countdownVoiceGender,
       countdownVoiceStart: getCountdownVoiceStart(),
       transitionEffect: state.transitionEffect,
+      inkStrokes: state.inkStrokes.slice(-350),
+      slideThumbs: state.remoteSlideThumbs || {},
+      slideThumbsCount: state.remoteSlideThumbsCount || 0,
       updatedAt: Date.now(),
     };
 
@@ -2381,10 +2345,16 @@
       case 'prev': previousPage(); break;
       case 'first': jumpToPage(1); break;
       case 'last': jumpToPage(state.totalPages); break;
+      case 'jumpTo': jumpToPage(command.value); break;
+      case 'requestSlideThumbs': generateRemoteSlideThumbs(); break;
+      case 'addInkStroke': addInkStroke(command.value); break;
+      case 'clearInk': clearInkStrokes(); break;
+      case 'undoInk': undoInkStroke(); break;
+      case 'eraseInkAt': eraseInkAt(command.value); break;
       case 'zoomIn': setZoom(state.zoom + 0.1); break;
       case 'zoomOut': setZoom(state.zoom - 0.1); break;
       case 'resetZoom': setZoom(1, { centerX: 0.5, centerY: 0.5 }); break;
-      case 'toggleFullscreen': handleRemoteFullscreenRequest(); break;
+      case 'toggleFullscreen': toggleFullscreen(); break;
       case 'setZoom': setZoom(Number(command.value) || 1); break;
       case 'setViewport': setViewportTransform(command.value || {}); break;
       case 'autoStart': startAutoPlay(); break;
@@ -2471,6 +2441,145 @@
     }
   }
 
+
+  function normalizeStroke(raw = {}) {
+    const page = Math.min(Math.max(1, Number(raw.page) || state.currentPage || 1), state.totalPages || 1);
+    const tool = raw.tool === 'highlighter' ? 'highlighter' : 'pen';
+    const points = Array.isArray(raw.points)
+      ? raw.points.map((pt) => ({ x: clamp01(pt.x), y: clamp01(pt.y) })).filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y))
+      : [];
+    if (points.length < 2) return null;
+    return {
+      id: raw.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      page,
+      tool,
+      color: typeof raw.color === 'string' && raw.color ? raw.color : (tool === 'highlighter' ? '#facc15' : '#ef4444'),
+      size: Math.max(2, Math.min(28, Number(raw.size) || (tool === 'highlighter' ? 18 : 6))),
+      points,
+      createdAt: Number(raw.createdAt) || Date.now(),
+    };
+  }
+
+  function addInkStroke(raw) {
+    const stroke = normalizeStroke(raw);
+    if (!stroke) return;
+    state.inkStrokes = state.inkStrokes.filter((item) => item.id !== stroke.id).concat(stroke).slice(-350);
+    renderInkOverlay();
+    publishSessionState(true);
+  }
+
+  function clearInkStrokes(pageOnly = true) {
+    if (pageOnly) state.inkStrokes = state.inkStrokes.filter((stroke) => stroke.page !== state.currentPage);
+    else state.inkStrokes = [];
+    renderInkOverlay();
+    publishSessionState(true);
+  }
+
+  function undoInkStroke() {
+    const idx = [...state.inkStrokes].map((stroke, index) => ({ stroke, index })).reverse().find((item) => item.stroke.page === state.currentPage)?.index;
+    if (idx === undefined) return;
+    state.inkStrokes.splice(idx, 1);
+    renderInkOverlay();
+    publishSessionState(true);
+  }
+
+  function eraseInkAt(value = {}) {
+    const page = Math.min(Math.max(1, Number(value.page) || state.currentPage), state.totalPages || 1);
+    const x = clamp01(value.x);
+    const y = clamp01(value.y);
+    const radius = Math.max(0.01, Math.min(0.09, Number(value.radius) || 0.035));
+    const before = state.inkStrokes.length;
+    state.inkStrokes = state.inkStrokes.filter((stroke) => {
+      if (stroke.page !== page) return true;
+      return !stroke.points.some((pt) => Math.hypot(pt.x - x, pt.y - y) <= radius);
+    });
+    if (state.inkStrokes.length !== before) {
+      renderInkOverlay();
+      publishSessionState(true);
+    }
+  }
+
+  function getActiveSlideSurface() {
+    if (state.activeFile && state.activeFile.type === 'pdf') return state.activePdfCanvas || els.pdfCanvas;
+    if (state.activeFile && state.activeFile.type === 'pptx') return state.pptxRenderedSlides[state.currentPage - 1] || els.pptxSlide;
+    if (state.activeFile && state.activeFile.type === 'canva') return els.canvaFrame;
+    return null;
+  }
+
+  function renderInkOverlay() {
+    const canvas = els.inkCanvas;
+    const wrap = els.viewerCanvasWrap;
+    const surface = getActiveSlideSurface();
+    if (!canvas || !wrap || !surface || !surface.isConnected || !state.inkStrokes.length) {
+      if (canvas) canvas.classList.add('hidden');
+      return;
+    }
+    const wrapRect = wrap.getBoundingClientRect();
+    const surfRect = surface.getBoundingClientRect();
+    const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+    const width = Math.max(1, wrap.scrollWidth || wrap.clientWidth);
+    const height = Math.max(1, wrap.scrollHeight || wrap.clientHeight);
+    canvas.classList.remove('hidden');
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const offsetX = surfRect.left - wrapRect.left + wrap.scrollLeft;
+    const offsetY = surfRect.top - wrapRect.top + wrap.scrollTop;
+    const surfW = Math.max(1, surfRect.width);
+    const surfH = Math.max(1, surfRect.height);
+    state.inkStrokes.filter((stroke) => stroke.page === state.currentPage).forEach((stroke) => {
+      if (!stroke.points || stroke.points.length < 2) return;
+      ctx.save();
+      ctx.globalAlpha = stroke.tool === 'highlighter' ? 0.35 : 0.95;
+      ctx.globalCompositeOperation = stroke.tool === 'highlighter' ? 'multiply' : 'source-over';
+      ctx.strokeStyle = stroke.color || (stroke.tool === 'highlighter' ? '#facc15' : '#ef4444');
+      ctx.lineWidth = Math.max(2, Number(stroke.size) || 6);
+      ctx.beginPath();
+      stroke.points.forEach((pt, index) => {
+        const x = offsetX + pt.x * surfW;
+        const y = offsetY + pt.y * surfH;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  async function generateRemoteSlideThumbs() {
+    if (!state.sessionRef || !state.activeFile || state.remoteSlideThumbsBusy) return;
+    state.remoteSlideThumbsBusy = true;
+    const thumbs = { ...(state.remoteSlideThumbs || {}) };
+    const maxPages = Math.min(state.totalPages || 1, 80);
+    try {
+      for (let page = 1; page <= maxPages; page++) {
+        if (thumbs[page]) continue;
+        if (state.activeFile.type === 'pdf' && state.activePdf) {
+          thumbs[page] = await renderPdfPageToDataUrl(state.activePdf, page, 170, 0.45);
+        } else if (state.activeFile.type === 'pptx') {
+          thumbs[page] = createPptxThumbDataUrl(`Slide ${page}`, page);
+        } else if (state.activeFile.type === 'canva') {
+          thumbs[page] = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
+        }
+        if (page % 6 === 0 || page === maxPages) {
+          state.remoteSlideThumbs = thumbs;
+          state.remoteSlideThumbsCount = maxPages;
+          await state.sessionRef.set({ slideThumbs: thumbs, slideThumbsCount: maxPages, slideThumbsUpdatedAt: Date.now() }, { merge: true });
+        }
+      }
+    } catch (error) {
+      console.warn('Could not generate all slide thumbnails:', error);
+    } finally {
+      state.remoteSlideThumbsBusy = false;
+    }
+  }
+
   async function openQrModal() {
     if (!state.activeFile) return;
     if (!state.firebaseReady) {
@@ -2507,6 +2616,7 @@
     const isHost = role === 'host';
     let remoteViewport = { zoom: 1, centerX: 0.5, centerY: 0.5 };
     let latestThumb = '';
+    let latestRemoteData = null;
 
     els.remoteApp.innerHTML = `
       <main id="remoteControlDashboard" class="remote-card remote-premium-card ${isHost ? '' : 'remote-viewer-only'}">
@@ -2529,7 +2639,10 @@
           </div>
           <div class="remote-preview-shell">
             <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
-            <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Portrait Preview</button>
+            <div class="remote-preview-actions">
+              <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Portrait Preview</button>
+              <button id="remoteAllSlidesBtn" class="remote-preview-full-btn remote-all-slides-btn" data-host-only="true">All Slides</button>
+            </div>
           </div>
           <p id="remoteFileLabel" class="remote-sub remote-file-label">Connect to an active desktop session.</p>
         </section>
@@ -2642,17 +2755,37 @@
           </div>
         </section>
       </main>
+      <div id="remoteSlidesPanel" class="remote-slides-panel hidden" data-host-only="true">
+        <div class="remote-slides-head">
+          <div>
+            <strong>All Slides</strong>
+            <span id="remoteSlidesHelp">Choose a slide to show on desktop.</span>
+          </div>
+          <button id="remoteCloseSlides" type="button">Close</button>
+        </div>
+        <div id="remoteSlidesGrid" class="remote-slides-grid"></div>
+      </div>
+
       <div id="remoteFullPreview" class="remote-full-preview remote-portrait-preview hidden">
         <div class="remote-full-toolbar">
           <span id="remoteFullLabel">Slide Preview</span>
           <button id="remoteBackToControls" class="remote-back-controls">Controls</button>
           <button id="remoteClosePreview">Close</button>
         </div>
+        <div class="remote-draw-toolbar" data-host-only="true">
+          <button class="active" id="remoteToolMove" type="button">Move</button>
+          <button id="remoteToolPen" type="button">Pen</button>
+          <button id="remoteToolHighlighter" type="button">Highlight</button>
+          <button id="remoteToolErase" type="button">Erase</button>
+          <button id="remoteUndoInk" type="button">Undo</button>
+          <button id="remoteClearInk" type="button">Clear</button>
+        </div>
         <div id="remoteFullStage" class="remote-full-stage remote-monitor-stage">
           <div class="remote-monitor-frame" aria-label="Desktop monitor preview">
             <div class="remote-monitor-camera"></div>
             <div class="remote-monitor-screen">
               <img id="remoteFullImg" alt="Desktop monitor preview of current slide" />
+              <canvas id="remoteInkPreview" class="remote-ink-preview" aria-hidden="true"></canvas>
             </div>
             <div class="remote-monitor-neck"></div>
             <div class="remote-monitor-base"></div>
@@ -2661,6 +2794,13 @@
         <div class="remote-full-help">Portrait preview shows the desktop monitor look. Pinch inside the screen, then drag to choose the exact desktop area.</div>
       </div>
     `;
+
+    if (!isHost) {
+      els.remoteApp.querySelectorAll('[data-host-only="true"]').forEach((node) => {
+        node.setAttribute('aria-disabled', 'true');
+        if ('disabled' in node) node.disabled = true;
+      });
+    }
 
     if (!hasFirebaseConfig()) {
       $('remoteFileLabel').textContent = 'Remote needs firebase-config.js because phones need realtime sync across devices.';
@@ -2682,6 +2822,9 @@
           return;
         }
         const data = snap.data();
+        latestRemoteData = data;
+        window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
+        window.__phRemoteInkStrokes = Array.isArray(data.inkStrokes) ? data.inkStrokes : [];
         $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
         $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
@@ -2714,6 +2857,8 @@
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
         applyRemoteFullPreviewTransform(remoteViewport);
+        renderRemoteSlidesGrid(data, ref, isHost);
+        renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
       });
 
       els.remoteApp.querySelectorAll('[data-command]').forEach((button) => {
@@ -2725,6 +2870,8 @@
       attachRemotePreviewControls(ref, isHost, () => remoteViewport, (next) => {
         remoteViewport = next;
         applyRemoteFullPreviewTransform(remoteViewport);
+        renderRemoteSlidesGrid(data, ref, isHost);
+        renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
       });
       $('remoteTimingMode').addEventListener('change', () => {
         if (!isHost) return;
@@ -2779,6 +2926,97 @@
     });
   }
 
+
+  function renderRemoteSlidesGrid(data = {}, ref, isHost) {
+    const grid = $('remoteSlidesGrid');
+    const panel = $('remoteSlidesPanel');
+    if (!grid || !panel || panel.classList.contains('hidden')) return;
+    const total = Math.max(1, Number(data.totalPages) || 1);
+    const current = Math.max(1, Number(data.currentPage) || 1);
+    const thumbs = data.slideThumbs || {};
+    const availableCount = Number(data.slideThumbsCount) || Object.keys(thumbs).length || 0;
+    const help = $('remoteSlidesHelp');
+    if (help) help.textContent = availableCount ? `Tap any slide. Thumbnails loaded: ${Math.min(availableCount, total)} / ${total}.` : 'Loading thumbnails from desktop... tap numbers while waiting.';
+    const limit = Math.min(total, 180);
+    const parts = [];
+    for (let i = 1; i <= limit; i++) {
+      const src = thumbs[String(i)] || thumbs[i] || '';
+      parts.push(`
+        <button class="remote-slide-choice${i === current ? ' active' : ''}" data-jump-slide="${i}" type="button">
+          <span class="remote-slide-num">${i}</span>
+          ${src ? `<img src="${src}" alt="Slide ${i} thumbnail">` : `<span class="remote-slide-placeholder">${i}</span>`}
+        </button>
+      `);
+    }
+    if (total > limit) {
+      parts.push(`<div class="remote-slide-note">Showing first ${limit} of ${total}. Use First/Last/Next for far pages.</div>`);
+    }
+    grid.innerHTML = parts.join('');
+    grid.querySelectorAll('[data-jump-slide]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'jumpTo', Number(button.dataset.jumpSlide));
+      });
+    });
+  }
+
+  function renderRemoteInkPreview(strokes = [], page = 1, viewport = {}) {
+    const canvas = $('remoteInkPreview');
+    const img = $('remoteFullImg');
+    const screen = img ? (img.closest('.remote-monitor-screen') || $('remoteFullStage')) : null;
+    if (!canvas || !img || !screen) return;
+    const screenW = Math.max(1, screen.clientWidth || screen.getBoundingClientRect().width || 1);
+    const screenH = Math.max(1, screen.clientHeight || screen.getBoundingClientRect().height || 1);
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.style.width = `${screenW}px`;
+    canvas.style.height = `${screenH}px`;
+    canvas.width = Math.round(screenW * dpr);
+    canvas.height = Math.round(screenH * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, screenW, screenH);
+    const left = Number(img.dataset.remoteLeft) || 0;
+    const top = Number(img.dataset.remoteTop) || 0;
+    const contentW = Number(img.dataset.remoteContentW) || screenW;
+    const contentH = Number(img.dataset.remoteContentH) || screenH;
+    const all = Array.isArray(strokes) ? strokes.slice() : [];
+    if (window.__phRemoteTempStroke) all.push(window.__phRemoteTempStroke);
+    all.filter((stroke) => Number(stroke.page) === Number(page)).forEach((stroke) => {
+      if (!stroke.points || stroke.points.length < 2) return;
+      ctx.save();
+      ctx.globalAlpha = stroke.tool === 'highlighter' ? 0.35 : 0.95;
+      ctx.globalCompositeOperation = stroke.tool === 'highlighter' ? 'multiply' : 'source-over';
+      ctx.strokeStyle = stroke.color || (stroke.tool === 'highlighter' ? '#facc15' : '#ef4444');
+      ctx.lineWidth = Math.max(2, Math.min(22, Number(stroke.size) || 6));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      stroke.points.forEach((pt, index) => {
+        const x = left + clamp01(pt.x) * contentW;
+        const y = top + clamp01(pt.y) * contentH;
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function remoteScreenPointToSlide(clientX, clientY) {
+    const img = $('remoteFullImg');
+    const screen = img ? (img.closest('.remote-monitor-screen') || $('remoteFullStage')) : null;
+    if (!img || !screen) return { x: 0.5, y: 0.5 };
+    const rect = screen.getBoundingClientRect();
+    const left = Number(img.dataset.remoteLeft) || 0;
+    const top = Number(img.dataset.remoteTop) || 0;
+    const contentW = Math.max(1, Number(img.dataset.remoteContentW) || rect.width || 1);
+    const contentH = Math.max(1, Number(img.dataset.remoteContentH) || rect.height || 1);
+    return {
+      x: clamp01(((clientX - rect.left) - left) / contentW),
+      y: clamp01(((clientY - rect.top) - top) / contentH),
+    };
+  }
+
   function applyRemoteFullPreviewTransform(viewport) {
     const img = $('remoteFullImg');
     if (!img) return;
@@ -2826,8 +3064,13 @@
     img.style.height = `${contentH}px`;
     img.style.maxWidth = 'none';
     img.style.maxHeight = 'none';
+    img.dataset.remoteLeft = String(left);
+    img.dataset.remoteTop = String(top);
+    img.dataset.remoteContentW = String(contentW);
+    img.dataset.remoteContentH = String(contentH);
     img.dataset.actualCenterX = String(centerX);
     img.dataset.actualCenterY = String(centerY);
+    renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, { zoom, centerX, centerY });
   }
 
   function clampViewportToRemoteScreen(viewport) {
@@ -2975,8 +3218,62 @@
       return { rect, fitW, fitH, contentW: fitW * zoomValue, contentH: fitH * zoomValue };
     };
 
+    let activeTool = 'move';
+    let currentStroke = null;
+    const toolButtons = {
+      move: $('remoteToolMove'),
+      pen: $('remoteToolPen'),
+      highlighter: $('remoteToolHighlighter'),
+      erase: $('remoteToolErase'),
+    };
+
+    function setActiveTool(tool) {
+      activeTool = tool;
+      Object.entries(toolButtons).forEach(([name, button]) => {
+        if (button) button.classList.toggle('active', name === tool);
+      });
+      const screen = stage.querySelector('.remote-monitor-screen');
+      if (screen) screen.dataset.tool = tool;
+    }
+
+    Object.entries(toolButtons).forEach(([tool, button]) => {
+      if (button) button.addEventListener('click', () => setActiveTool(tool));
+    });
+    const undoBtn = $('remoteUndoInk');
+    const clearBtn = $('remoteClearInk');
+    if (undoBtn) undoBtn.addEventListener('click', () => sendRemoteCommand(ref, 'undoInk'));
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      if (confirm('Clear drawings on this slide?')) sendRemoteCommand(ref, 'clearInk');
+    });
+
+    const sendErase = throttle((point) => sendRemoteCommand(ref, 'eraseInkAt', {
+      page: window.__phRemoteCurrentPage || 1,
+      x: point.x,
+      y: point.y,
+      radius: 0.035,
+    }), 120);
+
     stage.addEventListener('touchstart', (event) => {
       if (event.touches.length) event.preventDefault();
+      if (activeTool !== 'move' && event.touches.length === 1) {
+        const point = remoteScreenPointToSlide(event.touches[0].clientX, event.touches[0].clientY);
+        if (activeTool === 'erase') {
+          sendErase(point);
+          return;
+        }
+        currentStroke = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          page: window.__phRemoteCurrentPage || 1,
+          tool: activeTool === 'highlighter' ? 'highlighter' : 'pen',
+          color: activeTool === 'highlighter' ? '#facc15' : '#ef4444',
+          size: activeTool === 'highlighter' ? 18 : 6,
+          points: [point],
+          createdAt: Date.now(),
+        };
+        window.__phRemoteTempStroke = currentStroke;
+        renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+        return;
+      }
       beginGesture();
       const current = safeViewport(localViewport || getViewport());
       startZoom = current.zoom;
@@ -2995,6 +3292,20 @@
     stage.addEventListener('touchmove', (event) => {
       if (event.touches.length !== 1 && event.touches.length !== 2) return;
       event.preventDefault();
+      if (activeTool !== 'move' && event.touches.length === 1) {
+        const point = remoteScreenPointToSlide(event.touches[0].clientX, event.touches[0].clientY);
+        if (activeTool === 'erase') {
+          sendErase(point);
+          return;
+        }
+        if (currentStroke) {
+          const last = currentStroke.points[currentStroke.points.length - 1];
+          if (!last || Math.hypot(last.x - point.x, last.y - point.y) > 0.0025) currentStroke.points.push(point);
+          window.__phRemoteTempStroke = currentStroke;
+          renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+        }
+        return;
+      }
       beginGesture();
       const rect = gestureRect();
       let next = safeViewport(localViewport || getViewport());
@@ -3026,8 +3337,23 @@
       sendViewport(next);
     }, { passive: false });
 
-    stage.addEventListener('touchend', endGesture, { passive: true });
-    stage.addEventListener('touchcancel', endGesture, { passive: true });
+    stage.addEventListener('touchend', () => {
+      if (currentStroke) {
+        const finished = currentStroke;
+        currentStroke = null;
+        window.__phRemoteTempStroke = null;
+        if (finished.points && finished.points.length > 1) sendRemoteCommand(ref, 'addInkStroke', finished);
+        renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+        return;
+      }
+      endGesture();
+    }, { passive: true });
+    stage.addEventListener('touchcancel', () => {
+      currentStroke = null;
+      window.__phRemoteTempStroke = null;
+      renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+      endGesture();
+    }, { passive: true });
 
     stage.addEventListener('wheel', (event) => {
       event.preventDefault();
