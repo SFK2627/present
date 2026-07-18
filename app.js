@@ -43,6 +43,12 @@
     autoElapsedBeforePause: 0,
     autoCurrentDuration: 10,
     autoAdvancing: false,
+    countdownAlert: 'off',
+    lastCountdownAlertSecond: null,
+    audioContext: null,
+    transitionEffect: 'fade',
+    slideChangePending: false,
+    pdfPageCache: new Map(),
     timerTick: null,
     timerStartedAt: null,
     timerElapsedBeforePause: 0,
@@ -104,6 +110,7 @@
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
       'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide',
       'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
+      'countdownAlertSelect', 'slideTransitionSelect',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
@@ -175,6 +182,16 @@
       updateTimerText();
       publishSessionState();
     });
+    if (els.countdownAlertSelect) els.countdownAlertSelect.addEventListener('change', () => {
+      state.countdownAlert = els.countdownAlertSelect.value || 'off';
+      state.lastCountdownAlertSecond = null;
+      publishSessionState();
+    });
+    if (els.slideTransitionSelect) els.slideTransitionSelect.addEventListener('change', () => {
+      state.transitionEffect = els.slideTransitionSelect.value || 'fade';
+      publishSessionState();
+    });
+
     if (els.autoStartBtn) els.autoStartBtn.addEventListener('click', startAutoPlay);
     if (els.autoPauseBtn) els.autoPauseBtn.addEventListener('click', pauseAutoPlay);
     if (els.autoResumeBtn) els.autoResumeBtn.addEventListener('click', resumeAutoPlay);
@@ -648,9 +665,12 @@
     state.autoElapsedBeforePause = 0;
     state.autoCurrentDuration = getCurrentTimingSeconds();
     state.activePdf = null;
+    state.pdfPageCache = new Map();
     state.activePptxSlides = [];
     state.pptxVisualReady = false;
     state.pptxRenderedSlides = [];
+    state.pdfPageCache = new Map();
+    state.lastCountdownAlertSecond = null;
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
       state.pptxBlobUrl = '';
@@ -706,9 +726,12 @@
     state.sessionId = null;
     if (state.activePdf && state.activePdf.destroy) state.activePdf.destroy();
     state.activePdf = null;
+    state.pdfPageCache = new Map();
     state.activePptxSlides = [];
     state.pptxVisualReady = false;
     state.pptxRenderedSlides = [];
+    state.pdfPageCache = new Map();
+    state.lastCountdownAlertSecond = null;
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
       state.pptxBlobUrl = '';
@@ -885,7 +908,7 @@
     if (state.activeFile.type === 'pdf') {
       els.pptxSlide.classList.add('hidden');
       els.pdfCanvas.classList.remove('hidden');
-      const page = await state.activePdf.getPage(state.currentPage);
+      const page = await getCachedPdfPage(state.currentPage);
       if (token !== state.renderToken) return;
       const viewportBase = page.getViewport({ scale: 1 });
       const available = getAvailableStageSize();
@@ -901,6 +924,7 @@
       canvas.style.width = `${Math.floor(cssViewport.width)}px`;
       canvas.style.height = `${Math.floor(cssViewport.height)}px`;
       await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+      warmAdjacentPdfPages();
       applyViewportScroll();
     } else {
       els.pdfCanvas.classList.add('hidden');
@@ -918,6 +942,10 @@
           </div>
         `;
       }
+    }
+    if (state.slideChangePending) {
+      playSlideTransition();
+      state.slideChangePending = false;
     }
     updateZoomLabel();
     publishSessionState();
@@ -1020,6 +1048,8 @@
   function handleSlideChanged() {
     state.viewportCenterX = 0.5;
     state.viewportCenterY = 0.5;
+    state.slideChangePending = true;
+    state.lastCountdownAlertSecond = null;
     resetAutoClockForCurrentSlide();
     if (isAutoClockActive()) resetTimer({ publish: false, start: state.autoPlaying });
   }
@@ -1164,6 +1194,7 @@
     state.autoCurrentDuration = getCurrentTimingSeconds();
     state.autoElapsedBeforePause = 0;
     state.autoStartedAt = state.autoPlaying ? Date.now() : null;
+    state.lastCountdownAlertSecond = null;
   }
 
   function startAutoPlay() {
@@ -1181,6 +1212,7 @@
     state.autoTimer = setInterval(() => {
       if (!state.autoPlaying || state.autoPaused) return;
       updateTimerText();
+      checkCountdownAlert();
       if (getAutoElapsedSeconds(true) < state.autoCurrentDuration || state.autoAdvancing) return;
       if (state.currentPage >= state.totalPages) {
         stopAutoPlay();
@@ -1304,6 +1336,98 @@
     els.timerModeSelect.value = state.timer.mode;
     els.timerPositionSelect.value = state.timer.position;
     els.timerOpacityInput.value = state.timer.opacity;
+    if (els.countdownAlertSelect) els.countdownAlertSelect.value = state.countdownAlert || 'off';
+    if (els.slideTransitionSelect) els.slideTransitionSelect.value = state.transitionEffect || 'fade';
+  }
+
+  async function getCachedPdfPage(pageNumber) {
+    if (!state.activePdf) return null;
+    const safePage = Math.min(Math.max(1, Number(pageNumber) || 1), state.totalPages || 1);
+    if (!state.pdfPageCache) state.pdfPageCache = new Map();
+    if (!state.pdfPageCache.has(safePage)) {
+      state.pdfPageCache.set(safePage, state.activePdf.getPage(safePage));
+    }
+    return state.pdfPageCache.get(safePage);
+  }
+
+  function warmAdjacentPdfPages() {
+    if (!state.activePdf || !state.pdfPageCache) return;
+    const keep = new Set();
+    for (let page = state.currentPage - 3; page <= state.currentPage + 3; page++) {
+      if (page >= 1 && page <= state.totalPages) {
+        keep.add(page);
+        if (!state.pdfPageCache.has(page)) state.pdfPageCache.set(page, state.activePdf.getPage(page));
+      }
+    }
+    for (const key of Array.from(state.pdfPageCache.keys())) {
+      if (!keep.has(key)) state.pdfPageCache.delete(key);
+    }
+  }
+
+  function playSlideTransition() {
+    const effect = state.transitionEffect || 'fade';
+    if (effect === 'none') return;
+    const target = getTransitionTarget();
+    if (!target) return;
+    const classes = ['slide-transition', 'transition-fade', 'transition-slide-left', 'transition-slide-right', 'transition-slide-up', 'transition-zoom-in', 'transition-zoom-out', 'transition-soft-blur'];
+    target.classList.remove(...classes);
+    // Force restart animation.
+    void target.offsetWidth;
+    target.classList.add('slide-transition', `transition-${effect}`);
+    window.setTimeout(() => target.classList.remove(...classes), 620);
+  }
+
+  function getTransitionTarget() {
+    // Animate the viewport wrapper, not the canvas/slide itself, so PPTX/PDF scale transforms stay intact.
+    return els.viewerCanvasWrap || els.pdfCanvas || els.pptxSlide;
+  }
+
+  function checkCountdownAlert() {
+    if (!state.autoPlaying || state.autoPaused || state.countdownAlert === 'off') return;
+    const remaining = Math.ceil(Math.max(0, state.autoCurrentDuration - getAutoElapsedSeconds(true)));
+    if (remaining < 1 || remaining > 5) return;
+    if (remaining === state.lastCountdownAlertSecond) return;
+    state.lastCountdownAlertSecond = remaining;
+    triggerCountdownAlert(remaining);
+  }
+
+  function triggerCountdownAlert(second) {
+    const mode = state.countdownAlert;
+    if (mode === 'sound' || mode === 'both') playCountdownBeep(second);
+    if (mode === 'voice' || mode === 'both') speakCountdown(second);
+  }
+
+  function playCountdownBeep(second) {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      state.audioContext = state.audioContext || new AudioContext();
+      if (state.audioContext.state === 'suspended') state.audioContext.resume().catch(() => {});
+      const ctx = state.audioContext;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = second === 1 ? 1040 : 760;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+    } catch (error) {}
+  }
+
+  function speakCountdown(second) {
+    try {
+      if (!window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(String(second));
+      utterance.rate = 1.05;
+      utterance.pitch = 1;
+      utterance.volume = 0.9;
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {}
   }
 
   async function setupRemoteSessionIfPossible() {
@@ -1351,6 +1475,8 @@
       timerOpacity: state.timer.opacity,
       timerMode: state.timer.mode,
       timerPosition: state.timer.position,
+      countdownAlert: state.countdownAlert,
+      transitionEffect: state.transitionEffect,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     };
 
@@ -1434,6 +1560,17 @@
       case 'timerReset': resetTimer(); break;
       case 'setTimerOpacity':
         state.timer.opacity = Number(command.value);
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setCountdownAlert':
+        state.countdownAlert = ['off', 'sound', 'voice', 'both'].includes(command.value) ? command.value : 'off';
+        state.lastCountdownAlertSecond = null;
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setTransitionEffect':
+        state.transitionEffect = command.value || 'fade';
         applyTimerSettings();
         publishSessionState();
         break;
@@ -1618,11 +1755,14 @@
   function applyRemoteFullPreviewTransform(viewport) {
     const img = $('remoteFullImg');
     if (!img) return;
-    const zoom = Math.min(4, Math.max(0.25, Number(viewport.zoom) || 1));
+    const zoom = Math.min(4, Math.max(1, Number(viewport.zoom) || 1));
     const centerX = Math.max(0, Math.min(1, Number(viewport.centerX) || 0.5));
     const centerY = Math.max(0, Math.min(1, Number(viewport.centerY) || 0.5));
-    img.style.transformOrigin = `${centerX * 100}% ${centerY * 100}%`;
-    img.style.transform = `scale(${zoom})`;
+    const offsetStrength = Math.max(0, zoom - 1);
+    const translateX = (0.5 - centerX) * 100 * offsetStrength;
+    const translateY = (0.5 - centerY) * 100 * offsetStrength;
+    img.style.transformOrigin = 'center center';
+    img.style.transform = `translate3d(${translateX}%, ${translateY}%, 0) scale(${zoom})`;
   }
 
   function attachRemotePreviewControls(ref, isHost, getViewport, setLocalViewport) {
@@ -1633,7 +1773,7 @@
     if (!openBtn || !full || !stage) return;
 
     const safeViewport = (value) => ({
-      zoom: Math.min(4, Math.max(0.25, Number(value.zoom) || 1)),
+      zoom: Math.min(4, Math.max(1, Number(value.zoom) || 1)),
       centerX: Math.max(0, Math.min(1, Number(value.centerX) || 0.5)),
       centerY: Math.max(0, Math.min(1, Number(value.centerY) || 0.5)),
     });
@@ -1685,6 +1825,7 @@
     });
 
     stage.addEventListener('touchstart', (event) => {
+      if (event.touches.length) event.preventDefault();
       const current = safeViewport(getViewport());
       startZoom = current.zoom;
       startCenter = { centerX: current.centerX, centerY: current.centerY };
@@ -1695,7 +1836,7 @@
         startPoint = { x: event.touches[0].clientX, y: event.touches[0].clientY };
         startDistance = 0;
       }
-    }, { passive: true });
+    }, { passive: false });
 
     stage.addEventListener('touchmove', (event) => {
       if (event.touches.length !== 1 && event.touches.length !== 2) return;

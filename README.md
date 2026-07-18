@@ -87,3 +87,28 @@ This build adds the requested production presentation controls:
 - The phone remote now has **Fullscreen Preview**. Open it, rotate the phone landscape, then pinch and drag the preview. The desktop viewer receives the same zoom and focus area.
 
 Reminder: for exact PowerPoint colors, pictures, fonts, and layouts, the most reliable workflow is still to export PPTX to PDF first, then upload the PDF.
+
+
+## Smooth fullscreen, countdown alert, and transitions update
+
+This build adds:
+
+- A smoother phone **Fullscreen Preview** using dynamic mobile viewport sizing so the bottom part of the slide is not cut off.
+- Phone fullscreen preview starts in contain/fit mode so the whole slide is visible first, then pinch zoom and drag can focus on one area.
+- Auto Play **Last 5-sec alert** options in the Controls panel:
+  - Off
+  - Sound only
+  - Voice count
+  - Sound + voice count
+- PDF/page transition choices in the Controls panel:
+  - Fade
+  - Slide left
+  - Slide right
+  - Slide up
+  - Zoom in
+  - Zoom out
+  - Soft blur
+  - None
+- Adjacent PDF page caching to make moving to the next/previous page feel smoother.
+
+PowerPoint note: the browser PPTX renderer has been kept visual-only and improved for sizing, but Microsoft PowerPoint transitions/animations and very complex designs still cannot be guaranteed on GitHub Pages. For exact PPT/PPTX appearance, export to PDF first and present the PDF.

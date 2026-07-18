@@ -869,3 +869,90 @@ body.remote-fullscreen-open {
   .remote-control-row { gap: 8px; }
   .remote-control-row button { padding-inline: .55rem; }
 }
+
+/* New slide transition effects */
+.slide-transition {
+  animation-duration: .5s;
+  animation-timing-function: cubic-bezier(.22, 1, .36, 1);
+  animation-fill-mode: both;
+  will-change: transform, opacity, filter;
+}
+.transition-fade { animation-name: phFadeIn; }
+.transition-slide-left { animation-name: phSlideLeft; }
+.transition-slide-right { animation-name: phSlideRight; }
+.transition-slide-up { animation-name: phSlideUp; }
+.transition-zoom-in { animation-name: phZoomIn; }
+.transition-zoom-out { animation-name: phZoomOut; }
+.transition-soft-blur { animation-name: phSoftBlur; }
+@keyframes phFadeIn { from { opacity: .18; } to { opacity: 1; } }
+@keyframes phSlideLeft { from { opacity: .2; transform: translateX(36px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes phSlideRight { from { opacity: .2; transform: translateX(-36px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes phSlideUp { from { opacity: .2; transform: translateY(34px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes phZoomIn { from { opacity: .2; transform: scale(.965); } to { opacity: 1; transform: scale(1); } }
+@keyframes phZoomOut { from { opacity: .2; transform: scale(1.045); } to { opacity: 1; transform: scale(1); } }
+@keyframes phSoftBlur { from { opacity: .2; filter: blur(12px); transform: scale(.99); } to { opacity: 1; filter: blur(0); transform: scale(1); } }
+
+/* Smoother phone fullscreen preview: full dynamic viewport, no clipped bottom */
+.remote-full-preview {
+  height: 100dvh;
+  min-height: 100svh;
+  overflow: hidden;
+}
+.remote-full-toolbar {
+  position: absolute;
+  top: env(safe-area-inset-top, 0);
+  left: 0;
+  right: 0;
+  z-index: 3;
+  backdrop-filter: blur(16px);
+}
+.remote-full-stage {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100svh;
+  padding: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: #000;
+  overscroll-behavior: none;
+}
+.remote-full-stage img {
+  max-width: 100vw;
+  max-height: 100dvh;
+  object-fit: contain;
+  background: #fff;
+  transform-origin: center center;
+  transition: transform .045s ease-out;
+  touch-action: none;
+}
+.remote-full-help {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: env(safe-area-inset-bottom, 0);
+  z-index: 3;
+  backdrop-filter: blur(16px);
+  pointer-events: none;
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .remote-full-toolbar { opacity: .82; }
+  .remote-full-help { opacity: .72; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .slide-transition { animation: none !important; }
+}
+
+/* Keep the whole phone preview visible around the small overlay bars */
+.remote-full-stage {
+  box-sizing: border-box;
+  padding: calc(52px + env(safe-area-inset-top, 0px)) 0 calc(34px + env(safe-area-inset-bottom, 0px));
+}
+@media (orientation: landscape) and (max-height: 540px) {
+  .remote-full-stage {
+    padding-top: calc(42px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+}
