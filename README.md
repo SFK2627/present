@@ -144,3 +144,25 @@ Presentation cards can be dragged directly into any folder chip. You can also dr
 ## Remote controls visibility fix
 
 If the phone opens only the slide preview, scan the **Control QR / Host remote** code. The Viewer QR is intentionally view-only. This build also defaults remote links to host controls when the role is missing and adds a **Controls** button inside fullscreen phone preview so you can always return to the remote dashboard.
+
+
+## Premium Smooth Transition Update
+
+This build improves PDF slide changes with a double-buffer renderer. The next PDF page renders on a fresh hidden canvas first, then the app swaps it in using the selected web-app transition. This removes the leftover/ghost-like transition effect that can appear on PDFs exported from Canva or other design tools.
+
+Tips:
+- For the smoothest result, keep **Slide transition** set to Fade, Slide left, or Zoom in.
+- If you want instant changes, choose **None**.
+- After uploading to GitHub Pages, hard refresh the desktop browser and clear the phone browser site data if the old version is still cached.
+
+## Premium controls and portrait phone remote update
+
+This build improves the presentation control experience:
+
+- Desktop toolbar and control settings have a more premium glass-panel design.
+- Phone host remote now opens to a polished control dashboard first, not fullscreen preview.
+- Phone preview fullscreen stays portrait-friendly; it no longer forces landscape orientation.
+- Host commands are lighter and faster: slide/control state is sent first, while heavy preview thumbnails update after.
+- PDF transition behavior keeps the selected app transition style and avoids leaving old Canva-exported PDF frames behind.
+
+If GitHub Pages still shows the old interface, hard refresh on desktop and clear site data on the phone.

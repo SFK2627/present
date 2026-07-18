@@ -50,8 +50,12 @@
     audioContext: null,
     audioUnlocked: false,
     transitionEffect: 'fade',
+    transitionDuration: 420,
     slideChangePending: false,
     pdfPageCache: new Map(),
+    pdfBitmapCache: new Map(),
+    activePdfCanvas: null,
+    pdfRenderQueueKey: '',
     timerTick: null,
     timerStartedAt: null,
     timerElapsedBeforePause: 0,
@@ -1020,10 +1024,11 @@
     state.autoCurrentDuration = getCurrentTimingSeconds();
     state.activePdf = null;
     state.pdfPageCache = new Map();
+    state.pdfBitmapCache = new Map();
+    resetPdfLayers();
     state.activePptxSlides = [];
     state.pptxVisualReady = false;
     state.pptxRenderedSlides = [];
-    state.pdfPageCache = new Map();
     state.lastCountdownAlertSecond = null;
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
@@ -1087,10 +1092,11 @@
     if (state.activePdf && state.activePdf.destroy) state.activePdf.destroy();
     state.activePdf = null;
     state.pdfPageCache = new Map();
+    state.pdfBitmapCache = new Map();
+    resetPdfLayers();
     state.activePptxSlides = [];
     state.pptxVisualReady = false;
     state.pptxRenderedSlides = [];
-    state.pdfPageCache = new Map();
     state.lastCountdownAlertSecond = null;
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
@@ -1288,28 +1294,10 @@
       } else if (state.activeFile.type === 'pdf') {
         if (els.canvaFrame) els.canvaFrame.classList.add('hidden');
         els.pptxSlide.classList.add('hidden');
-        els.pdfCanvas.classList.remove('hidden');
-        const page = await getCachedPdfPage(state.currentPage);
-        if (token !== state.renderToken) return;
-        const viewportBase = page.getViewport({ scale: 1 });
-        const available = getAvailableStageSize();
-        const fitScale = Math.min(available.width / viewportBase.width, available.height / viewportBase.height);
-        const cssScale = Math.max(0.15, fitScale * state.zoom);
-        const dpr = Math.min(window.devicePixelRatio || 1, 2.4);
-        const renderViewport = page.getViewport({ scale: cssScale * dpr });
-        const cssViewport = page.getViewport({ scale: cssScale });
-        const canvas = els.pdfCanvas;
-        const ctx = canvas.getContext('2d', { alpha: false });
-        canvas.width = Math.floor(renderViewport.width);
-        canvas.height = Math.floor(renderViewport.height);
-        canvas.style.width = `${Math.floor(cssViewport.width)}px`;
-        canvas.style.height = `${Math.floor(cssViewport.height)}px`;
-        const task = page.render({ canvasContext: ctx, viewport: renderViewport });
-        state.activePdfRenderTask = task;
-        await task.promise;
-        if (state.activePdfRenderTask === task) state.activePdfRenderTask = null;
+        await renderPdfPageSmooth(token);
         if (token !== state.renderToken) return;
         warmAdjacentPdfPages();
+        warmAdjacentPdfBitmaps();
         applyViewportScroll();
       } else {
         if (els.canvaFrame) els.canvaFrame.classList.add('hidden');
@@ -1806,22 +1794,200 @@
     }
   }
 
+  function getTransitionClasses() {
+    return ['slide-transition', 'transition-fade', 'transition-slide-left', 'transition-slide-right', 'transition-slide-up', 'transition-zoom-in', 'transition-zoom-out', 'transition-soft-blur'];
+  }
+
   function playSlideTransition() {
     const effect = state.transitionEffect || 'fade';
     if (effect === 'none') return;
+    if (state.activeFile && state.activeFile.type === 'pdf') return; // PDF uses the double-buffer renderer, not wrapper animation.
     const target = getTransitionTarget();
     if (!target) return;
-    const classes = ['slide-transition', 'transition-fade', 'transition-slide-left', 'transition-slide-right', 'transition-slide-up', 'transition-zoom-in', 'transition-zoom-out', 'transition-soft-blur'];
+    const classes = getTransitionClasses();
     target.classList.remove(...classes);
-    // Force restart animation.
     void target.offsetWidth;
     target.classList.add('slide-transition', `transition-${effect}`);
-    window.setTimeout(() => target.classList.remove(...classes), 620);
+    window.setTimeout(() => target.classList.remove(...classes), state.transitionDuration + 180);
   }
 
   function getTransitionTarget() {
-    // Animate the viewport wrapper, not the canvas/slide itself, so PPTX/PDF scale transforms stay intact.
-    return els.viewerCanvasWrap || els.pdfCanvas || els.pptxSlide;
+    return els.pptxSlide || els.viewerCanvasWrap;
+  }
+
+  async function renderPdfPageSmooth(token) {
+    const wrap = els.viewerCanvasWrap;
+    if (!wrap || !state.activePdf) return;
+    wrap.classList.add('pdf-layer-mode');
+    if (els.pdfCanvas) els.pdfCanvas.classList.add('hidden');
+
+    const pageNumber = state.currentPage;
+    const renderInfo = await getPdfRenderInfo(pageNumber);
+    if (token !== state.renderToken || !renderInfo) return;
+
+    const bitmapKey = makePdfBitmapKey(pageNumber, renderInfo);
+    let incoming = takeCachedPdfBitmap(bitmapKey);
+    if (!incoming) incoming = await renderPdfPageToCanvas(pageNumber, renderInfo, token);
+    if (token !== state.renderToken || !incoming) return;
+
+    preparePdfLayer(incoming, renderInfo);
+    const oldLayer = state.activePdfCanvas && state.activePdfCanvas.isConnected ? state.activePdfCanvas : null;
+    const effect = state.transitionEffect || 'fade';
+    const shouldAnimate = effect !== 'none' && (state.slideChangePending || !oldLayer);
+
+    incoming.classList.add('pdf-page-layer', 'pdf-layer-current');
+    incoming.dataset.pageNumber = String(pageNumber);
+    incoming.dataset.bitmapKey = bitmapKey;
+
+    if (oldLayer && oldLayer.dataset.pageNumber === String(pageNumber) && oldLayer.dataset.bitmapKey === bitmapKey) {
+      // Same rendered page/zoom after a resize race; keep a single clean layer.
+      oldLayer.remove();
+    }
+
+    if (shouldAnimate) {
+      incoming.classList.add('pdf-layer-incoming', `transition-${effect}`);
+      incoming.style.setProperty('--ph-transition-ms', `${state.transitionDuration}ms`);
+    }
+
+    wrap.appendChild(incoming);
+    state.activePdfCanvas = incoming;
+
+    // Keep the old PDF visible only until the incoming bitmap is ready, then fade it out cleanly.
+    if (oldLayer && oldLayer !== incoming) {
+      oldLayer.classList.remove('pdf-layer-current');
+      oldLayer.classList.add('pdf-layer-outgoing');
+      oldLayer.style.setProperty('--ph-transition-ms', `${Math.max(180, Math.round(state.transitionDuration * 0.55))}ms`);
+      window.setTimeout(() => oldLayer.remove(), Math.max(260, state.transitionDuration + 120));
+    }
+
+    if (shouldAnimate) {
+      requestAnimationFrame(() => {
+        incoming.classList.add('pdf-layer-show');
+        window.setTimeout(() => {
+          incoming.classList.remove('pdf-layer-incoming', 'pdf-layer-show', `transition-${effect}`);
+        }, state.transitionDuration + 120);
+      });
+    }
+
+    // Remove stale PDF layers left by fast keyboard presses.
+    window.setTimeout(() => cleanupPdfLayers(), Math.max(500, state.transitionDuration + 220));
+  }
+
+  async function getPdfRenderInfo(pageNumber) {
+    const page = await getCachedPdfPage(pageNumber);
+    if (!page) return null;
+    const viewportBase = page.getViewport({ scale: 1 });
+    const available = getAvailableStageSize();
+    const fitScale = Math.min(available.width / viewportBase.width, available.height / viewportBase.height);
+    const cssScale = Math.max(0.15, fitScale * state.zoom);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.4);
+    const renderViewport = page.getViewport({ scale: cssScale * dpr });
+    const cssViewport = page.getViewport({ scale: cssScale });
+    return { page, viewportBase, available, fitScale, cssScale, dpr, renderViewport, cssViewport };
+  }
+
+  function makePdfBitmapKey(pageNumber, info) {
+    const w = Math.round(info.cssViewport.width);
+    const h = Math.round(info.cssViewport.height);
+    const z = Math.round(state.zoom * 1000);
+    const fs = isPresentationFullscreen() ? 'fs' : 'normal';
+    return `${pageNumber}:${w}x${h}:z${z}:${fs}`;
+  }
+
+  function takeCachedPdfBitmap(key) {
+    if (!state.pdfBitmapCache || !state.pdfBitmapCache.has(key)) return null;
+    const cached = state.pdfBitmapCache.get(key);
+    state.pdfBitmapCache.delete(key);
+    return cached;
+  }
+
+  async function renderPdfPageToCanvas(pageNumber, info, token) {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'pdf-canvas pdf-page-layer';
+    preparePdfLayer(canvas, info);
+    canvas.width = Math.floor(info.renderViewport.width);
+    canvas.height = Math.floor(info.renderViewport.height);
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    const task = info.page.render({ canvasContext: ctx, viewport: info.renderViewport });
+    state.activePdfRenderTask = task;
+    try {
+      await task.promise;
+    } finally {
+      if (state.activePdfRenderTask === task) state.activePdfRenderTask = null;
+    }
+    if (token !== state.renderToken) return null;
+    return canvas;
+  }
+
+  function preparePdfLayer(canvas, info) {
+    canvas.classList.remove('hidden', ...getTransitionClasses(), 'pdf-layer-incoming', 'pdf-layer-show', 'pdf-layer-outgoing');
+    canvas.style.width = `${Math.floor(info.cssViewport.width)}px`;
+    canvas.style.height = `${Math.floor(info.cssViewport.height)}px`;
+    canvas.style.maxWidth = 'none';
+    canvas.style.maxHeight = 'none';
+  }
+
+  async function warmAdjacentPdfBitmaps() {
+    if (!state.activePdf || !state.pdfBitmapCache) return;
+    const center = state.currentPage;
+    const pages = [center + 1, center - 1].filter((p) => p >= 1 && p <= state.totalPages);
+    for (const pageNumber of pages) {
+      try {
+        const info = await getPdfRenderInfo(pageNumber);
+        if (!info) continue;
+        const key = makePdfBitmapKey(pageNumber, info);
+        if (state.pdfBitmapCache.has(key)) continue;
+        const token = state.renderToken;
+        const canvas = await renderPdfPageToCanvas(pageNumber, info, token);
+        if (canvas && token === state.renderToken) {
+          canvas.dataset.bitmapKey = key;
+          canvas.dataset.pageNumber = String(pageNumber);
+          state.pdfBitmapCache.set(key, canvas);
+        }
+      } catch (error) {
+        // Pre-rendering is optional. The main renderer will still work.
+      }
+    }
+    trimPdfBitmapCache();
+  }
+
+  function trimPdfBitmapCache() {
+    if (!state.pdfBitmapCache) return;
+    const keepKeys = [];
+    for (const key of state.pdfBitmapCache.keys()) {
+      const page = Number(String(key).split(':')[0]);
+      if (Math.abs(page - state.currentPage) <= 2) keepKeys.push(key);
+    }
+    for (const key of Array.from(state.pdfBitmapCache.keys())) {
+      if (!keepKeys.includes(key) || keepKeys.length > 4) state.pdfBitmapCache.delete(key);
+    }
+  }
+
+
+  function resetPdfLayers() {
+    state.activePdfCanvas = null;
+    state.pdfRenderQueueKey = '';
+    if (!els.viewerCanvasWrap) return;
+    els.viewerCanvasWrap.classList.remove('pdf-layer-mode');
+    els.viewerCanvasWrap.querySelectorAll('.pdf-page-layer').forEach((layer) => layer.remove());
+    if (els.pdfCanvas && !els.pdfCanvas.isConnected) els.viewerCanvasWrap.prepend(els.pdfCanvas);
+    if (els.pdfCanvas) {
+      els.pdfCanvas.className = 'pdf-canvas hidden';
+      els.pdfCanvas.removeAttribute('style');
+    }
+  }
+
+  function cleanupPdfLayers() {
+    if (!els.viewerCanvasWrap) return;
+    const layers = Array.from(els.viewerCanvasWrap.querySelectorAll('.pdf-page-layer'));
+    layers.forEach((layer) => {
+      if (layer !== state.activePdfCanvas && !layer.classList.contains('pdf-layer-outgoing')) layer.remove();
+    });
   }
 
   function checkCountdownAlert() {
@@ -1914,10 +2080,12 @@
   }
 
   async function publishSessionState(force = false) {
-    if (!state.sessionRef || !state.activeFile || state.publishLock) return;
+    if (!state.sessionRef || !state.activeFile || (state.publishLock && !force)) return;
     state.publishLock = true;
-    setTimeout(() => { state.publishLock = false; }, force ? 0 : 200);
+    setTimeout(() => { state.publishLock = false; }, force ? 0 : 120);
 
+    // Keep the hot remote-control path light: write slide/control state first,
+    // then upload the heavier thumbnail preview in a short deferred task.
     const payload = {
       fileName: state.activeFile.name,
       type: state.activeFile.type,
@@ -1941,16 +2109,28 @@
       timerPosition: state.timer.position,
       countdownAlert: state.countdownAlert,
       transitionEffect: state.transitionEffect,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: Date.now(),
     };
 
     try {
-      const thumb = await getCurrentThumbForRemote();
-      if (thumb) payload.thumb = thumb;
       await state.sessionRef.set(payload, { merge: true });
+      scheduleRemotePreviewPublish(force ? 80 : 260);
     } catch (error) {
       console.warn('Could not publish session:', error);
     }
+  }
+
+  function scheduleRemotePreviewPublish(delay = 260) {
+    if (!state.sessionRef || !state.activeFile) return;
+    clearTimeout(state.remoteThumbTimer);
+    state.remoteThumbTimer = setTimeout(async () => {
+      try {
+        const thumb = await getCurrentThumbForRemote();
+        if (thumb && state.sessionRef) {
+          await state.sessionRef.set({ thumb, thumbUpdatedAt: Date.now() }, { merge: true });
+        }
+      } catch (error) {}
+    }, delay);
   }
 
   async function getCurrentThumbForRemote() {
@@ -2093,45 +2273,58 @@
     let latestThumb = '';
 
     els.remoteApp.innerHTML = `
-      <main id="remoteControlDashboard" class="remote-card ${isHost ? '' : 'remote-viewer-only'}">
-        <div class="remote-head">
-          <div>
+      <main id="remoteControlDashboard" class="remote-card remote-premium-card ${isHost ? '' : 'remote-viewer-only'}">
+        <div class="remote-head remote-premium-head">
+          <div class="remote-title-block">
+            <span class="remote-eyebrow">${isHost ? 'HOST REMOTE' : 'VIEW ONLY'}</span>
             <h1>Presentation Remote</h1>
-            <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Host control' : 'Viewer only'}</p>
+            <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Full control' : 'Preview only'}</p>
           </div>
           <span id="remoteStatusPill" class="remote-status-pill">Connecting</span>
         </div>
-        <div class="remote-preview-shell">
-          <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
-          <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Fullscreen Preview</button>
-        </div>
-        <div class="remote-control-banner ${isHost ? '' : 'viewer'}">${isHost ? 'Control dashboard active. Buttons below should be visible after scanning.' : 'Viewer mode: preview is visible, but controls are disabled.'}</div>
-        <p class="remote-hint">Open fullscreen, rotate your phone landscape, then pinch and drag the preview. The desktop follows the same zoomed area.</p>
-        <h2 id="remoteSlideLabel">Slide -- / --</h2>
-        <p id="remoteFileLabel" class="remote-sub">Connect to an active desktop session.</p>
-        <p id="remoteAutoLabel" class="remote-sub remote-auto-label">Auto Play idle</p>
-        <section class="remote-grid">
-          <button data-command="first" data-host-only="true">First</button>
-          <button data-command="last" data-host-only="true">Last</button>
-          <button data-command="prev" data-host-only="true">Previous</button>
-          <button data-command="next" data-host-only="true">Next</button>
+
+        <section class="remote-now-card">
+          <div class="remote-slide-meta">
+            <div>
+              <span class="remote-mini-label">Now showing</span>
+              <h2 id="remoteSlideLabel">Slide -- / --</h2>
+            </div>
+            <p id="remoteAutoLabel" class="remote-sub remote-auto-label">Auto Play idle</p>
+          </div>
+          <div class="remote-preview-shell">
+            <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
+            <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Open Portrait Preview</button>
+          </div>
+          <p id="remoteFileLabel" class="remote-sub remote-file-label">Connect to an active desktop session.</p>
         </section>
-        <section class="remote-section">
-          <h3>Zoom</h3>
-          <div class="remote-control-row">
-            <button data-command="zoomOut" data-host-only="true">Zoom −</button>
+
+        <div class="remote-control-banner ${isHost ? '' : 'viewer'}">${isHost ? 'Host control active. Commands are sent immediately to the desktop viewer.' : 'Viewer mode: preview is visible, but controls are disabled.'}</div>
+        <p class="remote-hint">Portrait preview is supported. Pinch and drag only after opening the preview screen.</p>
+
+        <section class="remote-nav-pad" aria-label="Presentation navigation">
+          <button class="remote-small-action" data-command="first" data-host-only="true">First</button>
+          <button class="remote-main-action remote-prev-action" data-command="prev" data-host-only="true">← Prev</button>
+          <button class="remote-main-action remote-next-action" data-command="next" data-host-only="true">Next →</button>
+          <button class="remote-small-action" data-command="last" data-host-only="true">Last</button>
+        </section>
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Zoom</span><small>Desktop viewer</small></div>
+          <div class="remote-control-row remote-segment-row">
+            <button data-command="zoomOut" data-host-only="true">− Out</button>
             <button data-command="resetZoom" data-host-only="true">Reset</button>
-            <button data-command="zoomIn" data-host-only="true">Zoom +</button>
+            <button data-command="zoomIn" data-host-only="true">+ In</button>
           </div>
         </section>
-        <section class="remote-section">
-          <h3>Auto Play</h3>
-          <div class="remote-control-row">
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Auto Play</span><small>Global or per-slide</small></div>
+          <div class="remote-control-row remote-segment-row">
             <button data-command="autoStart" data-host-only="true">Start</button>
             <button data-command="autoPause" data-host-only="true">Pause</button>
             <button data-command="autoStop" data-host-only="true">Stop</button>
           </div>
-          <div class="remote-wide remote-timing-box">
+          <div class="remote-wide remote-timing-box remote-form-grid">
             <select id="remoteTimingMode" data-host-only="true">
               <option value="global">Global - all slides</option>
               <option value="per-slide">Per-slide - current slide</option>
@@ -2139,7 +2332,7 @@
             <input id="remoteTiming" type="number" min="1" value="10" placeholder="Seconds">
             <button id="remoteSetTiming" data-host-only="true">Apply Timing</button>
           </div>
-          <div class="remote-wide remote-timing-box">
+          <div class="remote-wide remote-timing-box remote-form-grid two">
             <select id="remoteCountdownAlert" data-host-only="true">
               <option value="off">Alert off</option>
               <option value="sound">Sound only</option>
@@ -2149,14 +2342,15 @@
             <button id="remoteTestAlert" data-host-only="true">Test Sound/Voice</button>
           </div>
         </section>
-        <section class="remote-section">
-          <h3>Timer</h3>
-          <div class="remote-control-row">
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Timer</span><small>Overlay controls</small></div>
+          <div class="remote-control-row remote-segment-row">
             <button data-command="timerShow" data-host-only="true">Show</button>
             <button data-command="timerHide" data-host-only="true">Hide</button>
             <button data-command="timerReset" data-host-only="true">Reset</button>
           </div>
-          <div class="remote-slider-stack">
+          <div class="remote-slider-stack remote-premium-sliders">
             <label>Opacity <span id="remoteOpacityLabel">75%</span>
               <input id="remoteOpacity" type="range" min="0" max="100" step="1" value="75" data-host-only="true">
             </label>
@@ -2166,7 +2360,7 @@
           </div>
         </section>
       </main>
-      <div id="remoteFullPreview" class="remote-full-preview hidden">
+      <div id="remoteFullPreview" class="remote-full-preview remote-portrait-preview hidden">
         <div class="remote-full-toolbar">
           <span id="remoteFullLabel">Slide Preview</span>
           <button id="remoteBackToControls" class="remote-back-controls">Controls</button>
@@ -2175,7 +2369,7 @@
         <div id="remoteFullStage" class="remote-full-stage">
           <img id="remoteFullImg" alt="Fullscreen current slide preview" />
         </div>
-        <div class="remote-full-help">Pinch to zoom. Drag to choose the exact area shown on the desktop.</div>
+        <div class="remote-full-help">Portrait preview. Pinch to zoom, then drag to choose the exact desktop area.</div>
       </div>
     `;
 
@@ -2306,16 +2500,12 @@
       document.body.classList.add('remote-fullscreen-open');
       applyRemoteFullPreviewTransform(getViewport());
       if (full.requestFullscreen) full.requestFullscreen().catch(() => {});
-      if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
     }
 
     function closeFullPreview() {
       full.classList.add('hidden');
       document.body.classList.remove('remote-fullscreen-open');
       if (document.fullscreenElement === full) document.exitFullscreen().catch(() => {});
-      if (screen.orientation && screen.orientation.unlock) {
-        try { screen.orientation.unlock(); } catch (error) {}
-      }
     }
 
     openBtn.addEventListener('click', openFullPreview);
@@ -2424,7 +2614,7 @@
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         action,
         value: value ?? null,
-        issuedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        issuedAt: Date.now(),
       }
     }, { merge: true });
   }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-phone-dashboard-restored-v2';
+const CACHE_NAME = 'presentation-hub-premium-controls-portrait-v1';
 const APP_SHELL = [
   './',
   './index.html',
