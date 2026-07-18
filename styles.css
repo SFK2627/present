@@ -1767,3 +1767,36 @@ body .remote-full-preview.hidden,
   .button-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .field-grid { grid-template-columns: 1fr !important; }
 }
+
+/* Readable native dropdown menus in dark/premium panels.
+   Some browsers render the opened <option> list with a light native background
+   while inheriting the white text color from the dark select. Force readable
+   option colors without changing the closed premium select appearance. */
+select option,
+select optgroup {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+select option:checked,
+select option:hover,
+select option:focus {
+  background-color: #dbeafe !important;
+  color: #0f172a !important;
+}
+body.dark select option,
+body.dark select optgroup,
+.field-grid select option,
+.remote-form-grid select option,
+.remote-timing-box select option,
+.card-folder-row select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+body.dark select option:checked,
+.field-grid select option:checked,
+.remote-form-grid select option:checked,
+.remote-timing-box select option:checked,
+.card-folder-row select option:checked {
+  background-color: #bfdbfe !important;
+  color: #0f172a !important;
+}

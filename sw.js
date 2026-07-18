@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-premium-controls-portrait-v1';
+const CACHE_NAME = 'presentation-hub-select-readable-v2';
 const APP_SHELL = [
   './',
   './index.html',
