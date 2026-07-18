@@ -90,7 +90,9 @@
     remoteSlideThumbsCount: 0,
     remoteSlideThumbsBusy: false,
     magicEffectTimer: null,
-    magicEffectVolume: 160,
+    magicEffectVolume: 200,
+    magicEffectSound: true,
+    magicEffectIntensity: 'grand',
   };
 
 
@@ -1638,12 +1640,13 @@
 
   function createMagicLayer() {
     let layer = document.getElementById('magicEffectLayer');
-    if (layer) return layer;
-    layer = document.createElement('div');
-    layer.id = 'magicEffectLayer';
-    layer.className = 'magic-effect-layer hidden';
-    const host = els.viewerStage || els.viewerView || document.body;
-    host.appendChild(layer);
+    const host = document.fullscreenElement || els.viewerView || document.body;
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'magicEffectLayer';
+      layer.className = 'magic-effect-layer hidden';
+    }
+    if (layer.parentElement !== host) host.appendChild(layer);
     return layer;
   }
 
@@ -1701,7 +1704,7 @@
   function triggerMagicEffect(effectId) {
     const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
     const layer = createMagicLayer();
-    layer.className = `magic-effect-layer magic-${effect.id}`;
+    layer.className = `magic-effect-layer magic-${effect.id} magic-intensity-${state.magicEffectIntensity || 'grand'}`;
     layer.innerHTML = magicEffectMarkup(effect.id);
     void layer.offsetWidth;
     layer.classList.add('show');
@@ -1716,70 +1719,236 @@
 
   function getMagicEffectVolume() {
     const value = Number(state.magicEffectVolume);
-    if (!Number.isFinite(value)) return 1.6;
-    return Math.max(0, Math.min(2.2, value / 100));
+    return Math.max(0, Math.min(3, value / 100));
   }
 
   function setMagicEffectVolume(value, publish = true) {
-    state.magicEffectVolume = Math.max(0, Math.min(220, Number(value) || 0));
+    state.magicEffectVolume = Math.max(0, Math.min(300, Number(value) || 0));
+    if (publish) publishSessionState();
+  }
+
+  function setMagicEffectSound(enabled, publish = true) {
+    state.magicEffectSound = !!enabled;
+    if (publish) publishSessionState();
+  }
+
+  function setMagicEffectIntensity(value, publish = true) {
+    state.magicEffectIntensity = ['low', 'normal', 'grand'].includes(value) ? value : 'grand';
     if (publish) publishSessionState();
   }
 
   function playMagicEffectSound(effectId) {
+    if (!state.magicEffectSound) return;
     primePresentationAudio();
     if (!state.audioContext) return;
     const ctx = state.audioContext;
-    const now = ctx.currentTime;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+    const now = ctx.currentTime + 0.02;
     const volume = getMagicEffectVolume();
-    const beep = (time, freq, duration = 0.14, type = 'sine', gainValue = 0.12) => {
+    if (volume <= 0) return;
+
+    // One compressed mix bus per effect. This lets the effects sound much bigger
+    // without turning into painful clipping/distortion on laptop speakers.
+    const master = ctx.createGain();
+    const compressor = ctx.createDynamicsCompressor();
+    try {
+      compressor.threshold.setValueAtTime(-18, now);
+      compressor.knee.setValueAtTime(24, now);
+      compressor.ratio.setValueAtTime(7, now);
+      compressor.attack.setValueAtTime(0.003, now);
+      compressor.release.setValueAtTime(0.22, now);
+    } catch (error) {}
+    master.gain.setValueAtTime(Math.min(1.25, 0.72 + volume * 0.18), now);
+    master.connect(compressor).connect(ctx.destination);
+
+    const clampGain = (gainValue) => Math.max(0.0001, Math.min(0.85, gainValue * volume));
+
+    const disconnectLater = (node, delay = 3.5) => {
+      window.setTimeout(() => {
+        try { node.disconnect(); } catch (error) {}
+      }, delay * 1000);
+    };
+
+    const tone = (time, freq, duration = 0.16, type = 'sine', gainValue = 0.12, endFreq = null) => {
       try {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        const safeGain = Math.max(0.0001, Math.min(0.9, gainValue * volume));
+        const level = clampGain(gainValue);
         osc.type = type;
         osc.frequency.setValueAtTime(freq, time);
+        if (endFreq) osc.frequency.exponentialRampToValueAtTime(Math.max(1, endFreq), time + Math.max(0.025, duration * 0.88));
         gain.gain.setValueAtTime(0.0001, time);
-        gain.gain.exponentialRampToValueAtTime(safeGain, time + 0.012);
+        gain.gain.exponentialRampToValueAtTime(level, time + 0.012);
         gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
-        osc.connect(gain).connect(ctx.destination);
+        osc.connect(gain).connect(master);
         osc.start(time);
-        osc.stop(time + duration + 0.03);
+        osc.stop(time + duration + 0.04);
       } catch (error) {}
     };
-    if (effectId === 'drumroll') {
-      for (let i = 0; i < 18; i++) beep(now + i * 0.055, i % 2 ? 92 : 154, 0.045, 'square', 0.105);
-      beep(now + 1.02, 220, 0.18, 'triangle', 0.18);
-    } else if (effectId === 'confetti' || effectId === 'correct' || effectId === 'sparkle' || effectId === 'stars' || effectId === 'hype' || effectId === 'applause') {
-      [523, 659, 784, 1046, 1318].forEach((f, i) => beep(now + i * 0.075, f, 0.14, 'triangle', 0.115));
-      if (effectId === 'hype') [220, 330, 440].forEach((f, i) => beep(now + i * 0.09, f, 0.11, 'square', 0.08));
-    } else if (effectId === 'wrong') {
-      beep(now, 180, 0.2, 'sawtooth', 0.15); beep(now + 0.18, 112, 0.26, 'sawtooth', 0.16);
-    } else if (effectId === 'timesup' || effectId === 'bell') {
-      [988, 988, 740, 554].forEach((f, i) => beep(now + i * 0.16, f, 0.15, 'sine', 0.12));
-    } else if (effectId === 'quiet') {
-      if ('speechSynthesis' in window) {
-        try {
-          window.speechSynthesis.cancel();
-          const utter = new SpeechSynthesisUtterance('Shhh. Quiet please.');
-          utter.rate = 0.82;
-          utter.pitch = 0.72;
-          utter.volume = Math.min(1, 0.55 * volume);
-          window.speechSynthesis.speak(utter);
-        } catch (error) { beep(now, 320, 0.34, 'sine', 0.09); }
-      } else beep(now, 320, 0.34, 'sine', 0.09);
-    } else if (effectId === 'micdrop') {
-      beep(now, 320, 0.14, 'triangle', 0.13); beep(now + 0.2, 90, 0.32, 'sine', 0.2); beep(now + 0.48, 55, 0.22, 'sawtooth', 0.11);
-    } else if (effectId === 'curtain') {
-      [196, 247, 330, 392, 523].forEach((f, i) => beep(now + i * 0.11, f, 0.16, 'triangle', 0.1));
-    } else if (effectId === 'bubbles') {
-      [880, 1046, 1174, 1318].forEach((f, i) => beep(now + i * 0.11, f, 0.1, 'sine', 0.075));
-    } else if (effectId === 'spotlight') {
-      beep(now, 180, 0.42, 'sine', 0.11); beep(now + 0.22, 520, 0.24, 'triangle', 0.08);
-    } else if (effectId === 'freeze') {
-      [660, 440, 330].forEach((f, i) => beep(now + i * 0.08, f, 0.16, 'sine', 0.095));
-    } else {
-      beep(now, 520, 0.14, 'sine', 0.1);
+
+    const noise = (time, duration = 0.18, gainValue = 0.12, filterType = 'bandpass', frequency = 900, q = 1.2) => {
+      try {
+        const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
+        const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length * 0.35);
+        const source = ctx.createBufferSource();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+        filter.type = filterType;
+        filter.frequency.setValueAtTime(frequency, time);
+        filter.Q.setValueAtTime(q, time);
+        gain.gain.setValueAtTime(0.0001, time);
+        gain.gain.exponentialRampToValueAtTime(clampGain(gainValue), time + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+        source.buffer = buffer;
+        source.connect(filter).connect(gain).connect(master);
+        source.start(time);
+        source.stop(time + duration + 0.02);
+      } catch (error) {}
+    };
+
+    const chord = (time, freqs, duration = 0.24, type = 'triangle', gainValue = 0.08) => {
+      freqs.forEach((freq, index) => tone(time + index * 0.006, freq, duration, type, gainValue, null));
+    };
+
+    const boom = (time = now, strength = 1) => {
+      tone(time, 145, 0.34, 'sine', 0.25 * strength, 42);
+      tone(time + 0.012, 72, 0.42, 'triangle', 0.24 * strength, 32);
+      noise(time + 0.01, 0.32, 0.16 * strength, 'lowpass', 210, 0.75);
+    };
+
+    const cymbal = (time = now, strength = 1) => {
+      noise(time, 0.52, 0.13 * strength, 'highpass', 4200, 0.55);
+      noise(time + 0.02, 0.38, 0.06 * strength, 'bandpass', 8200, 0.9);
+    };
+
+    const whoosh = (time = now, duration = 0.55, strength = 1) => {
+      try {
+        const length = Math.max(1, Math.floor(ctx.sampleRate * duration));
+        const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+        const source = ctx.createBufferSource();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(260, time);
+        filter.frequency.exponentialRampToValueAtTime(4600, time + duration * 0.88);
+        filter.Q.setValueAtTime(0.85, time);
+        gain.gain.setValueAtTime(0.0001, time);
+        gain.gain.exponentialRampToValueAtTime(clampGain(0.18 * strength), time + duration * 0.35);
+        gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+        source.buffer = buffer;
+        source.connect(filter).connect(gain).connect(master);
+        source.start(time);
+        source.stop(time + duration + 0.04);
+      } catch (error) {}
+    };
+
+    const sparkleRun = (time = now, count = 7, base = 880) => {
+      for (let i = 0; i < count; i++) tone(time + i * 0.055, base * Math.pow(2, (i % 5) / 12), 0.12, 'sine', 0.065);
+    };
+
+    const fanfare = (time = now, heroic = false) => {
+      const seq = heroic
+        ? [[392, 494, 587], [523, 659, 784], [659, 784, 1046], [784, 988, 1318]]
+        : [[523, 659, 784], [659, 784, 1046], [784, 988, 1318]];
+      seq.forEach((freqs, index) => chord(time + index * 0.16, freqs, 0.22, 'triangle', 0.075));
+      tone(time + seq.length * 0.16 + 0.02, heroic ? 1568 : 1318, 0.34, 'sine', 0.11);
+      cymbal(time + seq.length * 0.16, heroic ? 1.15 : 0.75);
+    };
+
+    switch (effectId) {
+      case 'drumroll': {
+        for (let i = 0; i < 30; i++) {
+          noise(now + i * 0.038, 0.035, i % 2 ? 0.12 : 0.09, 'bandpass', i % 2 ? 1650 : 900, 1.9);
+          tone(now + i * 0.038, i % 2 ? 108 : 150, 0.035, 'square', 0.045);
+        }
+        boom(now + 1.16, 0.85);
+        cymbal(now + 1.18, 0.9);
+        break;
+      }
+      case 'confetti':
+        fanfare(now, true);
+        sparkleRun(now + 0.18, 10, 1046);
+        break;
+      case 'correct':
+        chord(now, [523, 659, 784], 0.18, 'triangle', 0.09);
+        chord(now + 0.18, [659, 784, 1046], 0.26, 'triangle', 0.095);
+        tone(now + 0.38, 1568, 0.22, 'sine', 0.08);
+        cymbal(now + 0.28, 0.45);
+        break;
+      case 'sparkle':
+      case 'stars':
+        sparkleRun(now, effectId === 'stars' ? 13 : 9, 880);
+        noise(now + 0.14, 0.45, 0.045, 'highpass', 5500, 0.6);
+        break;
+      case 'hype':
+        whoosh(now, 0.46, 1.05);
+        boom(now + 0.34, 1.08);
+        fanfare(now + 0.38, true);
+        break;
+      case 'applause':
+        for (let i = 0; i < 24; i++) noise(now + i * 0.045 + Math.random() * 0.018, 0.045, 0.105, 'bandpass', 1600 + Math.random() * 1800, 0.85);
+        sparkleRun(now + 0.22, 6, 988);
+        break;
+      case 'wrong':
+        tone(now, 190, 0.26, 'sawtooth', 0.19, 128);
+        tone(now + 0.22, 142, 0.35, 'sawtooth', 0.21, 88);
+        noise(now, 0.42, 0.065, 'lowpass', 500, 0.8);
+        break;
+      case 'timesup':
+        [988, 988, 740, 554].forEach((freq, i) => tone(now + i * 0.15, freq, 0.12, 'sine', 0.105));
+        boom(now + 0.55, 0.72);
+        break;
+      case 'quiet':
+        whoosh(now, 0.38, 0.35);
+        noise(now + 0.04, 0.72, 0.085, 'highpass', 2400, 0.45);
+        if ('speechSynthesis' in window) {
+          try {
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance('Shhh. Quiet please.');
+            utter.rate = 0.78;
+            utter.pitch = 0.68;
+            utter.volume = Math.min(1, 0.78 * volume);
+            window.speechSynthesis.speak(utter);
+          } catch (error) {}
+        }
+        break;
+      case 'micdrop':
+        whoosh(now, 0.26, 0.55);
+        tone(now + 0.08, 360, 0.12, 'triangle', 0.11, 180);
+        boom(now + 0.27, 1.25);
+        noise(now + 0.31, 0.34, 0.12, 'lowpass', 260, 0.65);
+        break;
+      case 'curtain':
+        whoosh(now, 0.72, 1.05);
+        chord(now + 0.16, [196, 247, 330], 0.38, 'triangle', 0.085);
+        chord(now + 0.52, [392, 494, 659, 784], 0.42, 'triangle', 0.085);
+        cymbal(now + 0.78, 0.7);
+        break;
+      case 'bubbles':
+        [784, 932, 1046, 1174, 1396, 1568].forEach((freq, i) => tone(now + i * 0.075, freq, 0.09, 'sine', 0.055, freq * 1.16));
+        noise(now + 0.18, 0.32, 0.035, 'highpass', 4800, 0.5);
+        break;
+      case 'spotlight':
+        whoosh(now, 0.42, 0.7);
+        tone(now + 0.22, 520, 0.22, 'triangle', 0.09, 760);
+        tone(now + 0.34, 1046, 0.28, 'sine', 0.07);
+        break;
+      case 'freeze':
+        [1046, 880, 740, 622].forEach((freq, i) => tone(now + i * 0.07, freq, 0.15, 'sine', 0.06));
+        noise(now + 0.18, 0.36, 0.055, 'highpass', 6000, 0.75);
+        tone(now + 0.42, 330, 0.28, 'triangle', 0.075, 220);
+        break;
+      default:
+        fanfare(now, false);
+        break;
     }
+
+    disconnectLater(master, effectId === 'curtain' || effectId === 'drumroll' ? 3.2 : 2.5);
   }
 
   function handleKeyboard(event) {
@@ -2490,6 +2659,8 @@
       slideThumbsCount: state.remoteSlideThumbsCount || 0,
       slideThumbsReadyAt: state.remoteSlideThumbsReadyAt || 0,
       magicEffectVolume: state.magicEffectVolume,
+      magicEffectSound: !!state.magicEffectSound,
+      magicEffectIntensity: state.magicEffectIntensity || 'grand',
       updatedAt: Date.now(),
     };
 
@@ -2689,6 +2860,17 @@
       case 'setMagicEffectVolume':
         setMagicEffectVolume(command.value, false);
         publishSessionState();
+        break;
+      case 'setMagicEffectSound':
+        setMagicEffectSound(command.value !== false && command.value !== 'false' && command.value !== 0, false);
+        publishSessionState();
+        break;
+      case 'setMagicEffectIntensity':
+        setMagicEffectIntensity(command.value || 'grand', false);
+        publishSessionState();
+        break;
+      case 'testMagicEffect':
+        triggerMagicEffect(command.value || 'confetti');
         break;
       case 'setTransitionEffect':
         state.transitionEffect = command.value || 'fade';
@@ -2939,14 +3121,26 @@
         </section>
 
         <section class="remote-section remote-premium-section remote-magic-section" data-host-only="true">
-          <div class="remote-section-title"><span>Magic Effects</span><small>Tap to show on desktop</small></div>
-          <button id="remoteMagicToggle" type="button" class="remote-magic-toggle" data-host-only="true">✨ Show Magic Effects</button>
-          <div class="remote-slider-stack remote-magic-volume-wrap">
-            <label>Effect volume <span id="remoteMagicVolumeLabel">160%</span>
-              <input id="remoteMagicVolume" type="range" min="0" max="220" step="5" value="160" data-host-only="true">
+          <div class="remote-section-title"><span>Magic Effects</span><small>Hidden until you open the list</small></div>
+          <div class="remote-magic-settings-card">
+            <div class="remote-magic-settings-head">
+              <strong>Magic Settings</strong>
+              <button id="remoteMagicTest" type="button" class="remote-mini-pill" data-host-only="true">Test</button>
+            </div>
+            <label class="remote-magic-switch"><input id="remoteMagicSound" type="checkbox" checked data-host-only="true"> Effects sound</label>
+            <label>Effect volume <span id="remoteMagicVolumeLabel">200%</span>
+              <input id="remoteMagicVolume" type="range" min="0" max="300" step="5" value="200" data-host-only="true">
+            </label>
+            <label>Effect intensity
+              <select id="remoteMagicIntensity" data-host-only="true">
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="grand" selected>Grand</option>
+              </select>
             </label>
           </div>
-          <div id="remoteMagicGrid" class="remote-magic-grid remote-magic-collapsed">
+          <button id="remoteMagicToggle" type="button" class="remote-magic-toggle" aria-expanded="false" data-host-only="true">✨ Show Magic Effects</button>
+          <div id="remoteMagicGrid" class="remote-magic-grid remote-magic-collapsed" hidden aria-hidden="true">
             ${MAGIC_EFFECTS.map((effect) => `<button type="button" class="remote-magic-btn" data-magic-effect="${effect.id}" data-host-only="true"><span>${effect.emoji}</span><strong>${effect.label}</strong><small>${effect.shortcut}</small></button>`).join('')}
           </div>
         </section>
@@ -3146,8 +3340,10 @@
         if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${data.timerOpacity ?? 75}%`;
         $('remoteTimerSize').value = data.timerSize ?? 28;
         if ($('remoteTimerSizeLabel')) $('remoteTimerSizeLabel').textContent = `${data.timerSize ?? 28}px`;
-        if ($('remoteMagicVolume')) $('remoteMagicVolume').value = data.magicEffectVolume ?? 160;
-        if ($('remoteMagicVolumeLabel')) $('remoteMagicVolumeLabel').textContent = `${data.magicEffectVolume ?? 160}%`;
+        if ($('remoteMagicVolume')) $('remoteMagicVolume').value = data.magicEffectVolume ?? 200;
+        if ($('remoteMagicVolumeLabel')) $('remoteMagicVolumeLabel').textContent = `${data.magicEffectVolume ?? 200}%`;
+        if ($('remoteMagicSound')) $('remoteMagicSound').checked = data.magicEffectSound !== false;
+        if ($('remoteMagicIntensity')) $('remoteMagicIntensity').value = data.magicEffectIntensity || 'grand';
         $('remoteAutoLabel').textContent = data.autoPlaying
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
@@ -3187,10 +3383,21 @@
       });
       const magicToggle = $('remoteMagicToggle');
       const magicGrid = $('remoteMagicGrid');
+      if (magicGrid) {
+        magicGrid.hidden = true;
+        magicGrid.classList.add('remote-magic-collapsed');
+        magicGrid.setAttribute('aria-hidden', 'true');
+        magicGrid.style.display = 'none';
+      }
       if (magicToggle && magicGrid) {
         magicToggle.addEventListener('click', () => {
-          const isClosed = magicGrid.classList.toggle('remote-magic-collapsed');
-          magicToggle.textContent = isClosed ? '✨ Show Magic Effects' : '✨ Hide Magic Effects';
+          const open = magicGrid.hidden;
+          magicGrid.hidden = !open;
+          magicGrid.classList.toggle('remote-magic-collapsed', !open);
+          magicGrid.setAttribute('aria-hidden', open ? 'false' : 'true');
+          magicGrid.style.display = open ? 'grid' : 'none';
+          magicToggle.setAttribute('aria-expanded', String(open));
+          magicToggle.textContent = open ? '✨ Hide Magic Effects' : '✨ Show Magic Effects';
         });
       }
       if ($('remoteMagicVolume')) {
@@ -3207,6 +3414,24 @@
           remoteMagicVolumeTimer = setTimeout(sendMagicVolume, 120);
         });
         $('remoteMagicVolume').addEventListener('change', sendMagicVolume);
+      }
+      if ($('remoteMagicSound')) {
+        $('remoteMagicSound').addEventListener('change', () => {
+          if (!isHost) return;
+          sendRemoteCommand(ref, 'setMagicEffectSound', $('remoteMagicSound').checked);
+        });
+      }
+      if ($('remoteMagicIntensity')) {
+        $('remoteMagicIntensity').addEventListener('change', () => {
+          if (!isHost) return;
+          sendRemoteCommand(ref, 'setMagicEffectIntensity', $('remoteMagicIntensity').value);
+        });
+      }
+      if ($('remoteMagicTest')) {
+        $('remoteMagicTest').addEventListener('click', () => {
+          if (!isHost) return;
+          sendRemoteCommand(ref, 'testMagicEffect', 'confetti');
+        });
       }
 
       const allSlidesBtn = $('remoteAllSlidesBtn');

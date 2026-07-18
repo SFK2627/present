@@ -188,3 +188,10 @@ For perfect PPTX design fidelity, export PPTX/Canva to PDF first and upload the 
 - Added clean countdown voice style choices without exposing browser voice names.
 - Added a desktop-monitor frame inside Portrait Preview so the phone shows a monitor-like representation of the desktop view while pinching and panning.
 - Kept the update targeted to the countdown voice selector and portrait preview layer.
+
+
+## Pro v10.10 Magic Effects repair
+- Magic Effects list is hidden by default on phone host.
+- Added visible Magic Settings: sound on/off, volume slider, intensity selector, and test button.
+- Desktop effects are rendered through a fixed full-screen overlay so the main animation is centered, including in fullscreen mode.
+- Only Magic Effects panel/overlay/sound controls were changed.

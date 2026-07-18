@@ -3187,3 +3187,119 @@ body.presentation-hub-remote-mode:not(.remote-fullscreen-open) #remoteControlDas
   .remote-magic-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .remote-magic-btn { min-height: 68px; }
 }
+
+
+/* Pro v10.10 repair: Magic panel is truly collapsed by default, settings are visible, overlay is always centered. */
+.remote-magic-section {
+  position: relative;
+  overflow: visible !important;
+}
+.remote-magic-settings-card {
+  margin: 10px 0 12px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: linear-gradient(145deg, rgba(255,255,255,.08), rgba(15,23,42,.20));
+  display: grid;
+  gap: 10px;
+}
+.remote-magic-settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.remote-magic-settings-head strong {
+  color: #f8fafc;
+  font-size: .92rem;
+}
+.remote-mini-pill {
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  background: rgba(255,255,255,.11);
+  color: #fff;
+  padding: 7px 12px;
+  font-weight: 800;
+}
+.remote-magic-switch {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  color: #f8fafc;
+}
+.remote-magic-switch input {
+  width: 22px;
+  height: 22px;
+  accent-color: #8b5cf6;
+}
+.remote-magic-grid[hidden],
+.remote-magic-grid.remote-magic-collapsed {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  max-height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.remote-magic-grid:not([hidden]):not(.remote-magic-collapsed) {
+  display: grid !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  height: auto !important;
+  max-height: min(48dvh, 520px) !important;
+  overflow-y: auto !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+@media (min-width: 520px) {
+  .remote-magic-grid:not([hidden]):not(.remote-magic-collapsed) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+.magic-effect-layer {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  min-width: 100vw !important;
+  min-height: 100dvh !important;
+  z-index: 2147483000 !important;
+  display: none !important;
+  place-items: center !important;
+  align-items: center !important;
+  justify-items: center !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  transform: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.magic-effect-layer.show {
+  display: grid !important;
+  opacity: 1 !important;
+}
+.magic-effect-layer.hidden { display: none !important; opacity: 0 !important; }
+.viewer-stage > .magic-effect-layer,
+.viewer-view > .magic-effect-layer,
+body > .magic-effect-layer { position: fixed !important; }
+.magic-effect-layer .magic-center {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  transform: none !important;
+  margin: auto !important;
+  place-self: center !important;
+  max-width: min(90vw, 960px) !important;
+  min-width: min(540px, 82vw) !important;
+  text-align: center !important;
+}
+.magic-effect-layer.magic-intensity-low .magic-center { transform: scale(.82) !important; }
+.magic-effect-layer.magic-intensity-normal .magic-center { transform: scale(.93) !important; }
+.magic-effect-layer.magic-intensity-grand .magic-center { transform: scale(1) !important; }
+.magic-effect-layer.magic-intensity-low .magic-particles i:nth-child(n+46) { display: none; }
+.magic-effect-layer.magic-intensity-normal .magic-particles i:nth-child(n+78) { display: none; }
+.magic-effect-layer.magic-intensity-low .magic-glow-ring { width: min(74vw, 680px); opacity: .56; }
+.magic-effect-layer.magic-intensity-normal .magic-glow-ring { width: min(84vw, 800px); opacity: .78; }
