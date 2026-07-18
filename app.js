@@ -72,6 +72,7 @@
     activePdfRenderTask: null,
     lastRemoteThumbKey: '',
     remotePreviewBusy: false,
+    remoteThumbTimer: null,
     firebaseReady: false,
     firebaseDb: null,
     firebaseAuthReady: false,
@@ -720,7 +721,7 @@
     ctx.fillText('Embedded presentation link', 86, 198);
     ctx.font = '22px Inter, Arial';
     wrapCanvasText(ctx, name, 86, 255, 460, 30, 2);
-    return canvas.toDataURL('image/jpeg', 0.86);
+    return canvas.toDataURL('image/jpeg', quality);
   }
 
   async function handleFiles(fileList, folderIdOverride) {
@@ -882,7 +883,7 @@
     if (line && lines < maxLines) ctx.fillText(line, x, y + lines * lineHeight);
   }
 
-  async function renderPdfPageToDataUrl(pdf, pageNumber, targetWidth = 900) {
+  async function renderPdfPageToDataUrl(pdf, pageNumber, targetWidth = 900, quality = 0.86) {
     const page = await pdf.getPage(pageNumber);
     const base = page.getViewport({ scale: 1 });
     const scale = Math.min(1.25, Math.max(0.25, targetWidth / base.width));
@@ -1433,6 +1434,8 @@
     state.lastCountdownAlertSecond = null;
     resetAutoClockForCurrentSlide();
     if (isAutoClockActive()) resetTimer({ publish: false, start: state.autoPlaying });
+    // Pro v10: publish the new slide number immediately before the heavier render/preview path.
+    publishSessionState(true);
   }
 
   function setZoom(value, options = {}) {
@@ -2114,7 +2117,7 @@
 
     try {
       await state.sessionRef.set(payload, { merge: true });
-      scheduleRemotePreviewPublish(force ? 80 : 260);
+      scheduleRemotePreviewPublish(force ? 60 : 220);
     } catch (error) {
       console.warn('Could not publish session:', error);
     }
@@ -2140,7 +2143,7 @@
     try {
       state.lastRemoteThumbKey = key;
       if (state.activeFile.type === 'pdf' && state.activePdf) {
-        return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 900);
+        return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 680, 0.72);
       }
       if (state.activeFile.type === 'canva') {
         return state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
@@ -2174,6 +2177,7 @@
       case 'zoomIn': setZoom(state.zoom + 0.1); break;
       case 'zoomOut': setZoom(state.zoom - 0.1); break;
       case 'resetZoom': setZoom(1, { centerX: 0.5, centerY: 0.5 }); break;
+      case 'toggleFullscreen': toggleFullscreen(); break;
       case 'setZoom': setZoom(Number(command.value) || 1); break;
       case 'setViewport': setViewportTransform(command.value || {}); break;
       case 'autoStart': startAutoPlay(); break;
@@ -2205,6 +2209,16 @@
       case 'timerShow': showTimer(); break;
       case 'timerHide': hideTimer(); break;
       case 'timerReset': resetTimer(); break;
+      case 'setTimerPosition':
+        state.timer.position = ['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(command.value) ? command.value : 'bottom-right';
+        applyTimerSettings();
+        publishSessionState();
+        break;
+      case 'setTimerMode':
+        state.timer.mode = command.value === 'down' ? 'down' : 'up';
+        resetTimer();
+        publishSessionState();
+        break;
       case 'setTimerOpacity':
         state.timer.opacity = Number(command.value);
         applyTimerSettings();
@@ -2277,8 +2291,8 @@
         <div class="remote-head remote-premium-head">
           <div class="remote-title-block">
             <span class="remote-eyebrow">${isHost ? 'HOST REMOTE' : 'VIEW ONLY'}</span>
-            <h1>Presentation Remote</h1>
-            <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Full control' : 'Preview only'}</p>
+            <h1>Presentation Hub Pro</h1>
+            <p class="remote-sub">${escapeHtml(sessionId || 'No session')} • ${isHost ? 'Host control' : 'Preview only'} • low-latency mode</p>
           </div>
           <span id="remoteStatusPill" class="remote-status-pill">Connecting</span>
         </div>
@@ -2293,12 +2307,12 @@
           </div>
           <div class="remote-preview-shell">
             <div class="remote-preview" id="remotePreview"><span>Waiting for presentation...</span></div>
-            <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Open Portrait Preview</button>
+            <button id="remotePreviewFullBtn" class="remote-preview-full-btn" data-host-only="false">Portrait Preview</button>
           </div>
           <p id="remoteFileLabel" class="remote-sub remote-file-label">Connect to an active desktop session.</p>
         </section>
 
-        <div class="remote-control-banner ${isHost ? '' : 'viewer'}">${isHost ? 'Host control active. Commands are sent immediately to the desktop viewer.' : 'Viewer mode: preview is visible, but controls are disabled.'}</div>
+        <div class="remote-control-banner ${isHost ? '' : 'viewer'}">${isHost ? 'Host control active. Tap commands first; preview updates after for lower delay.' : 'Viewer mode: preview is visible, but controls are disabled.'}</div>
         <p class="remote-hint">Portrait preview is supported. Pinch and drag only after opening the preview screen.</p>
 
         <section class="remote-nav-pad" aria-label="Presentation navigation">
@@ -2306,6 +2320,33 @@
           <button class="remote-main-action remote-prev-action" data-command="prev" data-host-only="true">← Prev</button>
           <button class="remote-main-action remote-next-action" data-command="next" data-host-only="true">Next →</button>
           <button class="remote-small-action" data-command="last" data-host-only="true">Last</button>
+        </section>
+
+        <section class="remote-section remote-premium-section">
+          <div class="remote-section-title"><span>Presentation</span><small>Desktop screen</small></div>
+          <div class="remote-control-row remote-segment-row">
+            <button data-command="toggleFullscreen" data-host-only="true">Fullscreen</button>
+            <button data-command="resetZoom" data-host-only="true">Fit Slide</button>
+            <button data-command="timerReset" data-host-only="true">Reset Time</button>
+          </div>
+          <div class="remote-wide remote-timing-box remote-form-grid two">
+            <select id="remoteTransition" data-host-only="true">
+              <option value="fade">Fade transition</option>
+              <option value="slide-left">Slide left</option>
+              <option value="slide-right">Slide right</option>
+              <option value="slide-up">Slide up</option>
+              <option value="zoom-in">Zoom in</option>
+              <option value="zoom-out">Zoom out</option>
+              <option value="soft-blur">Soft blur</option>
+              <option value="none">No transition</option>
+            </select>
+            <select id="remoteTimerPosition" data-host-only="true">
+              <option value="bottom-right">Timer bottom right</option>
+              <option value="bottom-left">Timer bottom left</option>
+              <option value="top-right">Timer top right</option>
+              <option value="top-left">Timer top left</option>
+            </select>
+          </div>
         </section>
 
         <section class="remote-section remote-premium-section">
@@ -2349,6 +2390,13 @@
             <button data-command="timerShow" data-host-only="true">Show</button>
             <button data-command="timerHide" data-host-only="true">Hide</button>
             <button data-command="timerReset" data-host-only="true">Reset</button>
+          </div>
+          <div class="remote-wide remote-timing-box remote-form-grid two">
+            <select id="remoteTimerMode" data-host-only="true">
+              <option value="up">Timer count up</option>
+              <option value="down">Timer countdown</option>
+            </select>
+            <button data-command="timerReset" data-host-only="true">Sync Timer Reset</button>
           </div>
           <div class="remote-slider-stack remote-premium-sliders">
             <label>Opacity <span id="remoteOpacityLabel">75%</span>
@@ -2410,6 +2458,9 @@
         $('remoteTimingMode').value = data.timingMode || 'global';
         $('remoteTiming').value = (data.timingMode === 'per-slide' ? data.currentTiming : data.globalTiming) || 10;
         if ($('remoteCountdownAlert')) $('remoteCountdownAlert').value = data.countdownAlert || 'off';
+        if ($('remoteTransition')) $('remoteTransition').value = data.transitionEffect || 'fade';
+        if ($('remoteTimerPosition')) $('remoteTimerPosition').value = data.timerPosition || 'bottom-right';
+        if ($('remoteTimerMode')) $('remoteTimerMode').value = data.timerMode || 'up';
         $('remoteOpacity').value = data.timerOpacity ?? 75;
         if ($('remoteOpacityLabel')) $('remoteOpacityLabel').textContent = `${data.timerOpacity ?? 75}%`;
         $('remoteTimerSize').value = data.timerSize ?? 28;
@@ -2447,6 +2498,18 @@
       if ($('remoteTestAlert')) $('remoteTestAlert').addEventListener('click', () => {
         if (!isHost) return;
         sendRemoteCommand(ref, 'testCountdownAlert', $('remoteCountdownAlert') ? $('remoteCountdownAlert').value : 'both');
+      });
+      if ($('remoteTransition')) $('remoteTransition').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTransitionEffect', $('remoteTransition').value);
+      });
+      if ($('remoteTimerPosition')) $('remoteTimerPosition').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTimerPosition', $('remoteTimerPosition').value);
+      });
+      if ($('remoteTimerMode')) $('remoteTimerMode').addEventListener('change', () => {
+        if (!isHost) return;
+        sendRemoteCommand(ref, 'setTimerMode', $('remoteTimerMode').value);
       });
       $('remoteOpacity').addEventListener('input', () => {
         if (!isHost) return;
@@ -2615,6 +2678,7 @@
         action,
         value: value ?? null,
         issuedAt: Date.now(),
+        v: 10,
       }
     }, { merge: true });
   }

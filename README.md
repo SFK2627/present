@@ -166,3 +166,18 @@ This build improves the presentation control experience:
 - PDF transition behavior keeps the selected app transition style and avoids leaving old Canva-exported PDF frames behind.
 
 If GitHub Pages still shows the old interface, hard refresh on desktop and clear site data on the phone.
+
+
+## Presentation Hub Pro v10 update
+
+This build focuses on stability and polish instead of only adding features.
+
+- Phone QR host mode now opens the control dashboard first.
+- Host commands publish the new slide/control state immediately, while preview thumbnails update after, reducing perceived delay.
+- Phone remote adds premium Presentation controls: fullscreen toggle, transition selector, timer position, timer mode, fit slide, and reset time.
+- Phone preview stays portrait-first and opens only when the user taps **Portrait Preview**.
+- Remote preview thumbnails are compressed more efficiently to avoid slowing down Firestore command updates.
+- PDF transitions keep using the app's selected transition effect with the double-buffered canvas engine.
+- Desktop and phone controls have improved premium spacing, grouping, and readable dropdowns.
+
+For perfect PPTX design fidelity, export PPTX/Canva to PDF first and upload the PDF. A static GitHub Pages site cannot run LibreOffice conversion, so exact PowerPoint conversion needs an optional backend server.
