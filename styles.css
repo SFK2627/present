@@ -6406,3 +6406,95 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
   .remote-media-time-row { grid-template-columns: 42px 1fr 48px; gap: 6px; }
   .remote-media-jump-row { grid-template-columns: 1fr; }
 }
+
+/* Pro v media remote cleanup: compact phone remote sections for PDF/PPT mode. */
+.remote-presentation-accordion-mode .remote-premium-section {
+  padding: 10px !important;
+  border-radius: 20px !important;
+  margin-top: 10px !important;
+}
+.remote-presentation-accordion-mode .remote-section-title {
+  display: block !important;
+  margin: 0 !important;
+}
+.remote-section-toggle-button {
+  width: 100%;
+  min-height: 54px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255,255,255,.16), rgba(255,255,255,.07));
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  font-weight: 900;
+  box-shadow: 0 12px 26px rgba(0,0,0,.18);
+}
+.remote-section-toggle-button .remote-section-title-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.remote-section-toggle-button .remote-section-title-copy span,
+.remote-section-toggle-button .remote-section-title-copy > span {
+  font-size: .95rem;
+  letter-spacing: .01em;
+}
+.remote-section-toggle-button .remote-section-title-copy small {
+  font-size: .72rem;
+  line-height: 1.2;
+  color: rgba(226,232,240,.78);
+  white-space: normal;
+}
+.remote-section-chevron {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,.12);
+  color: rgba(255,255,255,.95);
+  font-size: .86rem;
+}
+.remote-section-open .remote-section-toggle-button {
+  background: linear-gradient(135deg, rgba(56,189,248,.28), rgba(168,85,247,.20));
+  border-color: rgba(125,211,252,.34);
+}
+.remote-collapsible-body {
+  margin-top: 12px;
+  animation: remoteAccordionIn .18s ease both;
+}
+.remote-section-collapsed .remote-collapsible-body {
+  display: none !important;
+}
+@keyframes remoteAccordionIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.remote-presentation-accordion-mode .remote-magic-section .remote-magic-toggle {
+  display: none !important;
+}
+.remote-presentation-accordion-mode .remote-magic-section.remote-section-open .remote-magic-grid {
+  display: grid !important;
+}
+.remote-media-only-mode .remote-media-cast-section .remote-section-toggle-button {
+  display: none !important;
+}
+.remote-media-only-mode .remote-media-cast-section .remote-collapsible-body {
+  display: block !important;
+  margin-top: 0 !important;
+}
+.remote-media-only-mode,
+.remote-media-only-mode .remote-card,
+.remote-media-only-mode .remote-premium-card,
+.remote-media-only-mode .remote-media-cast-section,
+.remote-media-only-mode .remote-media-cast-card {
+  overflow-anchor: none;
+}
+body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-media-only-mode input[type="range"] {
+  touch-action: pan-x !important;
+}

@@ -4592,10 +4592,92 @@
     if (sub) sub.textContent = isMediaOnly ? 'Paste a link, control playback, or cast one file from this phone' : 'Paste links first, or cast files from this phone';
     const fileDetails = document.querySelector('.remote-media-file-details');
     if (fileDetails && isMediaOnly && !fileDetails.dataset.userTouched) fileDetails.open = false;
-    const linkInput = $('remoteMediaLink');
-    if (linkInput && isMediaOnly && document.activeElement !== linkInput) {
-      try { linkInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (error) {}
-    }
+    // Do not auto-scroll the remote on every session update. Media playback
+    // status can update every second, and forcing scrollIntoView here made the
+    // phone remote jump back to the top while the teacher was scrolling.
+  }
+
+  function setupRemoteSectionCollapsibles(isMediaOnly = false) {
+    const dashboard = $('remoteControlDashboard');
+    if (!dashboard) return;
+    dashboard.classList.toggle('remote-media-only-mode', !!isMediaOnly);
+    dashboard.classList.toggle('remote-presentation-accordion-mode', !isMediaOnly);
+
+    const sectionConfigs = [
+      ['.remote-media-cast-section', 'Media Remote Control', false],
+      ['.remote-magic-section', 'Magic Effects', false],
+      ['.remote-classroom-section', 'Classroom Randomizer', false],
+      ['.remote-presentation-section', 'Presentation', false],
+      ['.remote-zoom-section', 'Zoom', false],
+      ['.remote-autoplay-section', 'Autoplay', false],
+      ['.remote-timer-section', 'Timer', false],
+    ];
+
+    sectionConfigs.forEach(([selector, label, openByDefault]) => {
+      const section = dashboard.querySelector(selector);
+      if (!section) return;
+      const title = section.querySelector('.remote-section-title');
+      if (!title) return;
+
+      let body = section.querySelector(':scope > .remote-collapsible-body');
+      if (!body) {
+        body = document.createElement('div');
+        body.className = 'remote-collapsible-body';
+        const children = Array.from(section.children).filter((child) => child !== title);
+        children.forEach((child) => body.appendChild(child));
+        section.appendChild(body);
+      }
+
+      let toggle = title.querySelector('.remote-section-toggle-button');
+      if (!toggle) {
+        const content = title.innerHTML;
+        title.innerHTML = `<button type="button" class="remote-section-toggle-button" aria-expanded="false"><span class="remote-section-title-copy">${content}</span><span class="remote-section-chevron" aria-hidden="true">▾</span></button>`;
+        toggle = title.querySelector('.remote-section-toggle-button');
+      }
+
+      const setOpen = (open) => {
+        const mediaModeNow = dashboard.classList.contains('remote-media-only-mode');
+        const shouldOpen = mediaModeNow && selector === '.remote-media-cast-section' ? true : !!open;
+        section.classList.toggle('remote-section-open', shouldOpen);
+        section.classList.toggle('remote-section-collapsed', !shouldOpen);
+        body.hidden = !shouldOpen;
+        body.style.display = shouldOpen ? '' : 'none';
+        if (toggle) {
+          toggle.setAttribute('aria-expanded', String(shouldOpen));
+          const chevron = toggle.querySelector('.remote-section-chevron');
+          if (chevron) chevron.textContent = shouldOpen ? '▴' : '▾';
+        }
+
+        if (selector === '.remote-magic-section') {
+          const magicGrid = $('remoteMagicGrid');
+          const magicToggle = $('remoteMagicToggle');
+          if (magicToggle) magicToggle.style.display = 'none';
+          if (magicGrid) {
+            magicGrid.hidden = !shouldOpen;
+            magicGrid.classList.toggle('remote-magic-collapsed', !shouldOpen);
+            magicGrid.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+            magicGrid.style.display = shouldOpen ? 'grid' : 'none';
+          }
+        }
+      };
+
+      const modeKey = isMediaOnly ? 'media' : 'presentation';
+      if (section.dataset.accordionMode !== modeKey) {
+        const initialOpen = isMediaOnly ? selector === '.remote-media-cast-section' : !!openByDefault;
+        setOpen(initialOpen);
+        section.dataset.accordionMode = modeKey;
+      } else if (selector === '.remote-magic-section') {
+        setOpen(section.classList.contains('remote-section-open'));
+      }
+
+      if (!toggle.dataset.boundAccordion) {
+        toggle.dataset.boundAccordion = '1';
+        toggle.addEventListener('click', () => {
+          if (dashboard.classList.contains('remote-media-only-mode') && selector === '.remote-media-cast-section') return;
+          setOpen(!section.classList.contains('remote-section-open'));
+        });
+      }
+    });
   }
 
   function renderRemoteApp() {
@@ -4996,13 +5078,22 @@
         $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
         const isMediaSession = data.mediaMode || data.type === 'media';
         setRemoteMediaOnlyMode(isMediaSession);
+        setupRemoteSectionCollapsibles(isMediaSession);
         $('remoteSlideLabel').textContent = isMediaSession ? 'Media Viewing Mode' : `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFullLabel').textContent = isMediaSession ? 'Media Preview' : `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFileLabel').textContent = isMediaSession ? 'Cast local files or paste online links from this phone.' : (data.fileName || 'Active presentation');
         if (data.thumb) latestThumb = data.thumb;
         const preview = $('remotePreview');
         const playbackForPreview = data && data.mediaPlayback ? data.mediaPlayback : {};
-        preview.innerHTML = isMediaSession ? buildRemoteMediaPreviewHtml(playbackForPreview) : (latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>');
+        if (preview) {
+          const previewKey = isMediaSession
+            ? `media:${playbackForPreview.url || ''}:${playbackForPreview.provider || ''}:${playbackForPreview.kind || ''}:${playbackForPreview.hidden ? 'hidden' : 'shown'}`
+            : `slide:${latestThumb || ''}`;
+          if (preview.dataset.previewKey !== previewKey) {
+            preview.innerHTML = isMediaSession ? buildRemoteMediaPreviewHtml(playbackForPreview) : (latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>');
+            preview.dataset.previewKey = previewKey;
+          }
+        }
         if (isMediaSession && playbackForPreview.url && $('remoteMediaLink') && document.activeElement !== $('remoteMediaLink')) $('remoteMediaLink').value = playbackForPreview.url;
         const fullImg = $('remoteFullImg');
         if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
@@ -5123,6 +5214,7 @@
       }
 
       attachRemoteMediaCastControls(ref, isHost);
+      setupRemoteSectionCollapsibles(urlMediaMode);
 
       const allSlidesBtn = $('remoteAllSlidesBtn');
       const slidesPanel = $('remoteSlidesPanel');

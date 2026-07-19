@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v-media-youtube-controls-sync-20260719';
+const CACHE_NAME = 'presentation-hub-v-remote-accordion-scrollfix-20260719';
 const CORE_ASSETS = [
   './',
   './index.html',
