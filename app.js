@@ -53,7 +53,7 @@
     audioContext: null,
     audioUnlocked: false,
     transitionEffect: 'fade',
-    transitionDuration: 420,
+    transitionDuration: 760,
     slideChangePending: false,
     pdfPageCache: new Map(),
     pdfBitmapCache: new Map(),
@@ -2459,7 +2459,22 @@
   }
 
   function getTransitionClasses() {
-    return ['slide-transition', 'transition-fade', 'transition-slide-left', 'transition-slide-right', 'transition-slide-up', 'transition-zoom-in', 'transition-zoom-out', 'transition-soft-blur'];
+    return [
+      'slide-transition',
+      'transition-fade',
+      'transition-slide-left',
+      'transition-slide-right',
+      'transition-slide-up',
+      'transition-zoom-in',
+      'transition-zoom-out',
+      'transition-soft-blur',
+      'transition-bounce-pop',
+      'transition-happy-pop',
+      'transition-page-flip',
+      'transition-circle-reveal',
+      'transition-bright-wipe',
+      'transition-drop-in'
+    ];
   }
 
   function playSlideTransition() {
@@ -2471,8 +2486,12 @@
     const classes = getTransitionClasses();
     target.classList.remove(...classes);
     void target.offsetWidth;
+    target.style.setProperty('--ph-transition-ms', `${state.transitionDuration}ms`);
     target.classList.add('slide-transition', `transition-${effect}`);
-    window.setTimeout(() => target.classList.remove(...classes), state.transitionDuration + 180);
+    window.setTimeout(() => {
+      target.classList.remove(...classes);
+      target.style.removeProperty('--ph-transition-ms');
+    }, state.transitionDuration + 180);
   }
 
   function getTransitionTarget() {
@@ -3411,6 +3430,12 @@
               <option value="zoom-in">Zoom in</option>
               <option value="zoom-out">Zoom out</option>
               <option value="soft-blur">Soft blur</option>
+              <option value="bounce-pop">Bounce pop</option>
+              <option value="happy-pop">Happy pop</option>
+              <option value="page-flip">Page flip</option>
+              <option value="circle-reveal">Circle reveal</option>
+              <option value="bright-wipe">Bright wipe</option>
+              <option value="drop-in">Drop in</option>
               <option value="none">No transition</option>
             </select>
             <select id="remoteTimerPosition" data-host-only="true">
