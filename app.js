@@ -3275,7 +3275,7 @@
       return;
     }
     clearTimeout(state.mediaPlaybackPublishTimer);
-    state.mediaPlaybackPublishTimer = setTimeout(publish, 220);
+    state.mediaPlaybackPublishTimer = setTimeout(publish, 110);
   }
 
   function readDirectPlayerPlayback(player, extra = {}) {
@@ -3482,7 +3482,23 @@
       volume.value = String(pct);
       if (volumeLabel) volumeLabel.textContent = `${pct}%`;
     }
-    syncRemotePhoneMediaPreview(playback);
+    if (!remoteMediaLocalControlActive()) syncRemotePhoneMediaPreview(playback);
+  }
+
+  function remoteMediaLocalControlActive() {
+    return Date.now() < Number(window.__phRemoteMediaLocalControlUntil || 0);
+  }
+
+  function markRemoteMediaLocalControl(ms = 1800) {
+    window.__phRemoteMediaLocalControlUntil = Math.max(Number(window.__phRemoteMediaLocalControlUntil || 0), Date.now() + ms);
+  }
+
+  function markRemotePreviewProgrammaticSync(ms = 900) {
+    window.__phRemoteMediaPreviewProgrammaticUntil = Math.max(Number(window.__phRemoteMediaPreviewProgrammaticUntil || 0), Date.now() + ms);
+  }
+
+  function remotePreviewProgrammaticSyncActive() {
+    return Date.now() < Number(window.__phRemoteMediaPreviewProgrammaticUntil || 0);
   }
 
   function remoteYouTubePreviewFrames() {
@@ -3491,13 +3507,76 @@
   }
 
   function postRemoteYouTubePreviewCommand(func, args = []) {
+    markRemotePreviewProgrammaticSync();
     remoteYouTubePreviewFrames().forEach((frame) => {
       try { frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), '*'); } catch (error) {}
     });
   }
 
+  function installRemoteMediaPreviewSync(ref, isHost) {
+    window.__phRemoteMediaRef = ref;
+    window.__phRemoteMediaIsHost = !!isHost;
+    if (window.__phRemoteMediaPreviewSyncInstalled) return;
+    window.__phRemoteMediaPreviewSyncInstalled = true;
+    window.addEventListener('message', (event) => {
+      if (!window.__phRemoteMediaIsHost || !window.__phRemoteMediaRef) return;
+      const frames = remoteYouTubePreviewFrames();
+      if (!frames.some((frame) => frame.contentWindow === event.source)) return;
+      let data = event && event.data;
+      if (!data) return;
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch (error) { return; } }
+      if (!data || (data.event !== 'infoDelivery' && data.event !== 'onStateChange')) return;
+      if (remotePreviewProgrammaticSyncActive()) return;
+      const now = Date.now();
+      const send = (type, value) => {
+        const key = `${type}:${Math.round(Number(value) || 0)}`;
+        const lastKey = window.__phRemoteMediaPreviewLastKey || '';
+        const lastAt = Number(window.__phRemoteMediaPreviewLastAt || 0);
+        if (key === lastKey && now - lastAt < 650) return;
+        window.__phRemoteMediaPreviewLastKey = key;
+        window.__phRemoteMediaPreviewLastAt = now;
+        markRemoteMediaLocalControl(1400);
+        try { sendRemoteCommand(window.__phRemoteMediaRef, 'mediaCastControl', { type, value, source: 'phonePreview', clientAt: now }); } catch (error) {}
+      };
+      if (data.event === 'onStateChange' || typeof data.info === 'number') {
+        const st = Number(typeof data.info === 'number' ? data.info : data.data);
+        if (st === 1) send('play', 1);
+        if (st === 2 || st === 0) send('pause', 0);
+      }
+      const info = data.info && typeof data.info === 'object' ? data.info : {};
+      const playback = window.__phRemoteMediaPlayback || {};
+      if (Number.isFinite(Number(info.currentTime))) {
+        const t = Math.max(0, Number(info.currentTime));
+        const oldT = Math.max(0, Number(playback.currentTime) || 0);
+        if (Math.abs(t - oldT) > 3 && now - Number(window.__phRemoteMediaPreviewLastSeekSentAt || 0) > 900) {
+          window.__phRemoteMediaPreviewLastSeekSentAt = now;
+          send('seek', t);
+        }
+      }
+      if (Number.isFinite(Number(info.volume))) {
+        const v = Math.max(0, Math.min(1, Number(info.volume) / 100));
+        const oldV = Math.max(0, Math.min(1, Number(playback.volume) || 0));
+        if (Math.abs(v - oldV) > 0.12 && now - Number(window.__phRemoteMediaPreviewLastVolumeSentAt || 0) > 700) {
+          window.__phRemoteMediaPreviewLastVolumeSentAt = now;
+          send('volume', v);
+        }
+      }
+      if (typeof info.muted === 'boolean' && info.muted !== !!playback.muted && now - Number(window.__phRemoteMediaPreviewLastMuteSentAt || 0) > 700) {
+        window.__phRemoteMediaPreviewLastMuteSentAt = now;
+        send(info.muted ? 'mute' : 'unmute', info.muted ? 1 : 0);
+      }
+    });
+    clearInterval(window.__phRemoteMediaPreviewListenTimer);
+    window.__phRemoteMediaPreviewListenTimer = setInterval(() => {
+      remoteYouTubePreviewFrames().forEach((frame) => {
+        try { frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'remoteMediaPreview' }), '*'); } catch (error) {}
+      });
+    }, 900);
+  }
+
   function applyRemotePreviewMediaCommand(type, value) {
     const action = String(type || '');
+    markRemoteMediaLocalControl(action === 'seek' || action === 'skip' ? 2400 : 1400);
     const playback = window.__phRemoteMediaPlayback || {};
     const provider = String(playback.provider || playback.kind || '').toLowerCase();
     const phoneMuted = $('remoteMediaPhoneMuted');
@@ -3545,6 +3624,7 @@
   }
 
   function syncRemotePhoneMediaPreview(playback = {}) {
+    if (remoteMediaLocalControlActive()) return;
     const phoneWatch = $('remoteMediaWatchPhone');
     if (phoneWatch && !phoneWatch.checked) return;
     const provider = String(playback.provider || playback.kind || '').toLowerCase();
@@ -3572,11 +3652,10 @@
     const now = Date.now();
     frames.forEach((frame) => {
       try {
-        const lastSeek = Number(frame.dataset.lastPhonePreviewSeekAt || 0);
+        markRemotePreviewProgrammaticSync();
         const lastSecond = Number(frame.dataset.lastPhonePreviewSecond || -999);
-        if (duration && (Math.abs(current - lastSecond) > 3 || now - lastSeek > 3500)) {
+        if (duration && Math.abs(current - lastSecond) > 2.8) {
           frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [current, true] }), '*');
-          frame.dataset.lastPhonePreviewSeekAt = String(now);
           frame.dataset.lastPhonePreviewSecond = String(current);
         }
         frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [volume] }), '*');
@@ -3763,6 +3842,8 @@
   }
 
   function controlMediaCast(raw = {}) {
+    if (raw && raw.commandId && state.lastMediaCommandId === raw.commandId) return;
+    if (raw && raw.commandId) state.lastMediaCommandId = raw.commandId;
     const action = typeof raw === 'string' ? raw : String(raw.type || raw.action || '');
     const layer = document.getElementById('mediaCastLayer');
     const player = document.getElementById('mediaCastPlayer');
@@ -4016,6 +4097,7 @@
     const phoneWatch = $('remoteMediaWatchPhone');
     const phoneMuted = $('remoteMediaPhoneMuted');
     const phonePreview = $('remoteMediaPhonePreview');
+    installRemoteMediaPreviewSync(ref, isHost);
     if (fileDetails) fileDetails.addEventListener('toggle', () => { fileDetails.dataset.userTouched = '1'; });
     let selectedFile = null;
     let previewObjectUrl = '';
@@ -4031,6 +4113,10 @@
       if (!phonePreview) return;
       phonePreview.classList.toggle('hidden', !html);
       phonePreview.innerHTML = html || '<span>Phone preview off</span>';
+      window.setTimeout(() => {
+        installRemoteMediaPreviewSync(ref, isHost);
+        syncRemotePhoneMediaPreview(window.__phRemoteMediaPlayback || {});
+      }, 180);
     };
 
     const makePhonePreviewForUrl = (rawUrl) => {
@@ -4138,10 +4224,24 @@
     if (phoneWatch) phoneWatch.addEventListener('change', () => { updatePhonePreview(); window.setTimeout(() => syncRemotePhoneMediaPreview(window.__phRemoteMediaPlayback || {}), 250); });
     if (phoneMuted) phoneMuted.addEventListener('change', () => { updatePhonePreview(); window.setTimeout(() => syncRemotePhoneMediaPreview(window.__phRemoteMediaPlayback || {}), 250); });
 
-    const command = (type, value) => {
+    const command = (type, value, options = {}) => {
       if (!isHost) return;
+      const now = Date.now();
+      markRemoteMediaLocalControl(type === 'seek' || type === 'skip' ? 2600 : 1500);
       applyRemotePreviewMediaCommand(type, value);
-      sendRemoteCommand(ref, 'mediaCastControl', { type, value, clientAt: Date.now() });
+      const currentPlayback = window.__phRemoteMediaPlayback || {};
+      const patch = { ...currentPlayback };
+      if (type === 'play') { patch.playing = true; patch.paused = false; }
+      if (type === 'pause') { patch.playing = false; patch.paused = true; }
+      if (type === 'volume') { patch.volume = Math.max(0, Math.min(1, Number(value) || 0)); patch.muted = patch.volume <= 0; }
+      if (type === 'mute') patch.muted = true;
+      if (type === 'unmute') patch.muted = false;
+      if (type === 'seek') patch.currentTime = Math.max(0, Number(value) || 0);
+      if (type === 'skip') patch.currentTime = Math.max(0, (Number(patch.currentTime) || 0) + (Number(value) || 0));
+      window.__phRemoteMediaPlayback = patch;
+      updateRemoteMediaPlaybackUI(patch);
+      const commandId = `${now}-${Math.random().toString(36).slice(2, 7)}`;
+      sendRemoteCommand(ref, 'mediaCastControl', { type, value, source: options.source || 'remote', commandId, clientAt: now });
       if (type === 'stop') {
         try { ref.set({ mediaCast: { id: window.__phRemoteMediaCast ? window.__phRemoteMediaCast.id : `media-${Date.now()}`, status: 'stop', receiverStatus: 'stopped', receiverMessage: 'Media stopped from phone.', stoppedAt: Date.now() } }, { merge: true }); } catch (error) {}
       }
@@ -4164,24 +4264,39 @@
       command(playback.muted ? 'unmute' : 'mute');
     });
     const volume = $('remoteMediaVolume');
+    let volumeTimer = null;
     if (volume) volume.addEventListener('input', () => {
       const value = Math.max(0, Math.min(1, Number(volume.value) / 100));
-      command('volume', value);
+      markRemoteMediaLocalControl(1200);
+      applyRemotePreviewMediaCommand('volume', value);
+      const playback = { ...(window.__phRemoteMediaPlayback || {}), volume: value, muted: value <= 0 };
+      window.__phRemoteMediaPlayback = playback;
+      updateRemoteMediaPlaybackUI(playback);
       const label = $('remoteMediaVolumeLabel');
       if (label) label.textContent = `${Math.round(value * 100)}%`;
+      clearTimeout(volumeTimer);
+      volumeTimer = setTimeout(() => command('volume', value), 120);
     });
     const seek = $('remoteMediaSeek');
+    let seekTimer = null;
     if (seek) {
       seek.addEventListener('input', () => {
         const playback = window.__phRemoteMediaPlayback || {};
         const duration = Number(playback.duration) || 0;
         const seconds = duration ? (Number(seek.value) / 1000) * duration : 0;
         if ($('remoteMediaCurrentTime')) $('remoteMediaCurrentTime').textContent = formatMediaTime(seconds);
+        if (!duration) return;
+        markRemoteMediaLocalControl(2400);
+        applyRemotePreviewMediaCommand('seek', seconds);
+        window.__phRemoteMediaPlayback = { ...playback, currentTime: seconds };
+        clearTimeout(seekTimer);
+        seekTimer = setTimeout(() => command('seek', seconds), 180);
       });
       seek.addEventListener('change', () => {
         const playback = window.__phRemoteMediaPlayback || {};
         const duration = Number(playback.duration) || 0;
         if (!duration) return;
+        clearTimeout(seekTimer);
         command('seek', (Number(seek.value) / 1000) * duration);
       });
     }
