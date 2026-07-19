@@ -84,6 +84,8 @@
     sessionRef: null,
     unsubscribeSession: null,
     lastCommandId: null,
+    remoteCommandPollTimer: null,
+    processedRemoteCommands: new Set(),
     publishLock: false,
     inkStrokes: [],
     remoteSlideThumbs: {},
@@ -1656,7 +1658,11 @@
 
   function createMagicLayer() {
     let layer = document.getElementById('magicEffectLayer');
-    const host = document.fullscreenElement || els.viewerStage || els.viewerView || document.body;
+    // Put magic effects on the fullscreen element when available; otherwise put
+    // them directly on <body>. Appending to the slide/stage can be clipped by
+    // transforms, overflow rules, or stacking contexts, which is why remote
+    // effects could be received but never visually appear on the desktop.
+    const host = document.fullscreenElement || document.body;
     if (!layer) {
       layer = document.createElement('div');
       layer.id = 'magicEffectLayer';
@@ -1664,6 +1670,10 @@
     }
     if (layer.parentElement !== host) host.appendChild(layer);
     layer.className = 'magic-effect-layer hidden';
+    layer.style.position = 'fixed';
+    layer.style.inset = '0';
+    layer.style.zIndex = '2147483600';
+    layer.style.pointerEvents = 'none';
     layer.innerHTML = '';
     return layer;
   }
@@ -1673,6 +1683,11 @@
     const layer = createMagicLayer();
     layer.className = `magic-effect-layer magic-${effect.id} magic-intensity-${state.magicEffectIntensity || 'grand'}`;
     layer.innerHTML = magicEffectMarkup(effect.id);
+    // Inline visibility guards make the effect show even if an old CSS cache or
+    // a stacking-context bug is still present on GitHub Pages.
+    layer.style.display = 'grid';
+    layer.style.opacity = '1';
+    layer.style.visibility = 'visible';
     void layer.offsetWidth;
     layer.classList.add('show');
     if (effect.id === 'confetti' || effect.id === 'bubbles') startCanvasMagicEffect(layer, effect.id);
@@ -1682,6 +1697,9 @@
     state.magicEffectTimer = setTimeout(() => {
       layer.classList.remove('show');
       layer.classList.add('hidden');
+      layer.style.display = 'none';
+      layer.style.opacity = '';
+      layer.style.visibility = '';
       layer.innerHTML = '';
     }, durations[effect.id] || 2200);
   }
@@ -2606,6 +2624,8 @@
     state.sessionId = state.sessionId || makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
     state.lastCommandId = null;
+    if (state.remoteCommandPollTimer) clearInterval(state.remoteCommandPollTimer);
+    state.processedRemoteCommands = new Set();
     // v10.6 cleanup: old builds stored every slide thumbnail inside the live
     // session document. That made every phone command feel delayed. Remove it
     // once, then keep thumbnails in a lightweight subcollection instead.
@@ -2618,10 +2638,43 @@
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
       const data = snap.data();
-      if (!data || !data.command || data.command.id === state.lastCommandId) return;
-      state.lastCommandId = data.command.id;
-      applyRemoteCommand(data.command);
+      processRemoteCommand(data && data.command, 'snapshot');
+      processRemoteCommand(data && data.lastMagicCommand, 'snapshot-magic');
+    }, (error) => {
+      console.warn('Remote live listener failed; command polling fallback remains active.', error);
     });
+    startRemoteCommandFallbackPoll();
+  }
+
+  function processRemoteCommand(command, source = 'unknown') {
+    if (!command || !command.id) return;
+    if (state.processedRemoteCommands && state.processedRemoteCommands.has(command.id)) return;
+    state.lastCommandId = command.id;
+    if (!state.processedRemoteCommands) state.processedRemoteCommands = new Set();
+    state.processedRemoteCommands.add(command.id);
+    // Keep the Set small so the app does not grow memory during long sessions.
+    if (state.processedRemoteCommands.size > 80) {
+      state.processedRemoteCommands = new Set(Array.from(state.processedRemoteCommands).slice(-30));
+    }
+    applyRemoteCommand(command);
+  }
+
+  function startRemoteCommandFallbackPoll() {
+    if (!state.sessionRef) return;
+    if (state.remoteCommandPollTimer) clearInterval(state.remoteCommandPollTimer);
+    // Firebase onSnapshot should handle commands instantly. This fallback catches
+    // cases where the realtime listener silently stops, the page resumes from
+    // sleep, or the browser throttles the tab. It is intentionally light.
+    state.remoteCommandPollTimer = setInterval(async () => {
+      try {
+        if (!state.sessionRef) return;
+        const snap = await state.sessionRef.get();
+        if (!snap.exists) return;
+        const data = snap.data();
+        processRemoteCommand(data && data.command, 'poll');
+        processRemoteCommand(data && data.lastMagicCommand, 'poll-magic');
+      } catch (error) {}
+    }, 700);
   }
 
   function makeSessionId() {
@@ -2774,7 +2827,11 @@
       case 'last': jumpToPage(state.totalPages); break;
       case 'jumpTo': jumpToPage(command.value); break;
       case 'requestSlideThumbs': generateRemoteSlideThumbs(); break;
-      case 'magicEffect': triggerMagicEffect(command.value); break;
+      case 'magicEffect':
+      case 'triggerMagicEffect':
+      case 'remoteMagicEffect':
+        triggerMagicEffect(command.value || 'confetti');
+        break;
       case 'addInkStroke': addInkStroke(command.value); break;
       case 'clearInk': clearInkStrokes(); break;
       case 'undoInk': undoInkStroke(); break;
@@ -4204,15 +4261,12 @@
   }
 
   function sendRemoteCommand(ref, action, value) {
-    return ref.set({
-      command: {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        action,
-        value: value ?? null,
-        issuedAt: Date.now(),
-        v: 10,
-      }
-    }, { merge: true });
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const command = { id, action, value: value ?? null, issuedAt: Date.now(), v: 11 };
+    const mirror = action === 'magicEffect' || action === 'testMagicEffect'
+      ? { lastMagicCommand: command, lastMagicCommandAt: Date.now() }
+      : {};
+    return ref.set({ command, ...mirror }, { merge: true });
   }
 
 
