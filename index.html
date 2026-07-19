@@ -8,6 +8,8 @@
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
   <link rel="preconnect" href="https://www.gstatic.com" />
+  <link rel="preconnect" href="https://accounts.google.com" />
+  <link rel="preconnect" href="https://www.googleapis.com" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -47,6 +49,39 @@
             <small>Open screen for images, MP3, MP4, YouTube, or TikTok remote casting</small>
           </button>
         </div>
+      </section>
+
+      <section id="driveCloudCard" class="drive-cloud-card glass">
+        <div class="drive-cloud-head">
+          <div>
+            <span class="eyebrow mini">Google Drive Cloud Library</span>
+            <h3>Save files to your own Google Drive account.</h3>
+            <p>No app server storage. Files go to a Drive folder named <strong>Presentation Hub Files</strong>, then you can open them here again later.</p>
+          </div>
+          <span id="driveCloudStatus" class="drive-cloud-status muted">Not connected</span>
+        </div>
+
+        <div class="drive-cloud-setup">
+          <label class="drive-client-field">Google OAuth Client ID
+            <input id="driveClientIdInput" type="text" inputmode="text" autocomplete="off" placeholder="Paste your Google OAuth Web Client ID here" />
+          </label>
+          <button id="driveSaveClientBtn" type="button" class="text-button">Save Client ID</button>
+          <button id="driveSignInBtn" type="button">Sign in with Google</button>
+          <button id="driveSignOutBtn" type="button" class="text-button hidden">Sign out</button>
+        </div>
+
+        <div class="drive-cloud-actions">
+          <label id="driveUploadZone" class="drive-upload-zone">
+            <input id="driveUploadInput" type="file" multiple accept=".pdf,.pptx,image/*,audio/*,video/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+            <span>☁️</span>
+            <strong>Upload to Drive Library</strong>
+            <small>PDF/PPTX for presenting, plus images/audio/video for Media Viewing</small>
+          </label>
+          <button id="driveRefreshBtn" type="button" class="text-button">Refresh Drive files</button>
+        </div>
+
+        <div id="driveFilesGrid" class="drive-files-grid"></div>
+        <p id="driveEmptyState" class="drive-empty-state">Paste a Client ID, sign in, then upload files to your Drive library.</p>
       </section>
 
       <section class="toolbar-card glass">
@@ -302,6 +337,7 @@
   <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script defer src="firebase-config.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script defer src="app.js"></script>
 </body>
 </html>

@@ -20,6 +20,10 @@
   const DB_VERSION = 1;
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
+  const DRIVE_FOLDER_NAME = 'Presentation Hub Files';
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
+  const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
   const MEDIA_CAST_ICE_SERVERS = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -121,6 +125,13 @@
     youtubeAutoplayTimers: [],
     mediaUnmuteVolume: 0.9,
     mediaLastSeekCommandAt: 0,
+    driveClientId: '',
+    driveTokenClient: null,
+    driveAccessToken: '',
+    driveTokenExpiry: 0,
+    driveFolderId: localStorage.getItem('presentationHubDriveFolderId') || '',
+    driveFiles: [],
+    driveBusy: false,
   };
 
 
@@ -315,8 +326,10 @@
     await loadLibrary();
     loadClassroomLocal();
     loadFolders();
+    loadDriveCloudConfig();
     renderFolderList();
     renderLibrary();
+    renderDriveCloud();
     registerServiceWorker();
     window.addEventListener('resize', () => {
       if (!state.activeFile) return;
@@ -339,6 +352,7 @@
       'app', 'remoteApp', 'homeView', 'viewerView', 'fileInput', 'uploadZone', 'searchInput', 'sortSelect',
       'cardsGrid', 'emptyState', 'libraryCount', 'clearLibraryBtn', 'themeToggle', 'firebaseStatus',
       'mediaViewerBtn', 'createFolderBtn', 'folderList',
+      'driveCloudCard', 'driveCloudStatus', 'driveClientIdInput', 'driveSaveClientBtn', 'driveSignInBtn', 'driveSignOutBtn', 'driveUploadZone', 'driveUploadInput', 'driveRefreshBtn', 'driveFilesGrid', 'driveEmptyState',
       'thumbnailSidebar', 'viewerStage', 'viewerToolbar', 'controlPanel', 'settingsBtn', 'backHomeBtn',
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
       'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'inkCanvas',
@@ -372,6 +386,7 @@
     if (els.themeToggle) els.themeToggle.addEventListener('click', toggleTheme);
     if (els.firebaseStatus) els.firebaseStatus.addEventListener('click', () => showModal(els.setupModal));
     if (els.mediaViewerBtn) els.mediaViewerBtn.addEventListener('click', openMediaViewer);
+    setupDriveCloudEvents();
     if (els.closeSetupBtn) els.closeSetupBtn.addEventListener('click', () => hideModal(els.setupModal));
 
     if (els.backHomeBtn) els.backHomeBtn.addEventListener('click', closeViewer);
@@ -526,6 +541,392 @@
       els.viewerView.addEventListener('mousemove', revealToolbarTemporarily);
       els.viewerView.addEventListener('touchstart', revealToolbarTemporarily, { passive: true });
     }
+  }
+
+
+  function loadDriveCloudConfig() {
+    state.driveClientId = (localStorage.getItem('presentationHubGoogleClientId') || '').trim();
+    if (els.driveClientIdInput) els.driveClientIdInput.value = state.driveClientId;
+  }
+
+  function setupDriveCloudEvents() {
+    if (els.driveSaveClientBtn) els.driveSaveClientBtn.addEventListener('click', saveDriveClientId);
+    if (els.driveSignInBtn) els.driveSignInBtn.addEventListener('click', async () => {
+      try {
+        await ensureDriveAccessToken(true);
+        await refreshDriveFiles();
+      } catch (error) {
+        console.warn(error);
+        updateDriveStatus(error.message || 'Google Drive sign-in failed.', 'error');
+      }
+    });
+    if (els.driveSignOutBtn) els.driveSignOutBtn.addEventListener('click', signOutDrive);
+    if (els.driveRefreshBtn) els.driveRefreshBtn.addEventListener('click', refreshDriveFiles);
+    if (els.driveUploadInput) els.driveUploadInput.addEventListener('change', async (event) => {
+      await handleDriveUploadFiles(event.target.files);
+      event.target.value = '';
+    });
+    if (els.driveUploadZone) {
+      ['dragenter', 'dragover'].forEach((type) => els.driveUploadZone.addEventListener(type, (event) => {
+        event.preventDefault();
+        els.driveUploadZone.classList.add('drag-over');
+      }));
+      ['dragleave', 'drop'].forEach((type) => els.driveUploadZone.addEventListener(type, async (event) => {
+        event.preventDefault();
+        els.driveUploadZone.classList.remove('drag-over');
+        if (type === 'drop') await handleDriveUploadFiles(event.dataTransfer.files);
+      }));
+    }
+  }
+
+  function saveDriveClientId() {
+    const value = (els.driveClientIdInput ? els.driveClientIdInput.value : '').trim();
+    if (!value) {
+      localStorage.removeItem('presentationHubGoogleClientId');
+      state.driveClientId = '';
+      state.driveTokenClient = null;
+      updateDriveStatus('Paste your Google OAuth Web Client ID first.', 'warning');
+      renderDriveCloud();
+      return;
+    }
+    localStorage.setItem('presentationHubGoogleClientId', value);
+    state.driveClientId = value;
+    state.driveTokenClient = null;
+    updateDriveStatus('Client ID saved. Tap Sign in with Google.', 'ready');
+    renderDriveCloud();
+  }
+
+  function updateDriveStatus(message, tone = '') {
+    if (!els.driveCloudStatus) return;
+    const fallback = state.driveAccessToken ? 'Drive connected' : state.driveClientId ? 'Ready to sign in' : 'Not connected';
+    els.driveCloudStatus.textContent = message || fallback;
+    els.driveCloudStatus.classList.toggle('ready', tone === 'ready' || (!!state.driveAccessToken && tone !== 'error' && tone !== 'warning'));
+    els.driveCloudStatus.classList.toggle('error', tone === 'error');
+    els.driveCloudStatus.classList.toggle('warning', tone === 'warning');
+    els.driveCloudStatus.classList.toggle('muted', !tone && !state.driveAccessToken);
+  }
+
+  function renderDriveCloud() {
+    if (!els.driveCloudCard) return;
+    const signedIn = !!state.driveAccessToken && Date.now() < state.driveTokenExpiry;
+    if (els.driveClientIdInput && !els.driveClientIdInput.value && state.driveClientId) els.driveClientIdInput.value = state.driveClientId;
+    if (els.driveSignInBtn) els.driveSignInBtn.textContent = signedIn ? 'Reconnect Google' : 'Sign in with Google';
+    if (els.driveSignOutBtn) els.driveSignOutBtn.classList.toggle('hidden', !signedIn);
+    if (els.driveRefreshBtn) els.driveRefreshBtn.disabled = state.driveBusy || !state.driveClientId;
+    if (els.driveUploadInput) els.driveUploadInput.disabled = state.driveBusy || !state.driveClientId;
+    if (els.driveUploadZone) els.driveUploadZone.classList.toggle('disabled', state.driveBusy || !state.driveClientId);
+    if (!state.driveClientId) updateDriveStatus('Paste Client ID first', 'warning');
+    else if (signedIn) updateDriveStatus(`${state.driveFiles.length} Drive files ready`, 'ready');
+    else updateDriveStatus('Ready to sign in', '');
+
+    if (!els.driveFilesGrid) return;
+    if (!state.driveFiles.length) {
+      els.driveFilesGrid.innerHTML = '';
+      if (els.driveEmptyState) els.driveEmptyState.classList.remove('hidden');
+      return;
+    }
+    if (els.driveEmptyState) els.driveEmptyState.classList.add('hidden');
+    els.driveFilesGrid.innerHTML = state.driveFiles.map(driveFileTemplate).join('');
+    els.driveFilesGrid.querySelectorAll('[data-drive-open]').forEach((button) => {
+      button.addEventListener('click', () => openDriveFile(button.dataset.driveOpen));
+    });
+    els.driveFilesGrid.querySelectorAll('[data-drive-delete]').forEach((button) => {
+      button.addEventListener('click', () => deleteDriveFile(button.dataset.driveDelete));
+    });
+  }
+
+  function driveFileTemplate(file) {
+    const kind = getDriveFileKind(file);
+    const icon = kind === 'pdf' ? '📄' : kind === 'pptx' ? '📊' : kind === 'image' ? '🖼️' : kind === 'video' ? '🎬' : kind === 'audio' ? '🎵' : '☁️';
+    const modified = file.modifiedTime ? new Date(file.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Drive';
+    const size = file.size ? formatMediaBytes(Number(file.size)) : 'Google Drive';
+    return `
+      <article class="drive-file-card" title="${escapeHtml(file.name || 'Drive file')}">
+        <div class="drive-file-icon">${icon}</div>
+        <div class="drive-file-main">
+          <strong>${escapeHtml(file.name || 'Untitled')}</strong>
+          <small>${escapeHtml(kind.toUpperCase())} • ${escapeHtml(size)} • ${escapeHtml(modified)}</small>
+        </div>
+        <div class="drive-file-actions">
+          <button type="button" data-drive-open="${escapeHtml(file.id)}">Open</button>
+          <button type="button" class="text-button" data-drive-delete="${escapeHtml(file.id)}">Delete</button>
+        </div>
+      </article>
+    `;
+  }
+
+  async function ensureGoogleIdentityScript() {
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) return true;
+    await loadScriptOnce('https://accounts.google.com/gsi/client');
+    if (!(window.google && window.google.accounts && window.google.accounts.oauth2)) throw new Error('Google Identity could not load. Check internet connection or ad-block settings.');
+    return true;
+  }
+
+  async function ensureDriveAccessToken(interactive = true) {
+    const saved = (els.driveClientIdInput ? els.driveClientIdInput.value : state.driveClientId || '').trim();
+    if (saved && saved !== state.driveClientId) {
+      state.driveClientId = saved;
+      localStorage.setItem('presentationHubGoogleClientId', saved);
+      state.driveTokenClient = null;
+    }
+    if (!state.driveClientId) throw new Error('Paste and save your Google OAuth Web Client ID first.');
+    if (state.driveAccessToken && Date.now() < state.driveTokenExpiry - 15000) return state.driveAccessToken;
+    if (!interactive) throw new Error('Google Drive needs sign-in again.');
+    await ensureGoogleIdentityScript();
+    return new Promise((resolve, reject) => {
+      try {
+        state.driveTokenClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: state.driveClientId,
+          scope: DRIVE_SCOPE,
+          prompt: '',
+          callback: (response) => {
+            if (!response || response.error) {
+              reject(new Error(response && response.error ? response.error : 'Google Drive sign-in was cancelled.'));
+              return;
+            }
+            state.driveAccessToken = response.access_token || '';
+            state.driveTokenExpiry = Date.now() + Math.max(60, Number(response.expires_in || 3600) - 60) * 1000;
+            updateDriveStatus('Drive connected', 'ready');
+            renderDriveCloud();
+            resolve(state.driveAccessToken);
+          },
+        });
+        state.driveTokenClient.requestAccessToken({ prompt: state.driveAccessToken ? '' : 'consent' });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async function driveFetch(url, options = {}) {
+    const token = await ensureDriveAccessToken(true);
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch(url, { ...options, headers });
+    if (response.status === 401 || response.status === 403) {
+      state.driveAccessToken = '';
+      state.driveTokenExpiry = 0;
+      renderDriveCloud();
+    }
+    if (!response.ok) {
+      let detail = '';
+      try { detail = (await response.json()).error.message; } catch (error) {}
+      throw new Error(detail || `Google Drive request failed (${response.status}).`);
+    }
+    return response;
+  }
+
+  async function findOrCreateDriveFolder() {
+    if (state.driveFolderId) return state.driveFolderId;
+    const q = `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQuery(DRIVE_FOLDER_NAME)}' and trashed=false`;
+    const listUrl = `${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`;
+    const listResponse = await driveFetch(listUrl);
+    const found = await listResponse.json();
+    if (found.files && found.files[0] && found.files[0].id) {
+      state.driveFolderId = found.files[0].id;
+      localStorage.setItem('presentationHubDriveFolderId', state.driveFolderId);
+      return state.driveFolderId;
+    }
+    const createResponse = await driveFetch(`${DRIVE_API_BASE}/files?fields=id,name`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
+    });
+    const folder = await createResponse.json();
+    state.driveFolderId = folder.id;
+    localStorage.setItem('presentationHubDriveFolderId', state.driveFolderId);
+    return state.driveFolderId;
+  }
+
+  function escapeDriveQuery(value) {
+    return String(value || '').replace(/'/g, "\\'");
+  }
+
+  async function refreshDriveFiles() {
+    if (state.driveBusy) return;
+    try {
+      state.driveBusy = true;
+      renderDriveCloud();
+      updateDriveStatus('Loading Drive files...', '');
+      await ensureDriveAccessToken(true);
+      const folderId = await findOrCreateDriveFolder();
+      const q = `'${folderId}' in parents and trashed=false`;
+      const fields = 'files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink)';
+      const response = await driveFetch(`${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(fields)}&orderBy=modifiedTime desc&spaces=drive&pageSize=100`);
+      const data = await response.json();
+      state.driveFiles = (data.files || []).filter((file) => isDriveFileSupported(file));
+      updateDriveStatus(`${state.driveFiles.length} Drive files ready`, 'ready');
+    } catch (error) {
+      console.warn(error);
+      updateDriveStatus(error.message || 'Could not load Drive files.', 'error');
+    } finally {
+      state.driveBusy = false;
+      renderDriveCloud();
+    }
+  }
+
+  async function handleDriveUploadFiles(fileList) {
+    const files = Array.from(fileList || []).filter((file) => isCloudUploadSupported(file));
+    if (!files.length) {
+      updateDriveStatus('Choose PDF, PPTX, image, audio, or video files.', 'warning');
+      return;
+    }
+    try {
+      state.driveBusy = true;
+      renderDriveCloud();
+      await ensureDriveAccessToken(true);
+      const folderId = await findOrCreateDriveFolder();
+      for (let i = 0; i < files.length; i++) {
+        updateDriveStatus(`Uploading ${i + 1}/${files.length}: ${files[i].name}`, '');
+        await uploadFileToDrive(files[i], folderId);
+      }
+      await refreshDriveFiles();
+      updateDriveStatus('Upload complete. Saved in Google Drive.', 'ready');
+    } catch (error) {
+      console.warn(error);
+      updateDriveStatus(error.message || 'Drive upload failed.', 'error');
+    } finally {
+      state.driveBusy = false;
+      renderDriveCloud();
+    }
+  }
+
+  function isCloudUploadSupported(file) {
+    if (!file || !file.name) return false;
+    return /\.(pdf|pptx|png|jpe?g|webp|gif|mp3|m4a|wav|ogg|mp4|webm|mov)$/i.test(file.name) || /^(image|audio|video)\//i.test(file.type || '');
+  }
+
+  async function uploadFileToDrive(file, folderId) {
+    const boundary = `ph_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const metadata = { name: file.name, mimeType: file.type || getMimeFromName(file.name), parents: [folderId] };
+    const body = new Blob([
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
+      `--${boundary}\r\nContent-Type: ${metadata.mimeType || 'application/octet-stream'}\r\n\r\n`,
+      file,
+      `\r\n--${boundary}--`,
+    ], { type: `multipart/related; boundary=${boundary}` });
+    const response = await driveFetch(`${DRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id,name,mimeType,size,createdTime,modifiedTime,webViewLink`, {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+      body,
+    });
+    return response.json();
+  }
+
+  async function openDriveFile(fileId) {
+    const meta = state.driveFiles.find((file) => file.id === fileId);
+    if (!meta) return;
+    try {
+      state.driveBusy = true;
+      renderDriveCloud();
+      updateDriveStatus(`Opening ${meta.name}...`, '');
+      const blob = await downloadDriveBlob(fileId, meta.mimeType);
+      const kind = getDriveFileKind(meta);
+      if (kind === 'pdf' || kind === 'pptx') {
+        const localFile = new File([blob], meta.name, { type: meta.mimeType || getMimeFromName(meta.name) });
+        let record = state.files.find((item) => item.driveFileId === fileId);
+        if (!record) {
+          record = await createPresentationRecord(localFile, '');
+          record.driveFileId = fileId;
+          record.driveCloud = true;
+          record.note = 'Opened from your Google Drive Cloud Library.';
+          state.files.unshift(record);
+        } else {
+          record.blob = localFile;
+          record.lastViewed = new Date().toISOString();
+          record.name = meta.name;
+          record.type = kind;
+        }
+        await dbPut(record);
+        renderLibrary();
+        await openPresentation(record.id);
+      } else {
+        await openMediaViewer();
+        const mediaUrl = URL.createObjectURL(blob);
+        if (state.mediaCastBlobUrl) {
+          try { URL.revokeObjectURL(state.mediaCastBlobUrl); } catch (error) {}
+        }
+        state.mediaCastBlobUrl = mediaUrl;
+        showMediaCastPlayer(mediaUrl, { name: meta.name, kind, type: meta.mimeType || getMimeFromName(meta.name), size: Number(meta.size || blob.size || 0) });
+      }
+      updateDriveStatus('Opened from Drive.', 'ready');
+    } catch (error) {
+      console.warn(error);
+      updateDriveStatus(error.message || 'Could not open Drive file.', 'error');
+    } finally {
+      state.driveBusy = false;
+      renderDriveCloud();
+    }
+  }
+
+  async function downloadDriveBlob(fileId, mimeType = '') {
+    const response = await driveFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media`);
+    return response.blob().then((blob) => blob.type ? blob : blob.slice(0, blob.size, mimeType || 'application/octet-stream'));
+  }
+
+  async function deleteDriveFile(fileId) {
+    const file = state.driveFiles.find((item) => item.id === fileId);
+    if (!file) return;
+    if (!confirm(`Delete "${file.name}" from your Google Drive library?`)) return;
+    try {
+      state.driveBusy = true;
+      renderDriveCloud();
+      await driveFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
+      state.driveFiles = state.driveFiles.filter((item) => item.id !== fileId);
+      updateDriveStatus('Deleted from Drive.', 'ready');
+    } catch (error) {
+      console.warn(error);
+      updateDriveStatus(error.message || 'Could not delete Drive file.', 'error');
+    } finally {
+      state.driveBusy = false;
+      renderDriveCloud();
+    }
+  }
+
+  function signOutDrive() {
+    const token = state.driveAccessToken;
+    if (token && window.google && window.google.accounts && window.google.accounts.oauth2) {
+      try { window.google.accounts.oauth2.revoke(token, () => undefined); } catch (error) {}
+    }
+    state.driveAccessToken = '';
+    state.driveTokenExpiry = 0;
+    state.driveTokenClient = null;
+    state.driveFiles = [];
+    updateDriveStatus('Signed out from Google Drive.', '');
+    renderDriveCloud();
+  }
+
+  function isDriveFileSupported(file) {
+    return ['pdf', 'pptx', 'image', 'audio', 'video'].includes(getDriveFileKind(file));
+  }
+
+  function getDriveFileKind(file) {
+    const name = (file && file.name ? file.name : '').toLowerCase();
+    const mime = (file && file.mimeType ? file.mimeType : '').toLowerCase();
+    if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+    if (mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || name.endsWith('.pptx')) return 'pptx';
+    if (mime.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(name)) return 'image';
+    if (mime.startsWith('audio/') || /\.(mp3|m4a|wav|ogg)$/i.test(name)) return 'audio';
+    if (mime.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(name)) return 'video';
+    return 'file';
+  }
+
+  function getMimeFromName(name = '') {
+    const lower = String(name).toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.mp3')) return 'audio/mpeg';
+    if (lower.endsWith('.m4a')) return 'audio/mp4';
+    if (lower.endsWith('.wav')) return 'audio/wav';
+    if (lower.endsWith('.ogg')) return 'audio/ogg';
+    if (lower.endsWith('.mp4')) return 'video/mp4';
+    if (lower.endsWith('.webm')) return 'video/webm';
+    if (lower.endsWith('.mov')) return 'video/quicktime';
+    return 'application/octet-stream';
   }
 
   function applySavedTheme() {
