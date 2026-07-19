@@ -53,7 +53,7 @@
     audioContext: null,
     audioUnlocked: false,
     transitionEffect: 'fade',
-    transitionDuration: 760,
+    transitionDuration: 920,
     slideChangePending: false,
     pdfPageCache: new Map(),
     pdfBitmapCache: new Map(),
@@ -2465,15 +2465,29 @@
       'transition-slide-left',
       'transition-slide-right',
       'transition-slide-up',
+      'transition-slide-down',
       'transition-zoom-in',
       'transition-zoom-out',
       'transition-soft-blur',
       'transition-bounce-pop',
       'transition-happy-pop',
+      'transition-elastic-pop',
+      'transition-sparkle-zoom',
       'transition-page-flip',
+      'transition-paper-turn',
       'transition-circle-reveal',
+      'transition-corner-reveal',
       'transition-bright-wipe',
-      'transition-drop-in'
+      'transition-ribbon-wipe',
+      'transition-split-open',
+      'transition-drop-in',
+      'transition-float-up',
+      'transition-diagonal-rise',
+      'transition-diagonal-fall',
+      'transition-smooth-swing',
+      'transition-push-left',
+      'transition-push-right',
+      'transition-carousel'
     ];
   }
 
@@ -3424,18 +3438,32 @@
           <div class="remote-wide remote-timing-box remote-form-grid two">
             <select id="remoteTransition" data-host-only="true">
               <option value="fade">Fade transition</option>
-              <option value="slide-left">Slide left</option>
-              <option value="slide-right">Slide right</option>
-              <option value="slide-up">Slide up</option>
-              <option value="zoom-in">Zoom in</option>
-              <option value="zoom-out">Zoom out</option>
-              <option value="soft-blur">Soft blur</option>
-              <option value="bounce-pop">Bounce pop</option>
-              <option value="happy-pop">Happy pop</option>
-              <option value="page-flip">Page flip</option>
-              <option value="circle-reveal">Circle reveal</option>
-              <option value="bright-wipe">Bright wipe</option>
-              <option value="drop-in">Drop in</option>
+              <option value="slide-left">Slide left transition</option>
+              <option value="slide-right">Slide right transition</option>
+              <option value="slide-up">Slide up transition</option>
+              <option value="slide-down">Slide down transition</option>
+              <option value="zoom-in">Zoom in transition</option>
+              <option value="zoom-out">Zoom out transition</option>
+              <option value="soft-blur">Soft blur transition</option>
+              <option value="bounce-pop">Bounce pop transition</option>
+              <option value="happy-pop">Happy pop transition</option>
+              <option value="elastic-pop">Elastic pop transition</option>
+              <option value="sparkle-zoom">Sparkle zoom transition</option>
+              <option value="page-flip">Page flip transition</option>
+              <option value="paper-turn">Paper turn transition</option>
+              <option value="circle-reveal">Circle reveal transition</option>
+              <option value="corner-reveal">Corner reveal transition</option>
+              <option value="bright-wipe">Bright wipe transition</option>
+              <option value="ribbon-wipe">Ribbon wipe transition</option>
+              <option value="split-open">Split open transition</option>
+              <option value="drop-in">Drop in transition</option>
+              <option value="float-up">Float up transition</option>
+              <option value="diagonal-rise">Diagonal rise transition</option>
+              <option value="diagonal-fall">Diagonal fall transition</option>
+              <option value="smooth-swing">Smooth swing transition</option>
+              <option value="push-left">Push left transition</option>
+              <option value="push-right">Push right transition</option>
+              <option value="carousel">Carousel transition</option>
               <option value="none">No transition</option>
             </select>
             <select id="remoteTimerPosition" data-host-only="true">

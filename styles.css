@@ -893,8 +893,8 @@ body.remote-fullscreen-open {
 
 /* Slide transition effects - smoother, clearer, and more classroom-friendly. */
 .slide-transition {
-  animation-duration: var(--ph-transition-ms, 760ms);
-  animation-timing-function: cubic-bezier(.16, 1, .3, 1);
+  animation-duration: var(--ph-transition-ms, 920ms);
+  animation-timing-function: cubic-bezier(.18, .9, .16, 1);
   animation-fill-mode: both;
   transform-origin: center center;
   will-change: transform, opacity, filter, clip-path;
@@ -903,15 +903,29 @@ body.remote-fullscreen-open {
 .transition-slide-left { animation-name: phSlideLeft; }
 .transition-slide-right { animation-name: phSlideRight; }
 .transition-slide-up { animation-name: phSlideUp; }
+.transition-slide-down { animation-name: phSlideDown; }
 .transition-zoom-in { animation-name: phZoomIn; }
 .transition-zoom-out { animation-name: phZoomOut; }
 .transition-soft-blur { animation-name: phSoftBlur; }
 .transition-bounce-pop { animation-name: phBouncePop; }
 .transition-happy-pop { animation-name: phHappyPop; }
+.transition-elastic-pop { animation-name: phElasticPop; }
+.transition-sparkle-zoom { animation-name: phSparkleZoom; }
 .transition-page-flip { animation-name: phPageFlip; transform-style: preserve-3d; perspective: 1200px; }
+.transition-paper-turn { animation-name: phPaperTurn; transform-style: preserve-3d; perspective: 1200px; }
 .transition-circle-reveal { animation-name: phCircleReveal; }
+.transition-corner-reveal { animation-name: phCornerReveal; }
 .transition-bright-wipe { animation-name: phBrightWipe; }
+.transition-ribbon-wipe { animation-name: phRibbonWipe; }
+.transition-split-open { animation-name: phSplitOpen; }
 .transition-drop-in { animation-name: phDropIn; }
+.transition-float-up { animation-name: phFloatUp; }
+.transition-diagonal-rise { animation-name: phDiagonalRise; }
+.transition-diagonal-fall { animation-name: phDiagonalFall; }
+.transition-smooth-swing { animation-name: phSmoothSwing; transform-origin: top center; }
+.transition-push-left { animation-name: phPushLeft; }
+.transition-push-right { animation-name: phPushRight; }
+.transition-carousel { animation-name: phCarousel; transform-style: preserve-3d; perspective: 1200px; }
 @keyframes phFadeIn {
   0% { opacity: 0; filter: brightness(1.08); }
   100% { opacity: 1; filter: brightness(1); }
@@ -926,6 +940,10 @@ body.remote-fullscreen-open {
 }
 @keyframes phSlideUp {
   0% { opacity: 0; transform: translate3d(0,78px,0) scale(.985); filter: brightness(1.05); }
+  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); }
+}
+@keyframes phSlideDown {
+  0% { opacity: 0; transform: translate3d(0,-82px,0) scale(.985); filter: brightness(1.08); }
   100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); }
 }
 @keyframes phZoomIn {
@@ -952,22 +970,83 @@ body.remote-fullscreen-open {
   55% { opacity: 1; transform: scale(1.035) rotate(1.2deg); filter: saturate(1.18) brightness(1.06); }
   100% { opacity: 1; transform: scale(1) rotate(0); filter: saturate(1) brightness(1); }
 }
+@keyframes phElasticPop {
+  0% { opacity: 0; transform: scale(.68); filter: saturate(1.35) brightness(1.22); }
+  45% { opacity: 1; transform: scale(1.085); }
+  68% { transform: scale(.972); }
+  84% { transform: scale(1.018); }
+  100% { opacity: 1; transform: scale(1); filter: saturate(1) brightness(1); }
+}
+@keyframes phSparkleZoom {
+  0% { opacity: 0; transform: scale(.84) rotate(-.8deg); filter: blur(7px) saturate(1.55) brightness(1.38); }
+  45% { opacity: 1; transform: scale(1.035) rotate(.5deg); filter: blur(0) saturate(1.32) brightness(1.2); }
+  72% { transform: scale(.995); filter: saturate(1.15) brightness(1.08); }
+  100% { opacity: 1; transform: scale(1) rotate(0); filter: saturate(1) brightness(1); }
+}
 @keyframes phPageFlip {
   0% { opacity: 0; transform: rotateY(-22deg) translate3d(64px,0,0) scale(.985); filter: brightness(1.12); }
   100% { opacity: 1; transform: rotateY(0) translate3d(0,0,0) scale(1); filter: brightness(1); }
+}
+@keyframes phPaperTurn {
+  0% { opacity: 0; transform: perspective(1200px) rotateY(28deg) translate3d(-58px,0,0) scale(.982); filter: brightness(1.16); }
+  100% { opacity: 1; transform: perspective(1200px) rotateY(0) translate3d(0,0,0) scale(1); filter: brightness(1); }
 }
 @keyframes phCircleReveal {
   0% { opacity: .35; clip-path: circle(0% at 50% 50%); transform: scale(1.015); filter: brightness(1.12); }
   100% { opacity: 1; clip-path: circle(78% at 50% 50%); transform: scale(1); filter: brightness(1); }
 }
+@keyframes phCornerReveal {
+  0% { opacity: .3; clip-path: circle(0% at 100% 0%); transform: scale(1.018); filter: brightness(1.18); }
+  100% { opacity: 1; clip-path: circle(145% at 100% 0%); transform: scale(1); filter: brightness(1); }
+}
 @keyframes phBrightWipe {
   0% { opacity: .25; clip-path: inset(0 100% 0 0); filter: brightness(1.25) saturate(1.25); }
   100% { opacity: 1; clip-path: inset(0 0 0 0); filter: brightness(1) saturate(1); }
+}
+@keyframes phRibbonWipe {
+  0% { opacity: .2; clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); filter: brightness(1.28) saturate(1.25); }
+  55% { opacity: 1; clip-path: polygon(0 0, 84% 0, 66% 100%, 0 100%); filter: brightness(1.12) saturate(1.15); }
+  100% { opacity: 1; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); filter: brightness(1) saturate(1); }
+}
+@keyframes phSplitOpen {
+  0% { opacity: .25; clip-path: inset(0 50% 0 50%); transform: scale(1.012); filter: brightness(1.2); }
+  100% { opacity: 1; clip-path: inset(0 0 0 0); transform: scale(1); filter: brightness(1); }
 }
 @keyframes phDropIn {
   0% { opacity: 0; transform: translate3d(0,-92px,0) scale(.96); filter: blur(4px) brightness(1.12); }
   68% { opacity: 1; transform: translate3d(0,8px,0) scale(1.012); filter: blur(0) brightness(1.03); }
   100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); }
+}
+
+@keyframes phFloatUp {
+  0% { opacity: 0; transform: translate3d(0,92px,0) scale(.97); filter: blur(4px) brightness(1.12); }
+  70% { opacity: 1; transform: translate3d(0,-6px,0) scale(1.01); filter: blur(0) brightness(1.03); }
+  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); }
+}
+@keyframes phDiagonalRise {
+  0% { opacity: 0; transform: translate3d(88px,72px,0) scale(.975); filter: blur(3px) brightness(1.12); }
+  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: blur(0) brightness(1); }
+}
+@keyframes phDiagonalFall {
+  0% { opacity: 0; transform: translate3d(-88px,-72px,0) scale(.975); filter: blur(3px) brightness(1.12); }
+  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: blur(0) brightness(1); }
+}
+@keyframes phSmoothSwing {
+  0% { opacity: 0; transform: rotate(-5deg) translate3d(-42px,0,0) scale(.985); filter: brightness(1.15); }
+  55% { opacity: 1; transform: rotate(1.6deg) translate3d(10px,0,0) scale(1.01); }
+  100% { opacity: 1; transform: rotate(0) translate3d(0,0,0) scale(1); filter: brightness(1); }
+}
+@keyframes phPushLeft {
+  0% { opacity: 0; transform: translate3d(100%,0,0) scale(.992); filter: brightness(1.12); }
+  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); }
+}
+@keyframes phPushRight {
+  0% { opacity: 0; transform: translate3d(-100%,0,0) scale(.992); filter: brightness(1.12); }
+  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); }
+}
+@keyframes phCarousel {
+  0% { opacity: 0; transform: perspective(1200px) translate3d(92px,0,0) rotateY(-16deg) scale(.96); filter: brightness(1.15); }
+  100% { opacity: 1; transform: perspective(1200px) translate3d(0,0,0) rotateY(0) scale(1); filter: brightness(1); }
 }
 
 /* Smoother phone fullscreen preview: full dynamic viewport, no clipped bottom */
@@ -1439,23 +1518,37 @@ body .remote-full-preview.hidden,
 .pdf-layer-incoming {
   opacity: 0;
   z-index: 3;
-  animation-duration: var(--ph-transition-ms, 760ms);
-  animation-timing-function: cubic-bezier(.16, 1, .3, 1);
+  animation-duration: var(--ph-transition-ms, 920ms);
+  animation-timing-function: cubic-bezier(.18, .9, .16, 1);
   animation-fill-mode: both;
 }
 .pdf-layer-incoming.pdf-layer-show.transition-fade { animation-name: phPdfFadeClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-slide-left { animation-name: phPdfSlideLeftClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-slide-right { animation-name: phPdfSlideRightClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-slide-up { animation-name: phPdfSlideUpClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-slide-down { animation-name: phPdfSlideDownClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-zoom-in { animation-name: phPdfZoomInClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-zoom-out { animation-name: phPdfZoomOutClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-soft-blur { animation-name: phPdfSoftBlurClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-bounce-pop { animation-name: phPdfBouncePopClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-happy-pop { animation-name: phPdfHappyPopClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-elastic-pop { animation-name: phPdfElasticPopClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-sparkle-zoom { animation-name: phPdfSparkleZoomClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-page-flip { animation-name: phPdfPageFlipClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-paper-turn { animation-name: phPdfPaperTurnClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-circle-reveal { animation-name: phPdfCircleRevealClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-corner-reveal { animation-name: phPdfCornerRevealClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-bright-wipe { animation-name: phPdfBrightWipeClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-ribbon-wipe { animation-name: phPdfRibbonWipeClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-split-open { animation-name: phPdfSplitOpenClean; }
 .pdf-layer-incoming.pdf-layer-show.transition-drop-in { animation-name: phPdfDropInClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-float-up { animation-name: phPdfFloatUpClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-diagonal-rise { animation-name: phPdfDiagonalRiseClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-diagonal-fall { animation-name: phPdfDiagonalFallClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-smooth-swing { animation-name: phPdfSmoothSwingClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-push-left { animation-name: phPdfPushLeftClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-push-right { animation-name: phPdfPushRightClean; }
+.pdf-layer-incoming.pdf-layer-show.transition-carousel { animation-name: phPdfCarouselClean; }
 .pdf-layer-outgoing {
   z-index: 1;
   opacity: 0;
@@ -1468,15 +1561,29 @@ body .remote-full-preview.hidden,
 @keyframes phPdfSlideLeftClean { from { opacity: 0; transform: translate3d(82px,0,0) scale(.985); filter: brightness(1.05); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
 @keyframes phPdfSlideRightClean { from { opacity: 0; transform: translate3d(-82px,0,0) scale(.985); filter: brightness(1.05); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
 @keyframes phPdfSlideUpClean { from { opacity: 0; transform: translate3d(0,78px,0) scale(.985); filter: brightness(1.05); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
+@keyframes phPdfSlideDownClean { from { opacity: 0; transform: translate3d(0,-82px,0) scale(.985); filter: brightness(1.08); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
 @keyframes phPdfZoomInClean { 0% { opacity: 0; transform: scale(.88); filter: blur(2px) brightness(1.08); } 70% { opacity: 1; transform: scale(1.018); filter: blur(0) brightness(1.02); } 100% { opacity: 1; transform: scale(1); filter: brightness(1); } }
 @keyframes phPdfZoomOutClean { from { opacity: 0; transform: scale(1.12); filter: blur(2px) brightness(1.08); } to { opacity: 1; transform: scale(1); filter: blur(0) brightness(1); } }
 @keyframes phPdfSoftBlurClean { from { opacity: 0; filter: blur(18px) saturate(1.2) brightness(1.08); transform: scale(1.025); } to { opacity: 1; filter: blur(0) saturate(1) brightness(1); transform: scale(1); } }
 @keyframes phPdfBouncePopClean { 0% { opacity: 0; transform: scale(.72) translate3d(0,34px,0); filter: brightness(1.16); } 62% { opacity: 1; transform: scale(1.045) translate3d(0,-8px,0); } 82% { transform: scale(.988) translate3d(0,2px,0); } 100% { opacity: 1; transform: scale(1) translate3d(0,0,0); filter: brightness(1); } }
 @keyframes phPdfHappyPopClean { 0% { opacity: 0; transform: scale(.82) rotate(-2.5deg); filter: saturate(1.35) brightness(1.18); } 55% { opacity: 1; transform: scale(1.035) rotate(1.2deg); filter: saturate(1.18) brightness(1.06); } 100% { opacity: 1; transform: scale(1) rotate(0); filter: saturate(1) brightness(1); } }
+@keyframes phPdfElasticPopClean { 0% { opacity: 0; transform: scale(.68); filter: saturate(1.35) brightness(1.22); } 45% { opacity: 1; transform: scale(1.085); } 68% { transform: scale(.972); } 84% { transform: scale(1.018); } 100% { opacity: 1; transform: scale(1); filter: saturate(1) brightness(1); } }
+@keyframes phPdfSparkleZoomClean { 0% { opacity: 0; transform: scale(.84) rotate(-.8deg); filter: blur(7px) saturate(1.55) brightness(1.38); } 45% { opacity: 1; transform: scale(1.035) rotate(.5deg); filter: blur(0) saturate(1.32) brightness(1.2); } 72% { transform: scale(.995); filter: saturate(1.15) brightness(1.08); } 100% { opacity: 1; transform: scale(1) rotate(0); filter: saturate(1) brightness(1); } }
 @keyframes phPdfPageFlipClean { from { opacity: 0; transform: perspective(1200px) rotateY(-22deg) translate3d(64px,0,0) scale(.985); filter: brightness(1.12); } to { opacity: 1; transform: perspective(1200px) rotateY(0) translate3d(0,0,0) scale(1); filter: brightness(1); } }
+@keyframes phPdfPaperTurnClean { from { opacity: 0; transform: perspective(1200px) rotateY(28deg) translate3d(-58px,0,0) scale(.982); filter: brightness(1.16); } to { opacity: 1; transform: perspective(1200px) rotateY(0) translate3d(0,0,0) scale(1); filter: brightness(1); } }
 @keyframes phPdfCircleRevealClean { from { opacity: .35; clip-path: circle(0% at 50% 50%); transform: scale(1.015); filter: brightness(1.12); } to { opacity: 1; clip-path: circle(78% at 50% 50%); transform: scale(1); filter: brightness(1); } }
+@keyframes phPdfCornerRevealClean { from { opacity: .3; clip-path: circle(0% at 100% 0%); transform: scale(1.018); filter: brightness(1.18); } to { opacity: 1; clip-path: circle(145% at 100% 0%); transform: scale(1); filter: brightness(1); } }
 @keyframes phPdfBrightWipeClean { from { opacity: .25; clip-path: inset(0 100% 0 0); filter: brightness(1.25) saturate(1.25); } to { opacity: 1; clip-path: inset(0 0 0 0); filter: brightness(1) saturate(1); } }
+@keyframes phPdfRibbonWipeClean { 0% { opacity: .2; clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); filter: brightness(1.28) saturate(1.25); } 55% { opacity: 1; clip-path: polygon(0 0, 84% 0, 66% 100%, 0 100%); filter: brightness(1.12) saturate(1.15); } 100% { opacity: 1; clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); filter: brightness(1) saturate(1); } }
+@keyframes phPdfSplitOpenClean { from { opacity: .25; clip-path: inset(0 50% 0 50%); transform: scale(1.012); filter: brightness(1.2); } to { opacity: 1; clip-path: inset(0 0 0 0); transform: scale(1); filter: brightness(1); } }
 @keyframes phPdfDropInClean { 0% { opacity: 0; transform: translate3d(0,-92px,0) scale(.96); filter: blur(4px) brightness(1.12); } 68% { opacity: 1; transform: translate3d(0,8px,0) scale(1.012); filter: blur(0) brightness(1.03); } 100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
+@keyframes phPdfFloatUpClean { 0% { opacity: 0; transform: translate3d(0,92px,0) scale(.97); filter: blur(4px) brightness(1.12); } 70% { opacity: 1; transform: translate3d(0,-6px,0) scale(1.01); filter: blur(0) brightness(1.03); } 100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
+@keyframes phPdfDiagonalRiseClean { from { opacity: 0; transform: translate3d(88px,72px,0) scale(.975); filter: blur(3px) brightness(1.12); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: blur(0) brightness(1); } }
+@keyframes phPdfDiagonalFallClean { from { opacity: 0; transform: translate3d(-88px,-72px,0) scale(.975); filter: blur(3px) brightness(1.12); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: blur(0) brightness(1); } }
+@keyframes phPdfSmoothSwingClean { 0% { opacity: 0; transform: rotate(-5deg) translate3d(-42px,0,0) scale(.985); filter: brightness(1.15); } 55% { opacity: 1; transform: rotate(1.6deg) translate3d(10px,0,0) scale(1.01); } 100% { opacity: 1; transform: rotate(0) translate3d(0,0,0) scale(1); filter: brightness(1); } }
+@keyframes phPdfPushLeftClean { from { opacity: 0; transform: translate3d(100%,0,0) scale(.992); filter: brightness(1.12); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
+@keyframes phPdfPushRightClean { from { opacity: 0; transform: translate3d(-100%,0,0) scale(.992); filter: brightness(1.12); } to { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: brightness(1); } }
+@keyframes phPdfCarouselClean { from { opacity: 0; transform: perspective(1200px) translate3d(92px,0,0) rotateY(-16deg) scale(.96); filter: brightness(1.15); } to { opacity: 1; transform: perspective(1200px) translate3d(0,0,0) rotateY(0) scale(1); filter: brightness(1); } }
 .viewer-view.presentation-fullscreen .pdf-page-layer,
 .viewer-view:fullscreen .pdf-page-layer {
   border-radius: 0;
