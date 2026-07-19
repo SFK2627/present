@@ -92,6 +92,7 @@
     remoteThumbTimer: null,
     viewportQualityTimer: null,
     firebaseReady: false,
+    firebaseInitPromise: null,
     firebaseDb: null,
     firebaseAuthReady: false,
     sessionId: null,
@@ -318,7 +319,8 @@
 
     // Do not block the dashboard while Firebase signs in. The viewer can open fast,
     // then the remote status updates as soon as Firebase is ready.
-    const firebaseInitPromise = initFirebaseIfConfigured();
+    state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
+    const firebaseInitPromise = state.firebaseInitPromise;
 
     if (isRemoteMode) {
       await firebaseInitPromise;
@@ -3455,8 +3457,68 @@
     } catch (error) {}
   }
 
+  async function ensureFirebaseReadyForRemote(timeout = 8000) {
+    if (state.firebaseReady && state.firebaseDb) return true;
+    if (!hasFirebaseConfig()) {
+      updateFirebaseStatus('Remote setup needed');
+      return false;
+    }
+    try {
+      state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
+      const ok = await Promise.race([
+        state.firebaseInitPromise.then(Boolean).catch(() => false),
+        sleep(timeout).then(() => false)
+      ]);
+      if (ok && state.firebaseReady && state.firebaseDb) return true;
+    } catch (error) {}
+    try {
+      state.firebaseInitPromise = initFirebaseIfConfigured();
+      const retryOk = await Promise.race([
+        state.firebaseInitPromise.then(Boolean).catch(() => false),
+        sleep(3200).then(() => false)
+      ]);
+      return !!(retryOk && state.firebaseReady && state.firebaseDb);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function ensureRemoteSessionReady() {
+    const ready = await ensureFirebaseReadyForRemote();
+    if (!ready) return false;
+    if (!state.activeFile && !state.mediaMode) return false;
+    if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
+    state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+
+    const basePayload = {
+      sessionAlive: true,
+      hostReady: true,
+      hostUpdatedAt: Date.now(),
+      createdAt: Date.now(),
+      fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
+      type: state.activeFile ? state.activeFile.type : 'media',
+      currentPage: state.activeFile ? state.currentPage : 0,
+      totalPages: state.activeFile ? state.totalPages : 0,
+      mediaMode: !state.activeFile && !!state.mediaMode,
+      updatedAt: Date.now(),
+    };
+
+    try {
+      await state.sessionRef.set(basePayload, { merge: true });
+      await publishSessionState(true);
+      const snap = await state.sessionRef.get();
+      if (snap.exists) return true;
+      await state.sessionRef.set(basePayload, { merge: true });
+      return true;
+    } catch (error) {
+      console.warn('Could not create remote session:', error);
+      return false;
+    }
+  }
+
   async function setupRemoteSessionIfPossible() {
-    if (!state.firebaseReady || (!state.activeFile && !state.mediaMode)) return;
+    if ((!state.firebaseReady || !state.firebaseDb) && !(await ensureFirebaseReadyForRemote(6500))) return;
+    if (!state.activeFile && !state.mediaMode) return;
     if (state.unsubscribeSession) state.unsubscribeSession();
     state.sessionId = state.sessionId || makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
@@ -5572,29 +5634,23 @@
       if (els.viewerRemoteLink) els.viewerRemoteLink.value = 'Preparing viewer link...';
       if (els.qrHelp) els.qrHelp.textContent = 'Preparing phone remote QR...';
 
-      let sessionReady = false;
-      if (state.firebaseReady) {
-        try {
-          await Promise.race([
-            setupRemoteSessionIfPossible().then(() => { sessionReady = !!state.sessionId; }),
-            sleep(2600).then(() => { sessionReady = !!state.sessionId; })
-          ]);
-        } catch (error) {
-          console.warn('Remote session setup failed before QR render:', error);
-        }
+      const sessionReady = await ensureRemoteSessionReady();
+      if (!sessionReady || !state.sessionId || !state.sessionRef) {
+        if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-error">Remote session was not created. Check Firebase config, then close and open Remote QR again.</div>';
+        if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-error">No live session yet.</div>';
+        if (els.hostRemoteLink) els.hostRemoteLink.value = '';
+        if (els.viewerRemoteLink) els.viewerRemoteLink.value = '';
+        if (els.qrHelp) els.qrHelp.textContent = 'Remote QR needs a live Firebase session. Wait until the top bar says Remote ready, then open Remote QR again.';
+        return;
       }
 
-      if (!state.firebaseReady) {
-        if (els.qrHelp) els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
-      } else if (!sessionReady && !state.sessionId) {
-        if (els.qrHelp) els.qrHelp.textContent = 'Remote session is still preparing. QR is shown with the current session link; if the phone does not connect, close and open Remote QR again.';
-      } else if (els.qrHelp) {
+      if (els.qrHelp) {
         els.qrHelp.textContent = state.mediaMode && !state.activeFile
           ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
           : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
       }
 
-      const session = state.sessionId || 'NO-FIREBASE';
+      const session = state.sessionId;
       const baseUrl = window.location.href.split('?')[0].split('#')[0];
       const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
       const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
@@ -6100,6 +6156,11 @@
       $('remoteStatusPill').textContent = 'Setup needed';
       return;
     }
+    if (!sessionId || sessionId === 'NO-FIREBASE') {
+      $('remoteFileLabel').textContent = 'Invalid remote link. Open Remote QR again from the desktop viewer.';
+      $('remoteStatusPill').textContent = 'Invalid QR';
+      return;
+    }
 
     initFirebaseIfConfigured().then(() => {
       if (!state.firebaseReady || !sessionId) {
@@ -6110,8 +6171,10 @@
       const ref = state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
       ref.onSnapshot((snap) => {
         if (!snap.exists) {
-          $('remoteFileLabel').textContent = 'Session not found. Open QR from the desktop viewer first.';
-          $('remoteStatusPill').textContent = 'No session';
+          $('remoteFileLabel').textContent = 'Waiting for the desktop session. Keep this page open, then reopen Remote QR on the desktop if it stays here.';
+          $('remoteStatusPill').textContent = 'Waiting';
+          const preview = $('remotePreview');
+          if (preview) preview.innerHTML = '<span>Waiting for live desktop session...</span>';
           return;
         }
         const data = snap.data();
