@@ -5379,3 +5379,201 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
   .magic-simple-mic-ring{top:78%!important;}
   .magic-simple-mic-impact{top:72%!important;}
 }
+
+/* v11.36 Mic Drop visibility fix: guaranteed visible mic-only vector drop */
+.magic-effect-layer.magic-micdrop{
+  background:transparent!important;
+  overflow:hidden!important;
+}
+.magic-effect-layer.magic-micdrop::after{
+  display:none!important;
+  content:none!important;
+}
+.magic-micdrop-clean{
+  position:fixed!important;
+  inset:0!important;
+  z-index:80!important;
+  pointer-events:none!important;
+  display:block!important;
+  overflow:hidden!important;
+  isolation:isolate!important;
+}
+.magic-micdrop-clean .magic-micdrop-glow{
+  position:absolute!important;
+  left:50%!important;
+  top:68%!important;
+  width:clamp(260px,42vw,640px)!important;
+  height:clamp(150px,20vw,300px)!important;
+  transform:translate(-50%,-50%)!important;
+  border-radius:50%!important;
+  background:radial-gradient(ellipse,rgba(255,210,90,.45),rgba(249,115,22,.18) 45%,transparent 74%)!important;
+  filter:blur(20px)!important;
+  opacity:.95!important;
+  animation:micVisibleGlow 1.95s ease-out both!important;
+  z-index:1!important;
+}
+.magic-falling-mic{
+  --mic-w:clamp(88px,9.2vw,150px);
+  --mic-h:clamp(250px,25vw,420px);
+  position:absolute!important;
+  left:50%!important;
+  top:0!important;
+  width:var(--mic-w)!important;
+  height:var(--mic-h)!important;
+  transform:translate(-50%,-120%) rotate(-18deg)!important;
+  transform-origin:50% 72%!important;
+  opacity:1!important;
+  z-index:8!important;
+  filter:drop-shadow(0 30px 28px rgba(0,0,0,.44))!important;
+  animation:micVisibleDrop 1.95s cubic-bezier(.17,.86,.16,1.08) both!important;
+  will-change:transform!important;
+}
+.magic-falling-mic .mic-head,
+.magic-falling-mic .mic-band,
+.magic-falling-mic .mic-handle,
+.magic-falling-mic .mic-cord{
+  position:absolute!important;
+  left:50%!important;
+  transform:translateX(-50%)!important;
+  display:block!important;
+  box-sizing:border-box!important;
+}
+.magic-falling-mic .mic-head{
+  top:0!important;
+  width:76%!important;
+  height:42%!important;
+  border-radius:48% 48% 38% 38%!important;
+  background:linear-gradient(145deg,#f8fafc 0%,#cbd5e1 22%,#475569 48%,#111827 100%)!important;
+  border:clamp(4px,.55vw,8px) solid rgba(255,255,255,.82)!important;
+  box-shadow:inset -14px -20px 28px rgba(0,0,0,.42),inset 12px 14px 20px rgba(255,255,255,.22)!important;
+  overflow:hidden!important;
+}
+.magic-falling-mic .mic-grill{
+  position:absolute!important;
+  left:13%!important;
+  width:74%!important;
+  height:clamp(5px,.55vw,9px)!important;
+  border-radius:999px!important;
+  background:rgba(255,255,255,.58)!important;
+  box-shadow:0 16px 0 rgba(255,255,255,.36),0 32px 0 rgba(255,255,255,.24)!important;
+}
+.magic-falling-mic .mic-grill.g1{top:18%!important;}
+.magic-falling-mic .mic-grill.g2{top:36%!important;opacity:.82!important;}
+.magic-falling-mic .mic-grill.g3{top:54%!important;opacity:.72!important;}
+.magic-falling-mic .mic-band{
+  top:38%!important;
+  width:84%!important;
+  height:11%!important;
+  border-radius:999px!important;
+  background:linear-gradient(90deg,#f59e0b,#fef3c7,#f59e0b)!important;
+  border:clamp(3px,.35vw,6px) solid rgba(255,255,255,.74)!important;
+  box-shadow:0 8px 18px rgba(0,0,0,.24)!important;
+  z-index:2!important;
+}
+.magic-falling-mic .mic-handle{
+  top:47%!important;
+  width:39%!important;
+  height:50%!important;
+  border-radius:999px 999px 28px 28px!important;
+  background:linear-gradient(115deg,#e5e7eb 0%,#94a3b8 30%,#1f2937 100%)!important;
+  border:clamp(4px,.45vw,7px) solid rgba(255,255,255,.70)!important;
+  box-shadow:inset -8px -20px 22px rgba(0,0,0,.36),inset 7px 8px 14px rgba(255,255,255,.2)!important;
+}
+.magic-falling-mic .mic-cord{
+  top:92%!important;
+  width:8%!important;
+  height:20%!important;
+  border-radius:999px!important;
+  background:linear-gradient(180deg,#111827,#020617)!important;
+  opacity:.72!important;
+}
+.magic-micdrop-clean .magic-micdrop-floor-shadow{
+  position:absolute!important;
+  left:50%!important;
+  top:82%!important;
+  width:clamp(180px,27vw,420px)!important;
+  height:clamp(24px,4vw,58px)!important;
+  transform:translate(-50%,-50%) scale(.2)!important;
+  border-radius:50%!important;
+  background:radial-gradient(ellipse,rgba(0,0,0,.56),rgba(0,0,0,.16) 58%,transparent 76%)!important;
+  filter:blur(3px)!important;
+  opacity:0!important;
+  z-index:2!important;
+  animation:micVisibleShadow 1.95s ease-out both!important;
+}
+.magic-micdrop-clean .magic-micdrop-floor-ring{
+  position:absolute!important;
+  left:50%!important;
+  top:81%!important;
+  width:clamp(150px,22vw,360px)!important;
+  height:clamp(46px,6vw,110px)!important;
+  transform:translate(-50%,-50%) scale(.28)!important;
+  border:clamp(4px,.55vw,8px) solid rgba(255,255,255,.72)!important;
+  border-radius:50%!important;
+  opacity:0!important;
+  z-index:3!important;
+  animation:micVisibleRing 1.95s ease-out both!important;
+}
+.magic-micdrop-clean .magic-micdrop-impact{
+  position:absolute!important;
+  left:50%!important;
+  top:75%!important;
+  width:clamp(230px,32vw,520px)!important;
+  height:clamp(140px,17vw,270px)!important;
+  transform:translate(-50%,-50%)!important;
+  z-index:4!important;
+  opacity:1!important;
+}
+.magic-micdrop-clean .magic-micdrop-impact i{
+  position:absolute!important;
+  left:50%!important;
+  bottom:26%!important;
+  width:clamp(5px,.55vw,9px)!important;
+  height:0!important;
+  border-radius:999px!important;
+  transform-origin:50% 100%!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(251,191,36,.78),transparent)!important;
+  opacity:0!important;
+  animation:micVisibleBurst 1.95s ease-out both!important;
+}
+.magic-micdrop-clean .magic-micdrop-impact i:nth-child(1){transform:rotate(-64deg);animation-delay:1.02s!important;}
+.magic-micdrop-clean .magic-micdrop-impact i:nth-child(2){transform:rotate(-40deg);animation-delay:1.04s!important;}
+.magic-micdrop-clean .magic-micdrop-impact i:nth-child(3){transform:rotate(-14deg);animation-delay:1.06s!important;}
+.magic-micdrop-clean .magic-micdrop-impact i:nth-child(4){transform:rotate(14deg);animation-delay:1.06s!important;}
+.magic-micdrop-clean .magic-micdrop-impact i:nth-child(5){transform:rotate(40deg);animation-delay:1.04s!important;}
+.magic-micdrop-clean .magic-micdrop-impact i:nth-child(6){transform:rotate(64deg);animation-delay:1.02s!important;}
+@keyframes micVisibleDrop{
+  0%{opacity:1;transform:translate(-50%,-110%) rotate(-22deg) scale(.92)}
+  14%{opacity:1;transform:translate(-50%,-64%) rotate(-18deg) scale(.96)}
+  54%{transform:translate(-50%,50vh) rotate(17deg) scale(1.05)}
+  66%{transform:translate(-50%,60vh) rotate(22deg) scale(1.08)}
+  78%{transform:translate(-50%,47vh) rotate(-10deg) scale(1.03)}
+  90%{transform:translate(-50%,56vh) rotate(12deg) scale(1.01)}
+  100%{opacity:1;transform:translate(-50%,52vh) rotate(-7deg) scale(1)}
+}
+@keyframes micVisibleShadow{
+  0%,38%{opacity:0;transform:translate(-50%,-50%) scale(.18)}
+  64%{opacity:.62;transform:translate(-50%,-50%) scale(1.18)}
+  100%{opacity:.46;transform:translate(-50%,-50%) scale(1)}
+}
+@keyframes micVisibleRing{
+  0%,55%{opacity:0;transform:translate(-50%,-50%) scale(.25)}
+  66%{opacity:.95;transform:translate(-50%,-50%) scale(.8)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.9)}
+}
+@keyframes micVisibleBurst{
+  0%,55%{opacity:0;height:0}
+  66%{opacity:1;height:clamp(48px,7vw,110px)}
+  100%{opacity:0;height:0}
+}
+@keyframes micVisibleGlow{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.72)}
+  45%,82%{opacity:.95;transform:translate(-50%,-50%) scale(1)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.18)}
+}
+@media(max-width:700px){
+  .magic-falling-mic{--mic-w:clamp(74px,18vw,116px);--mic-h:clamp(210px,54vw,330px);}
+  .magic-micdrop-clean .magic-micdrop-floor-shadow{top:83%!important;}
+  .magic-micdrop-clean .magic-micdrop-floor-ring{top:82%!important;}
+  .magic-micdrop-clean .magic-micdrop-impact{top:76%!important;}
+}

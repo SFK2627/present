@@ -162,7 +162,7 @@
       case 'confetti':
         return `<canvas class="magic-fx-canvas"></canvas><div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles confetti-full">${magicParticleMarkup('confetti', 120)}</div>${magicCenter('🎉', '', '', 'magic-pop')}`;
       case 'micdrop':
-        return `<div class="magic-stage-flash amber"></div><div class="magic-simple-micdrop" aria-hidden="true"><div class="magic-micdrop-glow"></div><div class="magic-simple-mic">🎤</div><div class="magic-simple-mic-impact"><i></i><i></i><i></i><i></i><i></i></div><div class="magic-simple-mic-ring"></div><div class="magic-simple-mic-shadow"></div></div>`;
+        return `<div class="magic-stage-flash amber"></div><div class="magic-micdrop-clean" aria-hidden="true"><div class="magic-micdrop-glow"></div><div class="magic-falling-mic"><span class="mic-head"><span class="mic-grill g1"></span><span class="mic-grill g2"></span><span class="mic-grill g3"></span></span><span class="mic-band"></span><span class="mic-handle"></span><span class="mic-cord"></span></div><div class="magic-micdrop-impact"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="magic-micdrop-floor-ring"></div><div class="magic-micdrop-floor-shadow"></div></div>`;
       case 'curtain':
         return `<div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div>`;
       case 'bubbles':
