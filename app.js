@@ -162,7 +162,7 @@
       case 'confetti':
         return `<canvas class="magic-fx-canvas"></canvas><div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles confetti-full">${magicParticleMarkup('confetti', 120)}</div>${magicCenter('🎉', '', '', 'magic-pop')}`;
       case 'micdrop':
-        return `<div class="magic-reveal-shine"></div><div class="magic-center magic-plain magic-visual-only"><div class="magic-micdrop-hero magic-micdrop-hand-scene"><div class="magic-mic-hand">🤚</div><div class="magic-mic">🎤</div><div class="magic-mic-shadow"></div></div></div>`;
+        return `<div class="magic-micdrop-stage" aria-hidden="true"><div class="magic-micdrop-glow"></div><div class="magic-micdrop-vector-hand"><span class="palm"></span><span class="thumb"></span><span class="finger f1"></span><span class="finger f2"></span><span class="finger f3"></span></div><div class="magic-drop-microphone"><span class="mic-head"></span><span class="mic-grill g1"></span><span class="mic-grill g2"></span><span class="mic-grill g3"></span><span class="mic-band"></span><span class="mic-handle"></span><span class="mic-cord"></span></div><div class="magic-micdrop-shadow"></div><div class="magic-micdrop-impact"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="magic-micdrop-ring"></div></div>`;
       case 'curtain':
         return `<div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div>`;
       case 'bubbles':
@@ -1825,7 +1825,7 @@
     if (effect.id === 'confetti' || effect.id === 'bubbles') startCanvasMagicEffect(layer, effect.id);
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 3300, confetti: 3200, micdrop: 2600, curtain: 3400, bubbles: 8200, blur: 999999, quiet: 6200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 3300, confetti: 3200, micdrop: 3200, curtain: 3400, bubbles: 8200, blur: 999999, quiet: 6200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       clearMagicEffectLayer(layer);
     }, durations[effect.id] || 2200);
@@ -1865,7 +1865,7 @@
     const effectMixMap = {
       drumroll: 1.28,
       confetti: 1.1,
-      micdrop: 1.16,
+      micdrop: 1.34,
       curtain: 1.06,
       bubbles: 0.92,
       blur: 0.95,
@@ -2070,12 +2070,15 @@
         }
         break;
       case 'micdrop':
-        whoosh(now, 0.42, 0.72);
-        tone(now + 0.12, 360, 0.16, 'triangle', 0.12, 160);
-        tone(now + 0.56, 220, 0.12, 'sawtooth', 0.09, 118);
-        boom(now + 0.82, 1.45);
-        noise(now + 0.86, 0.46, 0.16, 'lowpass', 230, 0.72);
-        noise(now + 0.98, 0.28, 0.08, 'bandpass', 760, 0.55);
+        whoosh(now, 0.54, 0.95);
+        tone(now + 0.08, 520, 0.16, 'triangle', 0.10, 220);
+        tone(now + 0.22, 300, 0.18, 'sawtooth', 0.10, 124);
+        noise(now + 0.52, 0.22, 0.06, 'bandpass', 1100, 0.7);
+        boom(now + 0.98, 1.62);
+        tone(now + 1.0, 92, 0.42, 'sine', 0.26, 36);
+        noise(now + 1.02, 0.54, 0.20, 'lowpass', 185, 0.65);
+        noise(now + 1.12, 0.36, 0.10, 'bandpass', 720, 0.55);
+        tone(now + 1.22, 148, 0.18, 'square', 0.055, 82);
         break;
       case 'curtain':
         whoosh(now, 0.95, 1.12);
@@ -2112,7 +2115,7 @@
         break;
     }
 
-    const disconnectDelayMap = { drumroll: 4.4, bubbles: 4.4, curtain: 3.8, confetti: 3.6, spotlight: 3.6, applause: 3.6, hype: 3.6, blur: 3.4 };
+    const disconnectDelayMap = { drumroll: 4.4, bubbles: 4.4, curtain: 3.8, confetti: 3.6, spotlight: 3.6, micdrop: 3.6, applause: 3.6, hype: 3.6, blur: 3.4 };
     disconnectLater(master, disconnectDelayMap[effectId] || 2.9);
   }
 
