@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-remote-public-session-fix-v1';
+const CACHE_NAME = 'presentation-hub-no-remote-qr-v1';
 const CORE_ASSETS = [
   './',
   './index.html',

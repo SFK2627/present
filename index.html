@@ -17,13 +17,12 @@
         <div class="brand-mark">PH</div>
         <div>
           <h1>Presentation Hub</h1>
-          <p>PDF/PPT presentation viewer, classroom randomizer, and phone remote controller.</p>
+          <p>PDF/PPT presentation viewer, media viewing, and classroom randomizer.</p>
         </div>
       </div>
       <div class="topbar-actions">
         <button id="themeToggle" class="icon-button" title="Toggle dark mode">🌙</button>
         <button id="classroomBtn" class="pill-button">🎲 Classroom</button>
-        <button id="firebaseStatus" class="pill-button muted">Remote setup</button>
       </div>
     </header>
 
@@ -31,7 +30,7 @@
       <section class="hero glass">
         <div class="hero-copy">
           <span class="eyebrow">Presentation Hub Pro</span>
-          <h2>Open, present, auto-play, and control slides from your phone.</h2>
+          <h2>Open, present, auto-play, and control slides smoothly.</h2>
           <p>Upload PDF or PPTX files. PowerPoint files are automatically converted into a PDF-style viewer when possible.</p>
         </div>
         <div class="hero-action-stack">
@@ -44,7 +43,7 @@
           <button id="mediaViewerBtn" type="button" class="media-viewer-home-btn">
             <span>🎬</span>
             <strong>Media Viewing</strong>
-            <small>Open screen for images, MP3, MP4, YouTube, or TikTok remote casting</small>
+            <small>Open screen for images, MP3, MP4, YouTube, or TikTok playback</small>
           </button>
         </div>
       </section>
@@ -111,7 +110,6 @@
           <button id="zoomInBtn">+</button>
           <button id="resetZoomBtn">Reset</button>
           <button id="fullscreenBtn">Fullscreen</button>
-          <button id="qrBtn">Remote QR</button>
           <button id="settingsBtn">Controls</button>
         </div>
 
@@ -233,27 +231,7 @@
       </section>
     </main>
 
-    <div id="qrModal" class="modal hidden">
-      <div class="modal-card glass">
-        <button id="closeQrBtn" class="modal-close">×</button>
-        <h3>Phone Remote Control</h3>
-        <p><strong>Scan the Control QR</strong> if you want buttons on your phone. Viewer QR is only for view-only preview.</p>
-        <div class="qr-grid qr-grid-control-first">
-          <div class="qr-primary">
-            <h4>Control QR / Host remote</h4>
-            <div id="hostQr" class="qr-box"></div>
-            <input id="hostRemoteLink" readonly />
-          </div>
-          <div class="qr-secondary">
-            <h4>Viewer QR / Preview only</h4>
-            <div id="viewerQr" class="qr-box"></div>
-            <input id="viewerRemoteLink" readonly />
-          </div>
-        </div>
-        <p id="qrHelp" class="help-text"></p>
-      </div>
-    </div>
-
+    <!-- Remote QR removed temporarily. A new remote system will be rebuilt later. -->
 
     <div id="classroomModal" class="modal hidden">
       <div class="modal-card glass classroom-modal-card">
@@ -276,21 +254,6 @@
       </div>
     </div>
 
-    <div id="setupModal" class="modal hidden">
-      <div class="modal-card glass narrow">
-        <button id="closeSetupBtn" class="modal-close">×</button>
-        <h3>Remote setup</h3>
-        <p>For phone remote control across devices, edit <strong>firebase-config.js</strong> and add your Firebase web app config. The app still works offline for local presenting without Firebase.</p>
-        <pre class="code-note">window.PRESENTATION_HUB_FIREBASE_CONFIG = {
-  apiKey: "...",
-  authDomain: "...",
-  projectId: "...",
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "..."
-};</pre>
-      </div>
-    </div>
   </div>
 
   <div id="remoteApp" class="remote-app hidden"></div>
