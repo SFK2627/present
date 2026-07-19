@@ -4640,18 +4640,42 @@
     layer.classList.remove('show');
     renderClassroomPresentation();
   }
+  function buildDicePipMarkup(value) {
+    const n = Math.max(1, Number(value) || 1);
+    const classic = {
+      1: ['c'],
+      2: ['tl', 'br'],
+      3: ['tl', 'c', 'br'],
+      4: ['tl', 'tr', 'bl', 'br'],
+      5: ['tl', 'tr', 'c', 'bl', 'br'],
+      6: ['tl', 'tr', 'ml', 'mr', 'bl', 'br']
+    };
+    if (n <= 6) {
+      return `<div class="die-pips classic value-${n}">${classic[n].map(pos => `<i class="pip pip-${pos}"></i>`).join('')}</div>`;
+    }
+    const cols = n <= 9 ? 3 : 4;
+    const rows = Math.ceil(n / cols);
+    return `<div class="die-pips pip-grid cols-${cols} rows-${rows}">${Array.from({ length: n }, () => '<i class="pip"></i>').join('')}</div>`;
+  }
+  function paintDiceFaces(faces, frontValue, maxValue) {
+    faces.forEach((face, index) => {
+      const faceValue = index === 0 ? Number(frontValue) : 1 + ((Number(frontValue) + index - 1) % maxValue);
+      face.innerHTML = buildDicePipMarkup(faceValue);
+      face.setAttribute('data-face-value', String(faceValue));
+    });
+  }
   async function showRollingGroupDice(finalGroup) {
     const layer = getClassroomRevealLayer('group');
     const card = layer.querySelector('.classroom-reveal-card');
-    card.innerHTML = `<div class="classroom-reveal-badge">GROUP DICE</div><div class="rolling-dice-scene"><div class="rolling-die rolling-die-cube"><div class="die-face die-front"><span>?</span></div><div class="die-face die-back"><span>?</span></div><div class="die-face die-right"><span>?</span></div><div class="die-face die-left"><span>?</span></div><div class="die-face die-top"><span>?</span></div><div class="die-face die-bottom"><span>?</span></div></div><div class="dice-floor-shadow"></div></div><h3 class="rolling-group-label">ROLLING...</h3>`;
+    card.innerHTML = `<div class="classroom-reveal-badge">GROUP DICE</div><div class="rolling-dice-scene"><div class="rolling-die rolling-die-cube"><div class="die-face die-front"></div><div class="die-face die-back"></div><div class="die-face die-right"></div><div class="die-face die-left"></div><div class="die-face die-top"></div><div class="die-face die-bottom"></div></div><div class="dice-floor-shadow"></div></div><h3 class="rolling-group-label">ROLLING...</h3>`;
     const die = card.querySelector('.rolling-die');
-    const faces = Array.from(die.querySelectorAll('.die-face span'));
+    const faces = Array.from(die.querySelectorAll('.die-face'));
     const max = Math.max(2, Number(state.classroom.groupCount) || 6);
     const started = performance.now();
     let tick = 0;
     while (performance.now() - started < 1900) {
-      const value = String(1 + Math.floor(Math.random()*max));
-      faces.forEach((face, index) => { face.textContent = index === 0 ? value : String(1 + ((Number(value) + index - 1) % max)); });
+      const value = 1 + Math.floor(Math.random() * max);
+      paintDiceFaces(faces, value, max);
       die.style.setProperty('--rx', `${540 + tick*97}deg`);
       die.style.setProperty('--ry', `${720 + tick*83}deg`);
       die.style.setProperty('--rz', `${90 + tick*37}deg`);
@@ -4660,7 +4684,7 @@
       tick++;
       await wait(Math.min(150, 48 + tick*6));
     }
-    faces.forEach((face, index) => { face.textContent = index === 0 ? String(finalGroup) : String(1 + ((Number(finalGroup) + index - 1) % max)); });
+    paintDiceFaces(faces, finalGroup, max);
     playClassroomTone('land');
     die.classList.add('landed');
     card.querySelector('.rolling-group-label').textContent = `GROUP ${finalGroup}`;
