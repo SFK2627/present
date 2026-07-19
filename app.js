@@ -1654,6 +1654,20 @@
     if (els.pageTotalLabel) els.pageTotalLabel.textContent = `/ ${state.totalPages || 1}`;
   }
 
+  function createMagicLayer() {
+    let layer = document.getElementById('magicEffectLayer');
+    const host = document.fullscreenElement || els.viewerStage || els.viewerView || document.body;
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'magicEffectLayer';
+      layer.className = 'magic-effect-layer hidden';
+    }
+    if (layer.parentElement !== host) host.appendChild(layer);
+    layer.className = 'magic-effect-layer hidden';
+    layer.innerHTML = '';
+    return layer;
+  }
+
   function triggerMagicEffect(effectId) {
     const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
     const layer = createMagicLayer();
