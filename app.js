@@ -4891,7 +4891,7 @@
     const max = Math.max(2, Number(state.classroom.groupCount) || 6);
     const started = performance.now();
     let tick = 0;
-    while (performance.now() - started < 1900) {
+    while (performance.now() - started < 4900) {
       const value = 1 + Math.floor(Math.random() * max);
       paintDiceFaces(faces, value, max);
       die.style.setProperty('--rx', `${540 + tick*97}deg`);
@@ -4900,7 +4900,7 @@
       die.style.setProperty('--jump', `${-18 - (tick % 3) * 9}px`);
       playClassroomTone('dice', tick);
       tick++;
-      await wait(Math.min(150, 48 + tick*6));
+      await wait(Math.min(170, 52 + tick*6));
     }
     paintDiceFaces(faces, finalGroup, max);
     playClassroomTone('land');

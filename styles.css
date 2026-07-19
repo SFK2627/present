@@ -4569,3 +4569,86 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
 .magic-effect-layer.magic-timesup::after {
   display: none !important;
 }
+
+
+/* v11.28 spotlight magnifier + longer group roll polish */
+.magic-effect-layer.magic-spotlight::after{
+  display:none!important;
+}
+.magic-spotlight-dimmer{
+  background:transparent!important;
+  backdrop-filter:none!important;
+  -webkit-backdrop-filter:none!important;
+}
+.magic-moving-spotlight{
+  width:clamp(120px,14vw,210px)!important;
+  height:clamp(120px,14vw,210px)!important;
+  aspect-ratio:1/1!important;
+  border-radius:50%!important;
+  overflow:hidden!important;
+  position:absolute!important;
+  left:0!important;
+  top:0!important;
+  z-index:4!important;
+  background:
+    radial-gradient(circle at 38% 32%,rgba(255,255,255,.34) 0 12%,rgba(255,255,255,.10) 13% 22%,rgba(255,255,255,0) 23%),
+    radial-gradient(circle at 50% 50%,rgba(255,248,180,.20) 0 54%,rgba(255,239,129,.12) 55% 68%,rgba(255,231,102,.04) 69% 100%)!important;
+  box-shadow:
+    0 0 0 9999px rgba(2,6,23,.66),
+    0 0 0 3px rgba(255,248,190,.46),
+    0 0 0 7px rgba(15,23,42,.22),
+    0 14px 38px rgba(0,0,0,.30),
+    inset 0 0 20px rgba(255,255,255,.11)!important;
+  mix-blend-mode:normal!important;
+  backdrop-filter:brightness(1.55) contrast(1.08) saturate(1.04)!important;
+  -webkit-backdrop-filter:brightness(1.55) contrast(1.08) saturate(1.04)!important;
+  animation:spotlightMagnifierSearch 5.4s cubic-bezier(.34,.02,.16,1) forwards!important;
+  will-change:transform;
+}
+.magic-moving-spotlight::before{
+  content:""!important;
+  position:absolute!important;
+  inset:0!important;
+  border-radius:50%!important;
+  background:
+    radial-gradient(circle at 36% 30%,rgba(255,255,255,.30) 0 9%,rgba(255,255,255,.08) 10% 18%,rgba(255,255,255,0) 19%),
+    radial-gradient(circle at 50% 50%,rgba(255,250,205,.10) 0 55%,rgba(255,250,205,0) 72%)!important;
+  border:1px solid rgba(255,247,190,.44)!important;
+  box-shadow:inset 0 0 0 2px rgba(255,255,255,.08)!important;
+  filter:none!important;
+  opacity:1!important;
+  pointer-events:none!important;
+}
+.magic-moving-spotlight::after{
+  content:""!important;
+  position:absolute!important;
+  right:10%!important;
+  bottom:10%!important;
+  width:18%!important;
+  height:18%!important;
+  border-radius:50%!important;
+  background:rgba(255,255,255,.14)!important;
+  border:0!important;
+  box-shadow:none!important;
+  pointer-events:none!important;
+}
+@keyframes spotlightMagnifierSearch{
+  0%,9%{transform:translate3d(10vw,11vh,0) scale(1)}
+  19%,29%{transform:translate3d(68vw,12vh,0) scale(1)}
+  40%,51%{transform:translate3d(64vw,58vh,0) scale(1)}
+  62%,73%{transform:translate3d(15vw,57vh,0) scale(1)}
+  84%,94%{transform:translate3d(47vw,36vh,0) scale(1)}
+  100%{transform:translate3d(44vw,30vh,0) scale(1)}
+}
+@media(max-width:700px){
+  .magic-moving-spotlight{
+    width:clamp(105px,28vw,165px)!important;
+    height:clamp(105px,28vw,165px)!important;
+    box-shadow:
+      0 0 0 9999px rgba(2,6,23,.64),
+      0 0 0 3px rgba(255,248,190,.44),
+      0 0 0 6px rgba(15,23,42,.20),
+      0 12px 30px rgba(0,0,0,.28),
+      inset 0 0 18px rgba(255,255,255,.10)!important;
+  }
+}
