@@ -3543,27 +3543,15 @@
         if (st === 1) send('play', 1);
         if (st === 2 || st === 0) send('pause', 0);
       }
+      // Do not continuously push the preview iframe's currentTime back to the
+      // desktop while both videos are playing. YouTube sends currentTime info many
+      // times per second; treating that as a seek command made the desktop jump
+      // backward/forward and feel laggy. Real seek/volume changes should come from
+      // the remote controls below (seek bar, 10s buttons, volume slider). Native
+      // preview play/pause is still mirrored through onStateChange above.
       const info = data.info && typeof data.info === 'object' ? data.info : {};
-      const playback = window.__phRemoteMediaPlayback || {};
-      if (Number.isFinite(Number(info.currentTime))) {
-        const t = Math.max(0, Number(info.currentTime));
-        const oldT = Math.max(0, Number(playback.currentTime) || 0);
-        if (Math.abs(t - oldT) > 3 && now - Number(window.__phRemoteMediaPreviewLastSeekSentAt || 0) > 900) {
-          window.__phRemoteMediaPreviewLastSeekSentAt = now;
-          send('seek', t);
-        }
-      }
-      if (Number.isFinite(Number(info.volume))) {
-        const v = Math.max(0, Math.min(1, Number(info.volume) / 100));
-        const oldV = Math.max(0, Math.min(1, Number(playback.volume) || 0));
-        if (Math.abs(v - oldV) > 0.12 && now - Number(window.__phRemoteMediaPreviewLastVolumeSentAt || 0) > 700) {
-          window.__phRemoteMediaPreviewLastVolumeSentAt = now;
-          send('volume', v);
-        }
-      }
-      if (typeof info.muted === 'boolean' && info.muted !== !!playback.muted && now - Number(window.__phRemoteMediaPreviewLastMuteSentAt || 0) > 700) {
-        window.__phRemoteMediaPreviewLastMuteSentAt = now;
-        send(info.muted ? 'mute' : 'unmute', info.muted ? 1 : 0);
+      if (typeof info.muted === 'boolean') {
+        window.__phRemoteMediaPreviewMutedState = info.muted;
       }
     });
     clearInterval(window.__phRemoteMediaPreviewListenTimer);
@@ -3626,6 +3614,9 @@
   function syncRemotePhoneMediaPreview(playback = {}) {
     if (remoteMediaLocalControlActive()) return;
     const phoneWatch = $('remoteMediaWatchPhone');
+    // The remote now uses one preview only: the top preview that mirrors the
+    // desktop. The old lower phone-preview card is hidden to avoid double
+    // YouTube players fighting each other.
     if (phoneWatch && !phoneWatch.checked) return;
     const provider = String(playback.provider || playback.kind || '').toLowerCase();
     if (!(provider === 'youtube' || playback.youtubeId)) {
@@ -3654,14 +3645,31 @@
       try {
         markRemotePreviewProgrammaticSync();
         const lastSecond = Number(frame.dataset.lastPhonePreviewSecond || -999);
-        if (duration && Math.abs(current - lastSecond) > 2.8) {
+        const lastState = frame.dataset.lastPhonePreviewState || '';
+        const nextState = playback.playing ? 'playing' : (playback.paused || playback.ended) ? 'paused' : 'loaded';
+        // While playing, avoid constant re-seeks. Only correct a very large drift.
+        // When paused, keep the exact chosen time synced.
+        const drift = Math.abs(current - lastSecond);
+        const shouldSeek = duration && (lastSecond < -100 || (!playback.playing && drift > 0.7) || (playback.playing && drift > 12));
+        if (shouldSeek) {
           frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [current, true] }), '*');
           frame.dataset.lastPhonePreviewSecond = String(current);
         }
-        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [volume] }), '*');
-        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: muted ? 'mute' : 'unMute', args: [] }), '*');
-        if (playback.playing) frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
-        if (playback.paused || playback.ended) frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+        const lastVolume = frame.dataset.lastPhonePreviewVolume || '';
+        if (lastVolume !== String(volume)) {
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [volume] }), '*');
+          frame.dataset.lastPhonePreviewVolume = String(volume);
+        }
+        const lastMuted = frame.dataset.lastPhonePreviewMuted || '';
+        if (lastMuted !== String(muted)) {
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: muted ? 'mute' : 'unMute', args: [] }), '*');
+          frame.dataset.lastPhonePreviewMuted = String(muted);
+        }
+        if (nextState !== lastState) {
+          if (playback.playing) frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+          if (playback.paused || playback.ended) frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+          frame.dataset.lastPhonePreviewState = nextState;
+        }
       } catch (error) {}
     });
   }
@@ -5023,11 +5031,10 @@
               <input id="remoteMediaVolume" type="range" min="0" max="100" step="1" value="90" data-host-only="true">
             </label>
 
-            <div class="remote-media-phone-preview-card">
-              <strong>Phone preview</strong>
-              <label><input id="remoteMediaWatchPhone" type="checkbox" checked> Watch the same link on this phone</label>
-              <label><input id="remoteMediaPhoneMuted" type="checkbox" checked> Keep phone preview muted</label>
-              <div id="remoteMediaPhonePreview" class="remote-media-phone-preview"><span>Paste or play a link to preview it here.</span></div>
+            <div class="remote-media-phone-preview-card remote-media-phone-preview-card--hidden" aria-hidden="true">
+              <label class="hidden"><input id="remoteMediaWatchPhone" type="checkbox" checked> Watch the same link on this phone</label>
+              <label class="hidden"><input id="remoteMediaPhoneMuted" type="checkbox" checked> Keep phone preview muted</label>
+              <div id="remoteMediaPhonePreview" class="remote-media-phone-preview hidden"><span></span></div>
             </div>
 
             <details class="remote-media-file-details" open>

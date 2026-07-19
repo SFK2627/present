@@ -6498,3 +6498,8 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
 body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-media-only-mode input[type="range"] {
   touch-action: pan-x !important;
 }
+
+/* Media remote lag fix: use only the main/top remote preview; hide old duplicate lower preview. */
+.remote-media-phone-preview-card--hidden {
+  display: none !important;
+}
