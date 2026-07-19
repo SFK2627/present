@@ -1742,7 +1742,7 @@
     if (effect.id === 'confetti' || effect.id === 'bubbles') startCanvasMagicEffect(layer, effect.id);
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 2600, confetti: 3200, micdrop: 2200, curtain: 3400, bubbles: 3400, quiet: 2200, applause: 2400, spotlight: 4200, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 2600, confetti: 3200, micdrop: 2200, curtain: 3400, bubbles: 6400, quiet: 2200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       layer.classList.remove('show');
       layer.classList.add('hidden');
@@ -4579,19 +4579,27 @@
   }
   function fitClassroomNames(root) {
     if (!root) return;
-    root.querySelectorAll('.roulette-name,.classroom-single-line-name').forEach((node) => {
-      const holder = node.closest('.roulette-row') || node.parentElement;
-      if (!holder) return;
-      const available = Math.max(80, holder.clientWidth - 14);
-      let size = parseFloat(getComputedStyle(node).fontSize) || 32;
-      node.style.fontSize = `${size}px`;
-      let guard = 0;
-      while (node.scrollWidth > available && size > 10 && guard < 80) {
-        size -= 1;
-        node.style.fontSize = `${size}px`;
-        guard++;
-      }
-    });
+    const applyFit = () => {
+      const rootWidth = Math.max(320, root.clientWidth || root.getBoundingClientRect().width || window.innerWidth * 0.9);
+      root.querySelectorAll('.roulette-name,.classroom-single-line-name').forEach((node) => {
+        const holder = node.closest('.name-roulette-track') || node.closest('.classroom-stage-main') || node.parentElement;
+        const available = Math.max(260, Math.min(rootWidth - 28, (holder && (holder.clientWidth || holder.getBoundingClientRect().width)) || rootWidth) - 20);
+        const isFinal = node.classList.contains('roulette-final') || node.classList.contains('classroom-single-line-name');
+        const isCenter = !!node.closest('.row-current,.row-next,.row-final-center');
+        const baseSize = isFinal ? Math.min(76, Math.max(42, available / 14)) : isCenter ? Math.min(54, Math.max(32, available / 22)) : Math.min(38, Math.max(26, available / 30));
+        node.style.fontSize = `${baseSize}px`;
+        node.style.transform = '';
+        node.style.transformOrigin = 'center center';
+        node.style.display = 'inline-block';
+        node.style.width = 'max-content';
+        const naturalWidth = node.scrollWidth || node.getBoundingClientRect().width;
+        if (naturalWidth > available) {
+          const scale = Math.max(isFinal ? 0.68 : 0.74, available / naturalWidth);
+          node.style.transform = `scaleX(${scale})`;
+        }
+      });
+    };
+    requestAnimationFrame(() => requestAnimationFrame(applyFit));
   }
   async function showNameRoulette(allNames, finalName) {
     const layer = getClassroomRevealLayer('name');
@@ -4673,10 +4681,12 @@
   function startCanvasMagicEffect(layer, type) {
     const canvas=layer.querySelector('canvas'); if(!canvas) return; const ctx=canvas.getContext('2d'); let raf=0; const start=performance.now();
     const resize=()=>{ const d=Math.min(devicePixelRatio||1,2); canvas.width=innerWidth*d; canvas.height=innerHeight*d; canvas.style.width=innerWidth+'px'; canvas.style.height=innerHeight+'px'; ctx.setTransform(d,0,0,d,0,0); }; resize();
-    const count=type==='confetti'?150:48; const colors=['#ff4d6d','#ffd166','#06d6a0','#4cc9f0','#8338ec','#ffffff'];
-    const parts=Array.from({length:count},(_,i)=> type==='confetti' ? {x:Math.random()*innerWidth,y:-20-Math.random()*innerHeight*.35,vx:(Math.random()-.5)*4,vy:3+Math.random()*5,r:3+Math.random()*6,h:7+Math.random()*12,rot:Math.random()*6,vr:(Math.random()-.5)*.25,c:colors[i%colors.length]} : {x:Math.random()*innerWidth,y:innerHeight+Math.random()*300,r:10+Math.random()*25,vx:(Math.random()-.5)*.5,vy:.7+Math.random()*1.5,a:.5+Math.random()*.4});
-    function frame(now){ const t=now-start; ctx.clearRect(0,0,innerWidth,innerHeight); for(const p of parts){ if(type==='confetti'){p.x+=p.vx;p.y+=p.vy;p.vy+=.035;p.rot+=p.vr;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.fillStyle=p.c;ctx.fillRect(-p.r,-p.h/2,p.r*2,p.h);ctx.restore();}else{p.x+=p.vx+Math.sin((t+p.y)*.002)*.18;p.y-=p.vy;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);const g=ctx.createRadialGradient(p.x-p.r*.35,p.y-p.r*.35,1,p.x,p.y,p.r);g.addColorStop(0,'rgba(255,255,255,.9)');g.addColorStop(.25,'rgba(255,255,255,.25)');g.addColorStop(.7,'rgba(96,165,250,.18)');g.addColorStop(1,'rgba(59,130,246,.04)');ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=`rgba(255,255,255,${p.a})`;ctx.lineWidth=1.2;ctx.stroke();}}
-      if(t<(type==='confetti'?3100:3350) && layer.classList.contains('show')) raf=requestAnimationFrame(frame); }
+    const count=type==='confetti'?150:62; const colors=['#ff4d6d','#ffd166','#06d6a0','#4cc9f0','#8338ec','#ffffff'];
+    const parts=Array.from({length:count},(_,i)=> type==='confetti'
+      ? {x:Math.random()*innerWidth,y:-20-Math.random()*innerHeight*.35,vx:(Math.random()-.5)*4,vy:3+Math.random()*5,r:3+Math.random()*6,h:7+Math.random()*12,rot:Math.random()*6,vr:(Math.random()-.5)*.25,c:colors[i%colors.length]}
+      : {x:Math.random()*innerWidth,y:innerHeight*.58+Math.random()*(innerHeight*.52),r:9+Math.random()*24,vx:(Math.random()-.5)*.65,vy:2.15+Math.random()*2.1,a:.45+Math.random()*.42,wobble:Math.random()*Math.PI*2,wobbleSpeed:.0014+Math.random()*.0018});
+    function frame(now){ const t=now-start; ctx.clearRect(0,0,innerWidth,innerHeight); for(const p of parts){ if(type==='confetti'){p.x+=p.vx;p.y+=p.vy;p.vy+=.035;p.rot+=p.vr;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.fillStyle=p.c;ctx.fillRect(-p.r,-p.h/2,p.r*2,p.h);ctx.restore();}else{p.x+=p.vx+Math.sin(t*p.wobbleSpeed+p.wobble)*.34;p.y-=p.vy;const fadeIn=Math.min(1,(innerHeight+80-p.y)/150);const fadeOut=Math.max(0,Math.min(1,(p.y+p.r*2)/150));const alpha=Math.max(0,Math.min(1,fadeIn*fadeOut));ctx.save();ctx.globalAlpha=alpha;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);const g=ctx.createRadialGradient(p.x-p.r*.38,p.y-p.r*.4,1,p.x,p.y,p.r);g.addColorStop(0,'rgba(255,255,255,.96)');g.addColorStop(.18,'rgba(255,255,255,.36)');g.addColorStop(.58,'rgba(125,211,252,.19)');g.addColorStop(.82,'rgba(167,139,250,.12)');g.addColorStop(1,'rgba(59,130,246,.025)');ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=`rgba(255,255,255,${p.a})`;ctx.lineWidth=1.25;ctx.stroke();ctx.beginPath();ctx.arc(p.x-p.r*.28,p.y-p.r*.28,p.r*.22,Math.PI*1.05,Math.PI*1.72);ctx.strokeStyle='rgba(255,255,255,.65)';ctx.lineWidth=1.05;ctx.stroke();ctx.restore();}}
+      if(t<(type==='confetti'?3100:6250) && layer.classList.contains('show')) raf=requestAnimationFrame(frame); }
     raf=requestAnimationFrame(frame);
   }
 
