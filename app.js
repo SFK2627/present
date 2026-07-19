@@ -127,6 +127,68 @@
     return acc;
   }, {});
 
+  function getMagicEffectByShortcut(key) {
+    const normalized = String(key || '').trim().toLowerCase();
+    if (!normalized) return null;
+    return MAGIC_EFFECTS.find((effect) => String(effect.shortcut || '').toLowerCase() === normalized) || null;
+  }
+
+  function magicParticleMarkup(kind, count = 72, symbols = ['✨']) {
+    return Array.from({ length: count }, (_, index) => {
+      const x = Math.round((index * 37 + Math.random() * 18) % 100);
+      const size = Math.round(9 + Math.random() * 18);
+      const delay = (Math.random() * 0.9).toFixed(2);
+      const drift = Math.round((Math.random() - 0.5) * 260);
+      const symbol = symbols[index % symbols.length];
+      const style = `--x:${x}%;--s:${size}px;--d:${delay}s;--drift:${drift}px`;
+      if (kind === 'symbol') return `<i class="magic-symbol" style="${style}">${symbol}</i>`;
+      if (kind === 'bubble') return `<i class="magic-bubble" style="${style}"></i>`;
+      return `<i class="magic-confetti" style="${style}"></i>`;
+    }).join('');
+  }
+
+  function magicCenter(icon, title, subtitle = '', extraClass = '') {
+    const small = subtitle ? `<small>${subtitle}</small>` : '';
+    return `<div class="magic-center ${extraClass}"><div class="magic-emoji">${icon}</div><strong>${title}</strong>${small}</div>`;
+  }
+
+  function magicEffectMarkup(effectId) {
+    switch (effectId) {
+      case 'drumroll':
+        return `<div class="magic-vignette"></div><div class="magic-stage-flash amber"></div><div class="magic-center magic-plain"><div class="magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span><span class="magic-stick right"></span></div></div><strong>Drumroll...</strong><small>Build the suspense</small></div>`;
+      case 'confetti':
+        return `<canvas class="magic-fx-canvas"></canvas><div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles confetti-full">${magicParticleMarkup('confetti', 110)}</div>${magicCenter('🎉', 'Great Job!', 'Celebrate the moment', 'magic-pop')}`;
+      case 'micdrop':
+        return `<div class="magic-vignette"></div><div class="magic-reveal-shine"></div><div class="magic-center magic-plain"><div class="magic-micdrop-hero"><div class="magic-mic">🎤</div><div class="magic-mic-shadow"></div></div><strong>Mic Drop!</strong><small>Powerful ending</small></div>`;
+      case 'curtain':
+        return `<div class="magic-vignette"></div><div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div><div class="magic-center magic-reveal"><div class="magic-emoji">🎭</div><strong>Reveal!</strong><small>Ta-da!</small></div>`;
+      case 'bubbles':
+        return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas><div class="magic-glow-ring"></div><div class="magic-particles bubbles-full">${magicParticleMarkup('bubble', 88)}</div>${magicCenter('🫧', 'Bubbles!', 'Light and fun', 'magic-pop')}`;
+      case 'quiet':
+        return `<div class="magic-quiet-backdrop"></div><div class="magic-quiet-halo"></div><div class="magic-quiet-halo halo-two"></div><div class="magic-center magic-plain magic-quiet-hero"><span class="magic-quiet-aura"></span><span class="magic-shush-wave"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span><div class="magic-emoji">🤫</div><strong>Be Quiet</strong><small>Eyes here, voices low</small></div>`;
+      case 'applause':
+        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring green"></div><div class="magic-particles applause-full">${magicParticleMarkup('symbol', 72, ['👏','🙌','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div><strong>Applause!</strong><small>Well done</small></div>`;
+      case 'spotlight':
+        return `<div class="magic-spotlight-dimmer"></div><div class="magic-moving-spotlight"></div>`;
+      case 'correct':
+        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct"><div class="magic-mark">✅</div><strong>Correct!</strong></div>`;
+      case 'wrong':
+        return `<div class="magic-stage-flash red"></div><div class="magic-center magic-plain magic-big-mark wrong"><div class="magic-mark">❌</div><strong>Try Again</strong></div>`;
+      case 'timesup':
+        return `<div class="magic-vignette"></div><div class="magic-time-rings"></div><div class="magic-center magic-plain magic-clock-wrap"><div class="magic-clock">⏰</div><strong>Time's Up!</strong></div>`;
+      case 'sparkle':
+        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles">${magicParticleMarkup('symbol', 76, ['✨','✦','✧','💫'])}</div><div class="magic-center magic-plain magic-sparkle-hero"><div class="magic-emoji">✨</div><strong>Sparkle!</strong></div>`;
+      case 'stars':
+        return `<div class="magic-glow-ring rainbow"></div><div class="magic-particles">${magicParticleMarkup('symbol', 88, ['⭐','🌟','✦','✨'])}</div><div class="magic-center magic-plain magic-stars-hero"><div class="magic-emoji">🌟</div><strong>Star Moment!</strong></div>`;
+      case 'hype':
+        return `<div class="magic-stage-flash amber"></div><div class="magic-glow-ring fire"></div><div class="magic-particles">${magicParticleMarkup('symbol', 76, ['🔥','⚡','✨'])}</div><div class="magic-center magic-plain magic-hype-hero"><div class="magic-emoji">🔥</div><strong>Hype!</strong></div>`;
+      case 'freeze':
+        return `<div class="magic-freeze"></div><div class="magic-center magic-plain magic-freeze-hero"><div class="magic-emoji">🧊</div><strong>Freeze!</strong><small>Hold that thought</small></div>`;
+      default:
+        return magicCenter('✨', 'Magic!', '', 'magic-pop');
+    }
+  }
+
   const COUNTDOWN_VOICE_STYLES = {
     'soft-female': {
       label: 'Soft Female',
@@ -1679,10 +1741,16 @@
   }
 
   function triggerMagicEffect(effectId) {
-    const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
+    const effectKey = String(effectId || 'confetti').trim().toLowerCase();
+    const effect = MAGIC_EFFECT_MAP[effectKey] || MAGIC_EFFECT_MAP.confetti;
     const layer = createMagicLayer();
     layer.className = `magic-effect-layer magic-${effect.id} magic-intensity-${state.magicEffectIntensity || 'grand'}`;
-    layer.innerHTML = magicEffectMarkup(effect.id);
+    try {
+      layer.innerHTML = magicEffectMarkup(effect.id);
+    } catch (error) {
+      console.warn('Magic effect markup failed; using safe fallback.', error);
+      layer.innerHTML = magicCenter(effect.emoji || '✨', effect.label || 'Magic!', '', 'magic-pop');
+    }
     // Inline visibility guards make the effect show even if an old CSS cache or
     // a stacking-context bug is still present on GitHub Pages.
     layer.style.display = 'grid';
