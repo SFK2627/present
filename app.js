@@ -20,6 +20,10 @@
   const DB_VERSION = 1;
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
+  // When the app is opened directly as file:/// on the desktop, a phone cannot
+  // open that local Windows path. Use the deployed GitHub Pages URL for the QR
+  // links in local testing, then the current https URL when already deployed.
+  const REMOTE_DEPLOYED_BASE_URL = 'https://sfk2627.github.io/present/';
   const MEDIA_CAST_ICE_SERVERS = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -2913,21 +2917,32 @@
   }
 
   async function setupRemoteSessionIfPossible() {
-    if (!state.firebaseReady || (!state.activeFile && !state.mediaMode)) return;
+    if (!state.firebaseReady || (!state.activeFile && !state.mediaMode)) return false;
+    if (!state.firebaseDb) return false;
     if (state.unsubscribeSession) state.unsubscribeSession();
     state.sessionId = state.sessionId || makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
     state.lastCommandId = null;
     if (state.remoteCommandPollTimer) clearInterval(state.remoteCommandPollTimer);
     state.processedRemoteCommands = new Set();
-    // v10.6 cleanup: old builds stored every slide thumbnail inside the live
-    // session document. That made every phone command feel delayed. Remove it
-    // once, then keep thumbnails in a lightweight subcollection instead.
+
+    // Create a tiny session document FIRST. If the heavier full-state payload ever
+    // contains a bad field, the phone can still find a live desktop session. This
+    // matches the existing Firestore rule: /presentationHubSessions/{sessionId}.
+    try {
+      await state.sessionRef.set(buildMinimalSessionPayload(), { merge: true });
+    } catch (error) {
+      console.warn('Could not create minimal remote session:', error);
+      return false;
+    }
+
+    // Cleanup old heavy field, but never let cleanup break the live session.
     try {
       if (window.firebase && window.firebase.firestore && window.firebase.firestore.FieldValue) {
         await state.sessionRef.set({ slideThumbs: window.firebase.firestore.FieldValue.delete() }, { merge: true });
       }
     } catch (error) {}
+
     await publishSessionState(true);
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
@@ -2939,6 +2954,7 @@
       console.warn('Remote live listener failed; command polling fallback remains active.', error);
     });
     startRemoteCommandFallbackPoll();
+    return true;
   }
 
   function processRemoteCommand(command, source = 'unknown') {
@@ -4452,6 +4468,61 @@
     return Math.random().toString(36).slice(2, 6).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
   }
 
+  function normalizeRemoteBaseUrl(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return '';
+    const noHash = raw.split('#')[0];
+    const noQuery = noHash.split('?')[0];
+    return /\/$/.test(noQuery) ? noQuery : `${noQuery}/`;
+  }
+
+  function getRemoteBaseUrl() {
+    const current = window.location.href.split('?')[0].split('#')[0];
+    if (window.location.protocol === 'file:') {
+      const saved = normalizeRemoteBaseUrl(localStorage.getItem('presentationHubRemoteBaseUrl'));
+      return saved || normalizeRemoteBaseUrl(REMOTE_DEPLOYED_BASE_URL) || current;
+    }
+    return normalizeRemoteBaseUrl(current);
+  }
+
+  function cleanFirestoreValue(value) {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (typeof value === 'string' || typeof value === 'boolean') return value;
+    if (Array.isArray(value)) {
+      return value.map(cleanFirestoreValue).filter((item) => item !== undefined);
+    }
+    if (typeof value === 'object') {
+      const output = {};
+      Object.keys(value).forEach((key) => {
+        const cleaned = cleanFirestoreValue(value[key]);
+        if (cleaned !== undefined) output[key] = cleaned;
+      });
+      return output;
+    }
+    return String(value);
+  }
+
+  function buildMinimalSessionPayload() {
+    return cleanFirestoreValue({
+      sessionId: state.sessionId || '',
+      fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
+      type: state.activeFile ? state.activeFile.type : 'media',
+      currentPage: state.activeFile ? state.currentPage : 0,
+      totalPages: state.activeFile ? state.totalPages : 0,
+      mediaMode: !state.activeFile && !!state.mediaMode,
+      zoom: state.zoom || 1,
+      viewportCenterX: Number.isFinite(Number(state.viewportCenterX)) ? Number(state.viewportCenterX) : 0.5,
+      viewportCenterY: Number.isFinite(Number(state.viewportCenterY)) ? Number(state.viewportCenterY) : 0.5,
+      autoPlaying: !!state.autoPlaying,
+      autoPaused: !!state.autoPaused,
+      transitionEffect: state.transitionEffect || 'fade',
+      updatedAt: Date.now(),
+      live: true
+    });
+  }
+
   async function publishSessionState(force = false) {
     if (!state.sessionRef || (!state.activeFile && !state.mediaMode) || (state.publishLock && !force)) return;
     state.publishLock = true;
@@ -4496,10 +4567,13 @@
     };
 
     try {
-      await state.sessionRef.set(payload, { merge: true });
+      await state.sessionRef.set(cleanFirestoreValue(payload), { merge: true });
       if (state.activeFile) scheduleRemotePreviewPublish(force ? 60 : 220);
+      return true;
     } catch (error) {
       console.warn('Could not publish session:', error);
+      try { await state.sessionRef.set(buildMinimalSessionPayload(), { merge: true }); return true; } catch (fallbackError) { console.warn('Could not publish fallback session:', fallbackError); }
+      return false;
     }
   }
 
@@ -4902,14 +4976,17 @@
 
     state.sessionId = state.sessionId || makeSessionId();
     const session = state.sessionId;
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+    const baseUrl = getRemoteBaseUrl();
+    const usingLocalFileQrFallback = window.location.protocol === 'file:' && baseUrl !== window.location.href.split('?')[0].split('#')[0];
     const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
     const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
     const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
 
     if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
     if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
-    if (els.qrHelp) els.qrHelp.textContent = 'Preparing live remote session... Scan the Control QR after it appears.';
+    if (els.qrHelp) els.qrHelp.textContent = usingLocalFileQrFallback
+      ? 'Local file mode detected. The QR uses your GitHub Pages link because phones cannot open file:///C:/ links. Upload this same build to GitHub, or run the folder on a local web server.'
+      : 'Preparing live remote session... Scan the Control QR after it appears.';
 
     const renderQrBox = (box, url, label) => {
       if (!box) return;
@@ -4957,11 +5034,13 @@
           if (els.qrHelp) els.qrHelp.textContent = 'Remote setup is not connected. Check firebase-config.js, enable Firebase Anonymous Auth, then refresh.';
           return;
         }
-        await setupRemoteSessionIfPossible();
+        const live = await setupRemoteSessionIfPossible();
         if (els.qrHelp) {
-          els.qrHelp.textContent = state.mediaMode && !state.activeFile
-            ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
-            : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
+          els.qrHelp.textContent = live
+            ? (state.mediaMode && !state.activeFile
+              ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
+              : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`)
+            : 'Remote QR is visible, but Firebase did not create the live session. Check Anonymous Auth and Firestore rules.';
         }
       } catch (error) {
         console.warn('Remote session prepare failed:', error);
