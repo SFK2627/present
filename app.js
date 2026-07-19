@@ -3319,7 +3319,7 @@
   function sendYouTubeCommand(func, args = [], repeats = true) {
     const run = () => postYouTubeCommand(func, args);
     run();
-    if (repeats) [180, 520, 1100].forEach((delay) => window.setTimeout(run, delay));
+    if (repeats) [120, 350, 750, 1300, 2200].forEach((delay) => window.setTimeout(run, delay));
   }
 
   function handleYouTubeMediaMessage(event) {
@@ -3600,17 +3600,17 @@
       if (!id) { showMediaCastStatus('Could not read the YouTube video ID.', 'warning'); return; }
       const origin = encodeURIComponent(window.location.origin || '');
       const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&mute=1`;
-      content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="youtube" src="${escapeHtml(embed)}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
+      content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="youtube" data-media-url="${safeUrl}" data-youtube-id="${escapeHtml(id)}" src="${escapeHtml(embed)}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
     } else if (kind === 'tiktok') {
       const id = extractTikTokVideoId(parsed);
       const embed = id ? `https://www.tiktok.com/embed/v2/${encodeURIComponent(id)}` : rawUrl;
-      content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame tiktok" data-provider="tiktok" src="${escapeHtml(embed)}" title="TikTok video" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+      content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame tiktok" data-provider="tiktok" data-media-url="${safeUrl}" src="${escapeHtml(embed)}" title="TikTok video" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
     } else if (kind === 'image') {
       content = `<img class="media-cast-image" src="${safeUrl}" alt="Online image">`;
     } else if (kind === 'video') {
-      content = `<video id="mediaCastPlayer" class="media-cast-player" src="${safeUrl}" controls playsinline autoplay preload="auto"></video>`;
+      content = `<video id="mediaCastPlayer" class="media-cast-player" data-media-url="${safeUrl}" src="${safeUrl}" controls playsinline autoplay preload="auto"></video>`;
     } else if (kind === 'audio') {
-      content = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">♪</div><strong>Online Audio</strong><audio id="mediaCastPlayer" class="media-cast-player" src="${safeUrl}" controls autoplay preload="auto"></audio></div>`;
+      content = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">♪</div><strong>Online Audio</strong><audio id="mediaCastPlayer" class="media-cast-player" data-media-url="${safeUrl}" src="${safeUrl}" controls autoplay preload="auto"></audio></div>`;
     } else {
       content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="web" src="${safeUrl}" title="Online media page" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
     }
@@ -3626,13 +3626,21 @@
     `;
     const close = document.getElementById('mediaCastClose');
     if (close) close.addEventListener('click', () => closeMediaCastOverlay(true));
+    const linkFrame = document.getElementById('mediaCastLinkFrame');
+    if (linkFrame && kind === 'youtube') {
+      linkFrame.addEventListener('load', () => {
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', title: 'YouTube Link', url: rawUrl, link: rawUrl, youtubeId: extractYouTubeId(parsed), canSeek: true, volume, muted: volume <= 0 }, true);
+        startYouTubeStatusSync();
+        syncYouTubeMediaControls(volume, payload.autoplay !== false);
+      }, { once: true });
+    }
     const player = document.getElementById('mediaCastPlayer');
     if (player) {
       try { player.volume = volume; player.muted = volume <= 0; } catch (error) {}
-      attachDesktopMediaPlayerSync(player, { kind, provider: 'direct', title: safeTitle.replace(/<[^>]*>/g, '') });
+      attachDesktopMediaPlayerSync(player, { kind, provider: 'direct', title: safeTitle.replace(/<[^>]*>/g, ''), url: rawUrl, link: rawUrl });
       if (payload.autoplay !== false) tryAutoplayDirectMedia(player, volume);
     } else {
-      updateMediaPlaybackStatus({ provider: kind, kind, title: safeTitle.replace(/<[^>]*>/g, ''), currentTime: 0, duration: null, volume, muted: volume <= 0, canSeek: kind === 'youtube', playing: payload.autoplay !== false }, true);
+      updateMediaPlaybackStatus({ provider: kind, kind, title: safeTitle.replace(/<[^>]*>/g, ''), url: rawUrl, link: rawUrl, youtubeId: kind === 'youtube' ? extractYouTubeId(parsed) : '', currentTime: 0, duration: null, volume, muted: volume <= 0, canSeek: kind === 'youtube', playing: payload.autoplay !== false }, true);
     }
     if (kind === 'youtube') {
       startYouTubeStatusSync();
@@ -3647,13 +3655,26 @@
     const frame = document.getElementById('mediaCastLinkFrame');
     const provider = frame ? String(frame.dataset.provider || '') : '';
     if (action === 'stop') { closeMediaCastOverlay(false); updateMediaPlaybackStatus({ provider: '', kind: '', playing: false, paused: true, currentTime: 0, duration: null }, true); return; }
-    if (action === 'hide') { if (layer) layer.classList.add('media-cast-minimized'); return; }
-    if (action === 'show') { if (layer) layer.classList.remove('media-cast-minimized', 'hidden'); return; }
+    if (action === 'hide') {
+      if (layer) layer.classList.add('media-cast-minimized');
+      updateMediaPlaybackStatus({ hidden: true }, true);
+      return;
+    }
+    if (action === 'show') {
+      if (layer) { layer.classList.remove('media-cast-minimized', 'hidden'); layer.classList.add('show'); }
+      updateMediaPlaybackStatus({ hidden: false }, true);
+      return;
+    }
     if (action === 'fullscreen') { requestMediaFullscreen(); return; }
+    if (action === 'exitFullscreen') {
+      removeMediaFullscreenPrompt();
+      try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (error) {}
+      return;
+    }
     if (provider === 'youtube') {
       const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
-      if (action === 'play') { sendYouTubeCommand('playVideo', []); return; }
-      if (action === 'pause') { sendYouTubeCommand('pauseVideo', []); return; }
+      if (action === 'play') { sendYouTubeCommand('playVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, true); return; }
+      if (action === 'pause') { sendYouTubeCommand('pauseVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: false, paused: true }, true); return; }
       if (action === 'toggle') { sendYouTubeCommand('playVideo', []); return; }
       if (action === 'volume') {
         state.mediaLinkVolume = value;
@@ -3837,6 +3858,37 @@
     }
   }
 
+
+  function buildRemoteMediaPreviewHtml(playback = {}) {
+    const rawUrl = String(playback.url || playback.link || '').trim();
+    if (!rawUrl) {
+      return '<span class="remote-media-preview-placeholder">Media screen ready. Paste a YouTube/TikTok/media link below, then control it here.</span>';
+    }
+    let parsed = null;
+    try { parsed = new URL(rawUrl); } catch (error) {}
+    if (!parsed || !/^https?:$/i.test(parsed.protocol)) {
+      return '<span class="remote-media-preview-placeholder">Desktop media is active. Preview is not available for this source.</span>';
+    }
+    const kind = playback.kind || detectOnlineMediaKind(parsed);
+    const safeUrl = escapeHtml(parsed.toString());
+    const muted = playback.muted !== false;
+    if (kind === 'youtube') {
+      const id = playback.youtubeId || extractYouTubeId(parsed);
+      if (!id) return '<span class="remote-media-preview-placeholder">YouTube link loaded on desktop.</span>';
+      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?playsinline=1&controls=1&rel=0&modestbranding=1&mute=${muted ? 1 : 0}`;
+      return `<iframe class="remote-media-desktop-preview-frame" src="${escapeHtml(embed)}" title="YouTube preview matching desktop" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+    }
+    if (kind === 'tiktok') {
+      const id = extractTikTokVideoId(parsed);
+      const embed = id ? `https://www.tiktok.com/embed/v2/${encodeURIComponent(id)}` : parsed.toString();
+      return `<iframe class="remote-media-desktop-preview-frame tiktok" src="${escapeHtml(embed)}" title="TikTok preview matching desktop" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+    }
+    if (kind === 'image') return `<img class="remote-media-desktop-preview-image" src="${safeUrl}" alt="Desktop media preview">`;
+    if (kind === 'video') return `<video class="remote-media-desktop-preview-video" src="${safeUrl}" controls playsinline preload="metadata" ${muted ? 'muted' : ''}></video>`;
+    if (kind === 'audio') return `<audio class="remote-media-desktop-preview-audio" src="${safeUrl}" controls preload="metadata" ${muted ? 'muted' : ''}></audio>`;
+    return `<iframe class="remote-media-desktop-preview-frame" src="${safeUrl}" title="Online media preview" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+  }
+
   function attachRemoteMediaCastControls(ref, isHost) {
     const fileInput = $('remoteMediaFile');
     const sendBtn = $('remoteMediaSend');
@@ -3976,6 +4028,7 @@
     bind('remoteMediaHide', 'hide');
     bind('remoteMediaStop', 'stop');
     bind('remoteMediaFullscreen', 'fullscreen');
+    bind('remoteMediaExitFullscreen', 'exitFullscreen');
     const back10 = $('remoteMediaBack10');
     if (back10) back10.addEventListener('click', () => command('skip', -10));
     const forward10 = $('remoteMediaForward10');
@@ -4638,7 +4691,8 @@
               <button id="remoteMediaBack10" type="button" data-host-only="true">↩ 10s</button>
               <button id="remoteMediaForward10" type="button" data-host-only="true">10s ↪</button>
               <button id="remoteMediaMute" type="button" data-host-only="true">🔇 Mute</button>
-              <button id="remoteMediaFullscreen" type="button" data-host-only="true">⛶ Fullscreen</button>
+              <button id="remoteMediaFullscreen" type="button" data-host-only="true">⛶ Fullscreen Media</button>
+              <button id="remoteMediaExitFullscreen" type="button" data-host-only="true">↙ Exit Fullscreen</button>
               <button id="remoteMediaShow" type="button" data-host-only="true">👁 Show</button>
               <button id="remoteMediaHide" type="button" data-host-only="true">🙈 Hide</button>
               <button id="remoteMediaStop" type="button" data-host-only="true">■ Stop</button>
@@ -4648,9 +4702,10 @@
             </label>
 
             <div class="remote-media-phone-preview-card">
-              <label><input id="remoteMediaWatchPhone" type="checkbox"> Watch/preview on this phone</label>
-              <label><input id="remoteMediaPhoneMuted" type="checkbox" checked> Phone preview muted</label>
-              <div id="remoteMediaPhonePreview" class="remote-media-phone-preview hidden"><span>Phone preview off</span></div>
+              <strong>Phone preview</strong>
+              <label><input id="remoteMediaWatchPhone" type="checkbox" checked> Watch the same link on this phone</label>
+              <label><input id="remoteMediaPhoneMuted" type="checkbox" checked> Keep phone preview muted</label>
+              <div id="remoteMediaPhonePreview" class="remote-media-phone-preview"><span>Paste or play a link to preview it here.</span></div>
             </div>
 
             <details class="remote-media-file-details" open>
@@ -4946,7 +5001,9 @@
         $('remoteFileLabel').textContent = isMediaSession ? 'Cast local files or paste online links from this phone.' : (data.fileName || 'Active presentation');
         if (data.thumb) latestThumb = data.thumb;
         const preview = $('remotePreview');
-        preview.innerHTML = isMediaSession ? '<span>Media screen ready. Use Media Cast below.</span>' : (latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>');
+        const playbackForPreview = data && data.mediaPlayback ? data.mediaPlayback : {};
+        preview.innerHTML = isMediaSession ? buildRemoteMediaPreviewHtml(playbackForPreview) : (latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>');
+        if (isMediaSession && playbackForPreview.url && $('remoteMediaLink') && document.activeElement !== $('remoteMediaLink')) $('remoteMediaLink').value = playbackForPreview.url;
         const fullImg = $('remoteFullImg');
         if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
         if (!window.__presentationHubRemoteGestureActive) {

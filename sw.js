@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v130-media-advanced-controls';
+const CACHE_NAME = 'presentation-hub-v-media-youtube-controls-sync-20260719';
 const CORE_ASSETS = [
   './',
   './index.html',

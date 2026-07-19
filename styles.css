@@ -6204,7 +6204,12 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
   background: linear-gradient(135deg, rgba(14,165,233,.14), rgba(168,85,247,.13)), rgba(2,6,23,.34);
 }
 .remote-media-only-mode .remote-preview {
-  display: none !important;
+  display: grid !important;
+  min-height: 190px;
+  aspect-ratio: 16 / 9;
+  background: #020617 !important;
+  border: 1px solid rgba(125,211,252,.28) !important;
+  overflow: hidden;
 }
 .remote-media-only-mode .remote-media-cast-section {
   border-color: rgba(125, 211, 252, .38) !important;
@@ -6341,6 +6346,46 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
   min-height: 44px;
   font-size: .7rem;
 }
+
+.remote-media-main-controls button#remoteMediaExitFullscreen {
+  border: 0;
+  border-radius: 14px;
+  font-weight: 950;
+  color: #f8fafc;
+  background: linear-gradient(135deg, #334155, #0f172a);
+}
+.remote-media-desktop-preview-frame,
+.remote-media-desktop-preview-image,
+.remote-media-desktop-preview-video,
+.remote-media-desktop-preview-audio {
+  width: 100%;
+  height: 100%;
+  min-height: 190px;
+  border: 0;
+  border-radius: 16px;
+  background: #000;
+  object-fit: contain;
+}
+.remote-media-desktop-preview-frame.tiktok {
+  width: min(100%, 320px);
+  height: 360px;
+  margin: auto;
+}
+.remote-media-preview-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+  padding: 18px;
+  text-align: center;
+  color: rgba(224,242,254,.86);
+  font-weight: 900;
+}
+.remote-media-only-mode .remote-preview-shell {
+  margin-top: 8px;
+}
+
 .media-fullscreen-request {
   z-index: 2147483650 !important;
 }
