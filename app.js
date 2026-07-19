@@ -20,12 +20,6 @@
   const DB_VERSION = 1;
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
-  const DRIVE_FOLDER_NAME = 'Presentation Hub Files';
-  const DEFAULT_GOOGLE_CLIENT_ID = '752163036148-vch4f0p8eggkimdgu4h4ppdcuijq5057.apps.googleusercontent.com';
-  const VIEWER_PREFS_STORAGE_KEY = 'presentationHubViewerPrefsV1';
-  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-  const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
-  const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
   const MEDIA_CAST_ICE_SERVERS = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -92,7 +86,6 @@
     remoteThumbTimer: null,
     viewportQualityTimer: null,
     firebaseReady: false,
-    firebaseInitPromise: null,
     firebaseDb: null,
     firebaseAuthReady: false,
     sessionId: null,
@@ -100,9 +93,6 @@
     unsubscribeSession: null,
     lastCommandId: null,
     remoteCommandPollTimer: null,
-    remoteSessionHeartbeatTimer: null,
-    remoteSessionHeartbeatBusy: false,
-    remoteSessionLastWriteAt: 0,
     processedRemoteCommands: new Set(),
     publishLock: false,
     inkStrokes: [],
@@ -130,15 +120,6 @@
     mediaExpectedPlayback: {},
     youtubeAutoplayTimers: [],
     mediaUnmuteVolume: 0.9,
-    mediaLastSeekCommandAt: 0,
-    driveClientId: '',
-    driveTokenClient: null,
-    driveAccessToken: '',
-    driveTokenExpiry: 0,
-    driveFolderId: localStorage.getItem('presentationHubDriveFolderId') || '',
-    driveFiles: [],
-    driveBusy: false,
-    viewerPrefsSaveTimer: null,
   };
 
 
@@ -322,8 +303,7 @@
 
     // Do not block the dashboard while Firebase signs in. The viewer can open fast,
     // then the remote status updates as soon as Firebase is ready.
-    state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
-    const firebaseInitPromise = state.firebaseInitPromise;
+    const firebaseInitPromise = initFirebaseIfConfigured();
 
     if (isRemoteMode) {
       await firebaseInitPromise;
@@ -334,10 +314,8 @@
     await loadLibrary();
     loadClassroomLocal();
     loadFolders();
-    loadDriveCloudConfig();
     renderFolderList();
     renderLibrary();
-    renderDriveCloud();
     registerServiceWorker();
     window.addEventListener('resize', () => {
       if (!state.activeFile) return;
@@ -360,7 +338,6 @@
       'app', 'remoteApp', 'homeView', 'viewerView', 'fileInput', 'uploadZone', 'searchInput', 'sortSelect',
       'cardsGrid', 'emptyState', 'libraryCount', 'clearLibraryBtn', 'themeToggle', 'firebaseStatus',
       'mediaViewerBtn', 'createFolderBtn', 'folderList',
-      'driveCloudCard', 'driveCloudStatus', 'driveClientIdInput', 'driveSaveClientBtn', 'driveSignInBtn', 'driveSignOutBtn', 'driveUploadZone', 'driveUploadInput', 'driveRefreshBtn', 'driveFilesGrid', 'driveEmptyState',
       'thumbnailSidebar', 'viewerStage', 'viewerToolbar', 'controlPanel', 'settingsBtn', 'backHomeBtn',
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
       'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'inkCanvas',
@@ -394,7 +371,6 @@
     if (els.themeToggle) els.themeToggle.addEventListener('click', toggleTheme);
     if (els.firebaseStatus) els.firebaseStatus.addEventListener('click', () => showModal(els.setupModal));
     if (els.mediaViewerBtn) els.mediaViewerBtn.addEventListener('click', openMediaViewer);
-    setupDriveCloudEvents();
     if (els.closeSetupBtn) els.closeSetupBtn.addEventListener('click', () => hideModal(els.setupModal));
 
     if (els.backHomeBtn) els.backHomeBtn.addEventListener('click', closeViewer);
@@ -407,20 +383,12 @@
     if (els.fullscreenBtn) els.fullscreenBtn.addEventListener('click', toggleFullscreen);
     if (els.qrBtn) els.qrBtn.addEventListener('click', openQrModal);
     if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => hideModal(els.qrModal));
-    document.addEventListener('click', (event) => {
-      const trigger = event.target && event.target.closest ? event.target.closest('#qrBtn, #mediaViewerQrNow') : null;
-      if (!trigger) return;
-      event.preventDefault();
-      openQrModal();
-    });
     if (els.settingsBtn) els.settingsBtn.addEventListener('click', () => els.controlPanel.classList.toggle('hidden'));
 
     // Browsers only allow presentation sounds after a user gesture. Prime audio early so
     // the last-5-second alert still works later, including when autoplay is started by phone.
     document.addEventListener('pointerdown', primePresentationAudio, { passive: true });
     document.addEventListener('keydown', primePresentationAudio, true);
-    window.addEventListener('pagehide', saveViewerPreferencesNow);
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveViewerPreferencesNow(); });
 
     if (els.timingModeSelect) els.timingModeSelect.addEventListener('change', () => {
       state.timingMode = els.timingModeSelect.value === 'per-slide' ? 'per-slide' : 'global';
@@ -557,515 +525,6 @@
       els.viewerView.addEventListener('mousemove', revealToolbarTemporarily);
       els.viewerView.addEventListener('touchstart', revealToolbarTemporarily, { passive: true });
     }
-  }
-
-
-  function loadDriveCloudConfig() {
-    // The public OAuth client ID is bundled with this static app, so the teacher
-    // only needs to tap Sign in with Google. Clear older manual values so a
-    // stale/wrong Client ID cannot override the built-in one.
-    localStorage.removeItem('presentationHubGoogleClientId');
-    state.driveClientId = DEFAULT_GOOGLE_CLIENT_ID;
-    if (els.driveClientIdInput) els.driveClientIdInput.value = state.driveClientId;
-  }
-
-  function setupDriveCloudEvents() {
-    if (els.driveSaveClientBtn) els.driveSaveClientBtn.addEventListener('click', saveDriveClientId);
-    if (els.driveSignInBtn) els.driveSignInBtn.addEventListener('click', async () => {
-      try {
-        await ensureDriveAccessToken(true);
-        await refreshDriveFiles();
-      } catch (error) {
-        console.warn(error);
-        updateDriveStatus(error.message || 'Google Drive sign-in failed.', 'error');
-      }
-    });
-    if (els.driveSignOutBtn) els.driveSignOutBtn.addEventListener('click', signOutDrive);
-    if (els.driveRefreshBtn) els.driveRefreshBtn.addEventListener('click', refreshDriveFiles);
-    if (els.driveUploadInput) els.driveUploadInput.addEventListener('change', async (event) => {
-      await handleDriveUploadFiles(event.target.files);
-      event.target.value = '';
-    });
-    if (els.driveUploadZone) {
-      ['dragenter', 'dragover'].forEach((type) => els.driveUploadZone.addEventListener(type, (event) => {
-        event.preventDefault();
-        els.driveUploadZone.classList.add('drag-over');
-      }));
-      ['dragleave', 'drop'].forEach((type) => els.driveUploadZone.addEventListener(type, async (event) => {
-        event.preventDefault();
-        els.driveUploadZone.classList.remove('drag-over');
-        if (type === 'drop') await handleDriveUploadFiles(event.dataTransfer.files);
-      }));
-    }
-  }
-
-  function saveDriveClientId() {
-    const value = (els.driveClientIdInput ? els.driveClientIdInput.value : '').trim() || DEFAULT_GOOGLE_CLIENT_ID;
-    state.driveClientId = value;
-    if (value === DEFAULT_GOOGLE_CLIENT_ID) localStorage.removeItem('presentationHubGoogleClientId');
-    else localStorage.setItem('presentationHubGoogleClientId', value);
-    state.driveTokenClient = null;
-    updateDriveStatus('Google Drive login is ready.', 'ready');
-    renderDriveCloud();
-  }
-
-  function updateDriveStatus(message, tone = '') {
-    if (!els.driveCloudStatus) return;
-    const fallback = state.driveAccessToken ? 'Drive connected' : state.driveClientId ? 'Ready to sign in' : 'Not connected';
-    els.driveCloudStatus.textContent = message || fallback;
-    els.driveCloudStatus.classList.toggle('ready', tone === 'ready' || (!!state.driveAccessToken && tone !== 'error' && tone !== 'warning'));
-    els.driveCloudStatus.classList.toggle('error', tone === 'error');
-    els.driveCloudStatus.classList.toggle('warning', tone === 'warning');
-    els.driveCloudStatus.classList.toggle('muted', !tone && !state.driveAccessToken);
-  }
-
-  function renderDriveCloud() {
-    if (!els.driveCloudCard) return;
-    const signedIn = !!state.driveAccessToken && Date.now() < state.driveTokenExpiry;
-    if (els.driveClientIdInput && !els.driveClientIdInput.value && state.driveClientId) els.driveClientIdInput.value = state.driveClientId;
-    if (els.driveSignInBtn) els.driveSignInBtn.textContent = signedIn ? 'Reconnect Google' : 'Sign in with Google';
-    if (els.driveSignOutBtn) els.driveSignOutBtn.classList.toggle('hidden', !signedIn);
-    if (els.driveRefreshBtn) els.driveRefreshBtn.disabled = state.driveBusy || !state.driveClientId;
-    if (els.driveUploadInput) els.driveUploadInput.disabled = state.driveBusy || !state.driveClientId;
-    if (els.driveUploadZone) els.driveUploadZone.classList.toggle('disabled', state.driveBusy || !state.driveClientId);
-    if (!state.driveClientId) updateDriveStatus('Google Drive login is not configured.', 'warning');
-    else if (signedIn) updateDriveStatus(`${state.driveFiles.length} Drive files ready`, 'ready');
-    else updateDriveStatus('Ready to sign in with Google', 'ready');
-
-    if (!els.driveFilesGrid) return;
-    if (!state.driveFiles.length) {
-      els.driveFilesGrid.innerHTML = '';
-      if (els.driveEmptyState) els.driveEmptyState.classList.remove('hidden');
-      return;
-    }
-    if (els.driveEmptyState) els.driveEmptyState.classList.add('hidden');
-    els.driveFilesGrid.innerHTML = state.driveFiles.map(driveFileTemplate).join('');
-    els.driveFilesGrid.querySelectorAll('[data-drive-open]').forEach((button) => {
-      button.addEventListener('click', () => openDriveFile(button.dataset.driveOpen));
-    });
-    els.driveFilesGrid.querySelectorAll('[data-drive-delete]').forEach((button) => {
-      button.addEventListener('click', () => deleteDriveFile(button.dataset.driveDelete));
-    });
-  }
-
-  function driveFileTemplate(file) {
-    const kind = getDriveFileKind(file);
-    const icon = kind === 'pdf' ? '📄' : kind === 'pptx' ? '📊' : kind === 'image' ? '🖼️' : kind === 'video' ? '🎬' : kind === 'audio' ? '🎵' : '☁️';
-    const modified = file.modifiedTime ? new Date(file.modifiedTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Drive';
-    const size = file.size ? formatMediaBytes(Number(file.size)) : 'Google Drive';
-    return `
-      <article class="drive-file-card" title="${escapeHtml(file.name || 'Drive file')}">
-        <div class="drive-file-icon">${icon}</div>
-        <div class="drive-file-main">
-          <strong>${escapeHtml(file.name || 'Untitled')}</strong>
-          <small>${escapeHtml(kind.toUpperCase())} • ${escapeHtml(size)} • ${escapeHtml(modified)}</small>
-        </div>
-        <div class="drive-file-actions">
-          <button type="button" data-drive-open="${escapeHtml(file.id)}">Open</button>
-          <button type="button" class="text-button" data-drive-delete="${escapeHtml(file.id)}">Delete</button>
-        </div>
-      </article>
-    `;
-  }
-
-  async function ensureGoogleIdentityScript() {
-    if (window.google && window.google.accounts && window.google.accounts.oauth2) return true;
-    await loadScriptOnce('https://accounts.google.com/gsi/client');
-    if (!(window.google && window.google.accounts && window.google.accounts.oauth2)) throw new Error('Google Identity could not load. Check internet connection or ad-block settings.');
-    return true;
-  }
-
-  async function ensureDriveAccessToken(interactive = true) {
-    const saved = ((els.driveClientIdInput && els.driveClientIdInput.value) || state.driveClientId || DEFAULT_GOOGLE_CLIENT_ID).trim();
-    if (saved && saved !== state.driveClientId) {
-      state.driveClientId = saved;
-      localStorage.setItem('presentationHubGoogleClientId', saved);
-      state.driveTokenClient = null;
-    }
-    if (!state.driveClientId) throw new Error('Google Drive login is not configured for this app yet.');
-    if (state.driveAccessToken && Date.now() < state.driveTokenExpiry - 15000) return state.driveAccessToken;
-    if (!interactive) throw new Error('Google Drive needs sign-in again.');
-    await ensureGoogleIdentityScript();
-    return new Promise((resolve, reject) => {
-      try {
-        state.driveTokenClient = window.google.accounts.oauth2.initTokenClient({
-          client_id: state.driveClientId,
-          scope: DRIVE_SCOPE,
-          prompt: '',
-          callback: (response) => {
-            if (!response || response.error) {
-              reject(new Error(response && response.error ? response.error : 'Google Drive sign-in was cancelled.'));
-              return;
-            }
-            state.driveAccessToken = response.access_token || '';
-            state.driveTokenExpiry = Date.now() + Math.max(60, Number(response.expires_in || 3600) - 60) * 1000;
-            updateDriveStatus('Drive connected', 'ready');
-            renderDriveCloud();
-            resolve(state.driveAccessToken);
-          },
-        });
-        state.driveTokenClient.requestAccessToken({ prompt: state.driveAccessToken ? '' : 'consent' });
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  async function driveFetch(url, options = {}) {
-    const token = await ensureDriveAccessToken(true);
-    const headers = new Headers(options.headers || {});
-    headers.set('Authorization', `Bearer ${token}`);
-    const response = await fetch(url, { ...options, headers });
-    if (response.status === 401 || response.status === 403) {
-      state.driveAccessToken = '';
-      state.driveTokenExpiry = 0;
-      renderDriveCloud();
-    }
-    if (!response.ok) {
-      let detail = '';
-      try { detail = (await response.json()).error.message; } catch (error) {}
-      throw new Error(detail || `Google Drive request failed (${response.status}).`);
-    }
-    return response;
-  }
-
-  async function findOrCreateDriveFolder() {
-    if (state.driveFolderId) return state.driveFolderId;
-    const q = `mimeType='application/vnd.google-apps.folder' and name='${escapeDriveQuery(DRIVE_FOLDER_NAME)}' and trashed=false`;
-    const listUrl = `${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`;
-    const listResponse = await driveFetch(listUrl);
-    const found = await listResponse.json();
-    if (found.files && found.files[0] && found.files[0].id) {
-      state.driveFolderId = found.files[0].id;
-      localStorage.setItem('presentationHubDriveFolderId', state.driveFolderId);
-      return state.driveFolderId;
-    }
-    const createResponse = await driveFetch(`${DRIVE_API_BASE}/files?fields=id,name`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' }),
-    });
-    const folder = await createResponse.json();
-    state.driveFolderId = folder.id;
-    localStorage.setItem('presentationHubDriveFolderId', state.driveFolderId);
-    return state.driveFolderId;
-  }
-
-  function escapeDriveQuery(value) {
-    return String(value || '').replace(/'/g, "\\'");
-  }
-
-  async function refreshDriveFiles() {
-    if (state.driveBusy) return;
-    try {
-      state.driveBusy = true;
-      renderDriveCloud();
-      updateDriveStatus('Loading Drive files...', '');
-      await ensureDriveAccessToken(true);
-      const folderId = await findOrCreateDriveFolder();
-      const q = `'${folderId}' in parents and trashed=false`;
-      const fields = 'files(id,name,mimeType,size,createdTime,modifiedTime,webViewLink,thumbnailLink)';
-      const response = await driveFetch(`${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=${encodeURIComponent(fields)}&orderBy=modifiedTime desc&spaces=drive&pageSize=100`);
-      const data = await response.json();
-      state.driveFiles = (data.files || []).filter((file) => isDriveFileSupported(file));
-      updateDriveStatus(`${state.driveFiles.length} Drive files ready`, 'ready');
-    } catch (error) {
-      console.warn(error);
-      updateDriveStatus(error.message || 'Could not load Drive files.', 'error');
-    } finally {
-      state.driveBusy = false;
-      renderDriveCloud();
-    }
-  }
-
-  async function handleDriveUploadFiles(fileList) {
-    const files = Array.from(fileList || []).filter((file) => isCloudUploadSupported(file));
-    if (!files.length) {
-      updateDriveStatus('Choose PDF, PPTX, image, audio, or video files.', 'warning');
-      return;
-    }
-    try {
-      state.driveBusy = true;
-      renderDriveCloud();
-      await ensureDriveAccessToken(true);
-      const folderId = await findOrCreateDriveFolder();
-      for (let i = 0; i < files.length; i++) {
-        updateDriveStatus(`Uploading ${i + 1}/${files.length}: ${files[i].name}`, '');
-        await uploadFileToDrive(files[i], folderId);
-      }
-      await refreshDriveFiles();
-      updateDriveStatus('Upload complete. Saved in Google Drive.', 'ready');
-    } catch (error) {
-      console.warn(error);
-      updateDriveStatus(error.message || 'Drive upload failed.', 'error');
-    } finally {
-      state.driveBusy = false;
-      renderDriveCloud();
-    }
-  }
-
-  function isCloudUploadSupported(file) {
-    if (!file || !file.name) return false;
-    return /\.(pdf|pptx|png|jpe?g|webp|gif|mp3|m4a|wav|ogg|mp4|webm|mov)$/i.test(file.name) || /^(image|audio|video)\//i.test(file.type || '');
-  }
-
-  async function uploadFileToDrive(file, folderId) {
-    const boundary = `ph_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const metadata = { name: file.name, mimeType: file.type || getMimeFromName(file.name), parents: [folderId] };
-    const body = new Blob([
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
-      `--${boundary}\r\nContent-Type: ${metadata.mimeType || 'application/octet-stream'}\r\n\r\n`,
-      file,
-      `\r\n--${boundary}--`,
-    ], { type: `multipart/related; boundary=${boundary}` });
-    const response = await driveFetch(`${DRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id,name,mimeType,size,createdTime,modifiedTime,webViewLink`, {
-      method: 'POST',
-      headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-      body,
-    });
-    return response.json();
-  }
-
-  async function openDriveFile(fileId) {
-    const meta = state.driveFiles.find((file) => file.id === fileId);
-    if (!meta) return;
-    try {
-      state.driveBusy = true;
-      renderDriveCloud();
-      updateDriveStatus(`Opening ${meta.name}...`, '');
-      const blob = await downloadDriveBlob(fileId, meta.mimeType);
-      const kind = getDriveFileKind(meta);
-      if (kind === 'pdf' || kind === 'pptx') {
-        const localFile = new File([blob], meta.name, { type: meta.mimeType || getMimeFromName(meta.name) });
-        let record = state.files.find((item) => item.driveFileId === fileId);
-        if (!record) {
-          record = await createPresentationRecord(localFile, '');
-          record.driveFileId = fileId;
-          record.driveCloud = true;
-          record.note = 'Opened from your Google Drive Cloud Library.';
-          state.files.unshift(record);
-        } else {
-          record.blob = localFile;
-          record.lastViewed = new Date().toISOString();
-          record.name = meta.name;
-          record.type = kind;
-        }
-        await dbPut(record);
-        renderLibrary();
-        await openPresentation(record.id);
-      } else {
-        await openMediaViewer();
-        const mediaUrl = URL.createObjectURL(blob);
-        if (state.mediaCastBlobUrl) {
-          try { URL.revokeObjectURL(state.mediaCastBlobUrl); } catch (error) {}
-        }
-        state.mediaCastBlobUrl = mediaUrl;
-        showMediaCastPlayer(mediaUrl, { name: meta.name, kind, type: meta.mimeType || getMimeFromName(meta.name), size: Number(meta.size || blob.size || 0) });
-      }
-      updateDriveStatus('Opened from Drive.', 'ready');
-    } catch (error) {
-      console.warn(error);
-      updateDriveStatus(error.message || 'Could not open Drive file.', 'error');
-    } finally {
-      state.driveBusy = false;
-      renderDriveCloud();
-    }
-  }
-
-  async function downloadDriveBlob(fileId, mimeType = '') {
-    const response = await driveFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}?alt=media`);
-    return response.blob().then((blob) => blob.type ? blob : blob.slice(0, blob.size, mimeType || 'application/octet-stream'));
-  }
-
-  async function deleteDriveFile(fileId) {
-    const file = state.driveFiles.find((item) => item.id === fileId);
-    if (!file) return;
-    if (!confirm(`Delete "${file.name}" from your Google Drive library?`)) return;
-    try {
-      state.driveBusy = true;
-      renderDriveCloud();
-      await driveFetch(`${DRIVE_API_BASE}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' });
-      state.driveFiles = state.driveFiles.filter((item) => item.id !== fileId);
-      updateDriveStatus('Deleted from Drive.', 'ready');
-    } catch (error) {
-      console.warn(error);
-      updateDriveStatus(error.message || 'Could not delete Drive file.', 'error');
-    } finally {
-      state.driveBusy = false;
-      renderDriveCloud();
-    }
-  }
-
-  function signOutDrive() {
-    const token = state.driveAccessToken;
-    if (token && window.google && window.google.accounts && window.google.accounts.oauth2) {
-      try { window.google.accounts.oauth2.revoke(token, () => undefined); } catch (error) {}
-    }
-    state.driveAccessToken = '';
-    state.driveTokenExpiry = 0;
-    state.driveTokenClient = null;
-    state.driveFiles = [];
-    updateDriveStatus('Signed out from Google Drive.', '');
-    renderDriveCloud();
-  }
-
-  function isDriveFileSupported(file) {
-    return ['pdf', 'pptx', 'image', 'audio', 'video'].includes(getDriveFileKind(file));
-  }
-
-  function getDriveFileKind(file) {
-    const name = (file && file.name ? file.name : '').toLowerCase();
-    const mime = (file && file.mimeType ? file.mimeType : '').toLowerCase();
-    if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
-    if (mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || name.endsWith('.pptx')) return 'pptx';
-    if (mime.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(name)) return 'image';
-    if (mime.startsWith('audio/') || /\.(mp3|m4a|wav|ogg)$/i.test(name)) return 'audio';
-    if (mime.startsWith('video/') || /\.(mp4|webm|mov)$/i.test(name)) return 'video';
-    return 'file';
-  }
-
-  function getMimeFromName(name = '') {
-    const lower = String(name).toLowerCase();
-    if (lower.endsWith('.pdf')) return 'application/pdf';
-    if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-    if (lower.endsWith('.png')) return 'image/png';
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-    if (lower.endsWith('.webp')) return 'image/webp';
-    if (lower.endsWith('.gif')) return 'image/gif';
-    if (lower.endsWith('.mp3')) return 'audio/mpeg';
-    if (lower.endsWith('.m4a')) return 'audio/mp4';
-    if (lower.endsWith('.wav')) return 'audio/wav';
-    if (lower.endsWith('.ogg')) return 'audio/ogg';
-    if (lower.endsWith('.mp4')) return 'video/mp4';
-    if (lower.endsWith('.webm')) return 'video/webm';
-    if (lower.endsWith('.mov')) return 'video/quicktime';
-    return 'application/octet-stream';
-  }
-
-  function getStoredViewerPreferences() {
-    try {
-      const raw = localStorage.getItem(VIEWER_PREFS_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (error) {
-      return {};
-    }
-  }
-
-  function writeStoredViewerPreferences(data) {
-    try {
-      const entries = Object.entries(data || {}).sort((a, b) => String(b[1]?.updatedAt || '').localeCompare(String(a[1]?.updatedAt || '')));
-      const trimmed = Object.fromEntries(entries.slice(0, 120));
-      localStorage.setItem(VIEWER_PREFS_STORAGE_KEY, JSON.stringify(trimmed));
-    } catch (error) {
-      console.warn('Could not save viewer preferences.', error);
-    }
-  }
-
-  function viewerPreferenceKey(file = state.activeFile) {
-    if (!file) return '';
-    if (file.driveFileId) return `drive:${file.driveFileId}`;
-    if (file.id) return `local:${file.id}`;
-    const size = file.blob && Number.isFinite(Number(file.blob.size)) ? file.blob.size : '';
-    return `file:${file.name || 'presentation'}:${size}`;
-  }
-
-  function readViewerPreferencesForFile(file = state.activeFile) {
-    const key = viewerPreferenceKey(file);
-    if (!key) return null;
-    return getStoredViewerPreferences()[key] || null;
-  }
-
-  function collectViewerPreferences() {
-    return {
-      currentPage: Math.min(Math.max(1, Number(state.currentPage) || 1), Math.max(1, Number(state.totalPages) || 1)),
-      zoom: Math.min(4, Math.max(0.25, Number(state.zoom) || 1)),
-      viewportCenterX: clamp01(Number(state.viewportCenterX) || 0.5),
-      viewportCenterY: clamp01(Number(state.viewportCenterY) || 0.5),
-      timingMode: state.timingMode === 'per-slide' ? 'per-slide' : 'global',
-      perPageTiming: Object.fromEntries(Object.entries(state.perPageTiming || {}).filter(([, value]) => Number(value) > 0)),
-      globalTimingSelect: els.globalTimingSelect ? els.globalTimingSelect.value : '10',
-      customTimingSeconds: Math.max(1, Number(els.customTimingInput ? els.customTimingInput.value : 10) || 10),
-      countdownAlert: state.countdownAlert || 'off',
-      countdownVoiceGender: normalizeCountdownVoiceStyle(state.countdownVoiceGender),
-      countdownVoiceStart: getCountdownVoiceStart(),
-      transitionEffect: state.transitionEffect || 'fade',
-      timer: {
-        visible: !!state.timer.visible,
-        mode: state.timer.mode === 'down' ? 'down' : 'up',
-        countdownSeconds: Math.max(1, Number(state.timer.countdownSeconds) || 600),
-        position: ['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(state.timer.position) ? state.timer.position : 'bottom-right',
-        opacity: Math.max(10, Math.min(100, Number(state.timer.opacity) || 75)),
-        size: Math.max(16, Math.min(72, Number(state.timer.size) || 28)),
-      },
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  function saveViewerPreferencesNow() {
-    if (!state.activeFile || state.mediaMode) return;
-    const key = viewerPreferenceKey(state.activeFile);
-    if (!key) return;
-    const allPrefs = getStoredViewerPreferences();
-    allPrefs[key] = collectViewerPreferences();
-    writeStoredViewerPreferences(allPrefs);
-  }
-
-  function scheduleViewerPreferencesSave(delay = 280) {
-    if (!state.activeFile || state.mediaMode) return;
-    clearTimeout(state.viewerPrefsSaveTimer);
-    state.viewerPrefsSaveTimer = setTimeout(saveViewerPreferencesNow, delay);
-  }
-
-  function applyViewerPreferences(prefs) {
-    if (!prefs || typeof prefs !== 'object') return;
-    const maxPage = Math.max(1, Number(state.totalPages) || 1);
-    state.currentPage = Math.min(Math.max(1, Number(prefs.currentPage) || 1), maxPage);
-    state.zoom = Math.min(4, Math.max(0.25, Number(prefs.zoom) || 1));
-    state.viewportCenterX = clamp01(Number(prefs.viewportCenterX) || 0.5);
-    state.viewportCenterY = clamp01(Number(prefs.viewportCenterY) || 0.5);
-    state.timingMode = prefs.timingMode === 'per-slide' ? 'per-slide' : 'global';
-    state.perPageTiming = {};
-    Object.entries(prefs.perPageTiming || {}).forEach(([page, seconds]) => {
-      const pageNumber = Math.min(Math.max(1, Number(page) || 1), maxPage);
-      const safeSeconds = Math.max(1, Number(seconds) || 0);
-      if (safeSeconds > 0) state.perPageTiming[pageNumber] = safeSeconds;
-    });
-
-    if (els.globalTimingSelect) {
-      const allowed = Array.from(els.globalTimingSelect.options || []).map((option) => option.value);
-      const requested = String(prefs.globalTimingSelect || '10');
-      els.globalTimingSelect.value = allowed.includes(requested) ? requested : 'custom';
-    }
-    if (els.customTimingInput) els.customTimingInput.value = Math.max(1, Number(prefs.customTimingSeconds) || 10);
-    if (els.customTimingWrap && els.globalTimingSelect) els.customTimingWrap.classList.toggle('hidden', els.globalTimingSelect.value !== 'custom');
-
-    state.countdownAlert = ['off', 'sound', 'voice', 'both'].includes(prefs.countdownAlert) ? prefs.countdownAlert : 'off';
-    state.countdownVoiceGender = normalizeCountdownVoiceStyle(prefs.countdownVoiceGender);
-    state.countdownVoiceStart = Number(prefs.countdownVoiceStart) === 3 ? 3 : 5;
-    state.transitionEffect = prefs.transitionEffect || 'fade';
-
-    if (prefs.timer && typeof prefs.timer === 'object') {
-      state.timer = {
-        ...state.timer,
-        visible: !!prefs.timer.visible,
-        mode: prefs.timer.mode === 'down' ? 'down' : 'up',
-        countdownSeconds: Math.max(1, Number(prefs.timer.countdownSeconds) || 600),
-        position: ['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(prefs.timer.position) ? prefs.timer.position : 'bottom-right',
-        opacity: Math.max(10, Math.min(100, Number(prefs.timer.opacity) || 75)),
-        size: Math.max(16, Math.min(72, Number(prefs.timer.size) || 28)),
-      };
-    }
-
-    resetAutoClockForCurrentSlide();
-    applyTimerSettings();
-    if (state.timer.visible && els.timerOverlay) {
-      els.timerOverlay.classList.remove('hidden');
-      updateTimerText();
-    } else if (els.timerOverlay) {
-      els.timerOverlay.classList.add('hidden');
-    }
-    updateTimingModeUI();
   }
 
   function applySavedTheme() {
@@ -1748,7 +1207,6 @@
   async function openPresentation(id) {
     const file = state.files.find((item) => item.id === id);
     if (!file) return;
-    const savedViewerPrefs = readViewerPreferencesForFile(file);
     stopAutoPlay();
     stopTimerInterval();
     closeMediaCastOverlay(false);
@@ -1823,11 +1281,8 @@
         }
       }
       file.pageCount = state.totalPages;
-      applyViewerPreferences(savedViewerPrefs);
       els.pageTotalLabel.textContent = `/ ${state.totalPages}`;
       els.jumpInput.max = state.totalPages;
-      els.jumpInput.value = state.currentPage;
-      updateZoomLabel();
       updateViewerNavigationUI();
       renderThumbnailSidebar();
       await renderCurrentPage();
@@ -1841,7 +1296,6 @@
   }
 
   function closeViewer() {
-    saveViewerPreferencesNow();
     if (document.fullscreenElement === els.viewerView) document.exitFullscreen().catch(() => {});
     els.viewerView.classList.remove('presentation-fullscreen', 'media-viewer-mode');
     stopAutoPlay();
@@ -1851,7 +1305,6 @@
     const mediaWelcome = document.getElementById('mediaViewerWelcome');
     if (mediaWelcome) mediaWelcome.remove();
     if (state.unsubscribeSession) state.unsubscribeSession();
-    stopRemoteSessionHeartbeat();
     state.unsubscribeSession = null;
     state.sessionRef = null;
     state.sessionId = null;
@@ -2165,7 +1618,6 @@
     updateZoomLabel();
     updateViewerNavigationUI();
     publishSessionState();
-    scheduleViewerPreferencesSave();
 
     if (state.activeFile.type === 'pdf' && state.activePdfRenderTask) {
       try { state.activePdfRenderTask.cancel(); } catch (error) {}
@@ -2308,7 +1760,6 @@
     state.slideChangePending = true;
     state.lastCountdownAlertSecond = null;
     resetAutoClockForCurrentSlide();
-    scheduleViewerPreferencesSave(120);
     if (isAutoClockActive()) resetTimer({ publish: false, start: state.autoPlaying });
     // Pro v10: publish the new slide number immediately before the heavier render/preview path.
     publishSessionState(true);
@@ -3090,7 +2541,6 @@
     els.timerModeSelect.value = state.timer.mode;
     els.timerPositionSelect.value = state.timer.position;
     els.timerOpacityInput.value = state.timer.opacity;
-    if (els.countdownMinutesInput) els.countdownMinutesInput.value = Math.max(1, Math.round((Number(state.timer.countdownSeconds) || 600) / 60));
     if (els.timerSizeInput) els.timerSizeInput.value = timerSize;
     if (els.timerSizeLabel) els.timerSizeLabel.textContent = `${timerSize}px`;
     if (els.countdownAlertSelect) els.countdownAlertSelect.value = state.countdownAlert || 'off';
@@ -3461,137 +2911,11 @@
     } catch (error) {}
   }
 
-  async function ensureFirebaseReadyForRemote(timeout = 3600) {
-    if (state.firebaseReady && state.firebaseDb) return true;
-    if (!hasFirebaseConfig()) {
-      updateFirebaseStatus('Remote setup needed');
-      return false;
-    }
-    try {
-      state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
-      const ok = await Promise.race([
-        state.firebaseInitPromise.then(Boolean).catch(() => false),
-        sleep(timeout).then(() => false)
-      ]);
-      if (ok && state.firebaseReady && state.firebaseDb) return true;
-    } catch (error) {}
-    try {
-      // A short second chance is enough for the QR path. Do not block the QR
-      // modal for 8-12 seconds; that made it look broken after adding Drive.
-      state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
-      const retryOk = await Promise.race([
-        state.firebaseInitPromise.then(Boolean).catch(() => false),
-        sleep(1400).then(() => false)
-      ]);
-      return !!(retryOk && state.firebaseReady && state.firebaseDb);
-    } catch (error) {
-      return false;
-    }
-  }
-
-  function buildRemoteSessionPayload() {
-    return {
-      sessionAlive: true,
-      hostReady: true,
-      hostUpdatedAt: Date.now(),
-      createdAt: Date.now(),
-      fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
-      type: state.activeFile ? state.activeFile.type : 'media',
-      currentPage: state.activeFile ? state.currentPage : 0,
-      totalPages: state.activeFile ? state.totalPages : 0,
-      mediaMode: !state.activeFile && !!state.mediaMode,
-      updatedAt: Date.now(),
-    };
-  }
-
-
-  function stopRemoteSessionHeartbeat() {
-    if (state.remoteSessionHeartbeatTimer) clearInterval(state.remoteSessionHeartbeatTimer);
-    state.remoteSessionHeartbeatTimer = null;
-    state.remoteSessionHeartbeatBusy = false;
-  }
-
-  async function writeRemoteSessionHeartbeat(reason = 'heartbeat') {
-    if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return false;
-    if (state.remoteSessionHeartbeatBusy) return false;
-    state.remoteSessionHeartbeatBusy = true;
-    const now = Date.now();
-    try {
-      const payload = {
-        ...buildRemoteSessionPayload(),
-        sessionAlive: true,
-        hostReady: true,
-        hostHeartbeatAt: now,
-        hostUpdatedAt: now,
-        updatedAt: now,
-        remoteProtocol: 'fast-heartbeat-v2',
-        lastHeartbeatReason: reason
-      };
-      await state.sessionRef.set(payload, { merge: true });
-      state.remoteSessionLastWriteAt = now;
-      return true;
-    } catch (error) {
-      console.warn('Remote heartbeat/session write failed:', error);
-      return false;
-    } finally {
-      state.remoteSessionHeartbeatBusy = false;
-    }
-  }
-
-  function startRemoteSessionHeartbeat() {
-    if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return;
-    if (state.remoteSessionHeartbeatTimer) clearInterval(state.remoteSessionHeartbeatTimer);
-    // Immediate + repeated host presence. This fixes the stuck phone state where
-    // the QR opens but the remote stays on "Waiting for live desktop session"
-    // because the first Firestore write was slow, dropped, or blocked by a cache race.
-    writeRemoteSessionHeartbeat('start');
-    state.remoteSessionHeartbeatTimer = setInterval(() => {
-      if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return stopRemoteSessionHeartbeat();
-      writeRemoteSessionHeartbeat('interval');
-    }, 1350);
-  }
-
-  async function ensureRemoteSessionReady(options = {}) {
-    const fast = !!options.fast;
-    const ready = await ensureFirebaseReadyForRemote(fast ? 2400 : 4200);
-    if (!ready) return false;
-    if (!state.activeFile && !state.mediaMode) return false;
-    if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
-    state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
-
-    const basePayload = buildRemoteSessionPayload();
-
-    try {
-      if (fast) {
-        // Show the QR fast, but keep writing the host heartbeat until the phone
-        // sees the live session. A single fire-and-forget write was too fragile
-        // after adding Drive/login work, especially on mobile data or slow WiFi.
-        startRemoteSessionHeartbeat();
-        Promise.race([
-          writeRemoteSessionHeartbeat('qr-open'),
-          sleep(850)
-        ]).catch(() => {});
-        setupRemoteSessionIfPossible().catch((error) => {
-          console.warn('Remote background setup failed:', error);
-        });
-        return true;
-      }
-      await state.sessionRef.set(basePayload, { merge: true });
-      await publishSessionState(true);
-      return true;
-    } catch (error) {
-      console.warn('Could not create remote session:', error);
-      return false;
-    }
-  }
-
   async function setupRemoteSessionIfPossible() {
-    if ((!state.firebaseReady || !state.firebaseDb) && !(await ensureFirebaseReadyForRemote(6500))) return;
-    if (!state.activeFile && !state.mediaMode) return;
+    if (!state.firebaseReady || (!state.activeFile && !state.mediaMode)) return;
     if (state.unsubscribeSession) state.unsubscribeSession();
     state.sessionId = state.sessionId || makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
-    startRemoteSessionHeartbeat();
     state.lastCommandId = null;
     if (state.remoteCommandPollTimer) clearInterval(state.remoteCommandPollTimer);
     state.processedRemoteCommands = new Set();
@@ -3604,7 +2928,6 @@
       }
     } catch (error) {}
     await publishSessionState(true);
-    startRemoteSessionHeartbeat();
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
       const data = snap.data();
@@ -4281,24 +3604,17 @@
       const info = data.info && typeof data.info === 'object' ? data.info : {};
       if (Number.isFinite(Number(info.currentTime))) {
         const t = Math.max(0, Number(info.currentTime) || 0);
-        const ignoreSeekUntil = Number(window.__phRemoteMediaPreviewIgnoreSeekUntil || 0);
-        if (now < ignoreSeekUntil) {
-          window.__phRemoteMediaPreviewLastTime = t;
-          window.__phRemoteMediaPreviewLastTimeAt = now;
-          return;
-        }
         const lastT = Number(window.__phRemoteMediaPreviewLastTime);
         const lastAt = Number(window.__phRemoteMediaPreviewLastTimeAt || 0);
         const elapsed = lastAt ? Math.max(0, (now - lastAt) / 1000) : 0;
         const expected = Number.isFinite(lastT) ? lastT + elapsed : t;
-        const jump = Number.isFinite(lastT) && Math.abs(t - expected) > 4.5;
+        const jump = Number.isFinite(lastT) && Math.abs(t - expected) > 3.2;
         const playback = window.__phRemoteMediaPlayback || {};
         const lastSentAt = Number(window.__phRemoteMediaPreviewLastSeekSentAt || 0);
-        const farFromDesktop = Math.abs(t - (Number(playback.currentTime) || 0)) > 2.25;
+        const farFromDesktop = Math.abs(t - (Number(playback.currentTime) || 0)) > 1.25;
         const previewPaused = Number(window.__phRemoteMediaPreviewLastState) === 2 || playback.paused === true;
-        if ((jump || previewPaused) && farFromDesktop && now - lastSentAt > 2200) {
+        if ((jump || previewPaused) && farFromDesktop && now - lastSentAt > 1200) {
           window.__phRemoteMediaPreviewLastSeekSentAt = now;
-          window.__phRemoteMediaPreviewIgnoreSeekUntil = now + 2600;
           send('seek', t);
         }
         window.__phRemoteMediaPreviewLastTime = t;
@@ -4332,16 +3648,10 @@
       if (action === 'volume') postRemoteYouTubePreviewCommand('setVolume', [Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)]);
       if (action === 'mute') postRemoteYouTubePreviewCommand('mute', []);
       if (action === 'unmute') postRemoteYouTubePreviewCommand('unMute', []);
-      if (action === 'seek' || action === 'skip') {
+      if (action === 'seek') postRemoteYouTubePreviewCommand('seekTo', [Math.max(0, Number(value) || 0), true]);
+      if (action === 'skip') {
         const current = Number(playback.currentTime) || 0;
-        const target = action === 'seek' ? Math.max(0, Number(value) || 0) : Math.max(0, current + (Number(value) || 0));
-        window.__phRemoteMediaPreviewIgnoreSeekUntil = Date.now() + 3000;
-        window.__phRemoteMediaPreviewLastSeekSentAt = Date.now();
-        postRemoteYouTubePreviewCommand('seekTo', [target, true]);
-        // Resume once after seeking. Sending play several times was the reason
-        // the preview looked like it repeated before becoming smooth.
-        window.setTimeout(() => postRemoteYouTubePreviewCommand('playVideo', []), 140);
-        return;
+        postRemoteYouTubePreviewCommand('seekTo', [Math.max(0, current + (Number(value) || 0)), true]);
       }
       if (action === 'fullscreen') {
         const frame = remoteYouTubePreviewFrames()[0];
@@ -4349,8 +3659,7 @@
       }
       if (action === 'exitFullscreen') { try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (error) {} }
       // Keep the phone preview following the selected muted/unmuted preference,
-      // while desktop volume remains controlled separately. Do not do this after
-      // seek/skip, because extra commands during seek make YouTube stutter.
+      // while desktop volume remains controlled separately.
       window.setTimeout(() => {
         postRemoteYouTubePreviewCommand('setVolume', [pct]);
         postRemoteYouTubePreviewCommand(phoneWantsMuted ? 'mute' : 'unMute', []);
@@ -4700,25 +4009,19 @@
       }
       if (action === 'seek') {
         const seconds = Math.max(0, Number(raw.seconds ?? raw.value) || 0);
-        const shouldResume = raw.resume !== false;
-        state.mediaLastSeekCommandAt = Date.now();
-        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, 2600);
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 900);
         sendYouTubeCommand('seekTo', [seconds, true], false);
-        if (shouldResume) window.setTimeout(() => sendYouTubeCommand('playVideo', [], false), 140);
-        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, true);
-        clearMediaControlLockSoon(2700);
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
+        clearMediaControlLockSoon(950);
         return;
       }
       if (action === 'skip') {
         const delta = Number(raw.value) || 0;
         const seconds = Math.max(0, current + delta);
-        const shouldResume = raw.resume !== false;
-        state.mediaLastSeekCommandAt = Date.now();
-        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, 2600);
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 900);
         sendYouTubeCommand('seekTo', [seconds, true], false);
-        if (shouldResume) window.setTimeout(() => sendYouTubeCommand('playVideo', [], false), 140);
-        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, true);
-        clearMediaControlLockSoon(2700);
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
+        clearMediaControlLockSoon(950);
         return;
       }
       // TikTok and generic web iframes do not expose reliable seek/volume APIs.
@@ -4742,13 +4045,12 @@
     }
     if (action === 'mute') { setDirectPlayerMuted(player, true); return; }
     if (action === 'unmute') { setDirectPlayerMuted(player, false); return; }
-    if (action === 'seek') { seekDirectPlayer(player, raw.seconds ?? raw.value); try { player.play().catch(() => {}); } catch (error) {} return; }
+    if (action === 'seek') { seekDirectPlayer(player, raw.seconds ?? raw.value); return; }
     if (action === 'skip') {
       const delta = Number(raw.value) || 0;
       let current = 0;
       try { current = Number(player.currentTime) || 0; } catch (error) {}
       seekDirectPlayer(player, current + delta);
-      try { player.play().catch(() => {}); } catch (error) {}
     }
   }
 
@@ -5054,12 +4356,7 @@
     const command = (type, value, options = {}) => {
       if (!isHost) return;
       const now = Date.now();
-      const isSeekLike = type === 'seek' || type === 'skip';
-      markRemoteMediaLocalControl(isSeekLike ? 3200 : 1500);
-      if (isSeekLike) {
-        window.__phRemoteMediaPreviewIgnoreSeekUntil = now + 3600;
-        window.__phRemoteMediaPreviewLastSeekSentAt = now;
-      }
+      markRemoteMediaLocalControl(type === 'seek' || type === 'skip' ? 2600 : 1500);
       applyRemotePreviewMediaCommand(type, value);
       const currentPlayback = window.__phRemoteMediaPlayback || {};
       const patch = { ...currentPlayback };
@@ -5068,12 +4365,12 @@
       if (type === 'volume') { patch.volume = Math.max(0, Math.min(1, Number(value) || 0)); patch.muted = patch.volume <= 0; }
       if (type === 'mute') patch.muted = true;
       if (type === 'unmute') patch.muted = false;
-      if (type === 'seek') { patch.currentTime = Math.max(0, Number(value) || 0); patch.playing = true; patch.paused = false; }
-      if (type === 'skip') { patch.currentTime = Math.max(0, (Number(patch.currentTime) || 0) + (Number(value) || 0)); patch.playing = true; patch.paused = false; }
+      if (type === 'seek') patch.currentTime = Math.max(0, Number(value) || 0);
+      if (type === 'skip') patch.currentTime = Math.max(0, (Number(patch.currentTime) || 0) + (Number(value) || 0));
       window.__phRemoteMediaPlayback = patch;
       updateRemoteMediaPlaybackUI(patch);
       const commandId = `${now}-${Math.random().toString(36).slice(2, 7)}`;
-      sendRemoteCommand(ref, 'mediaCastControl', { type, value, source: options.source || 'remote', commandId, clientAt: now, resume: isSeekLike ? true : undefined });
+      sendRemoteCommand(ref, 'mediaCastControl', { type, value, source: options.source || 'remote', commandId, clientAt: now });
       if (type === 'stop') {
         try { ref.set({ mediaCast: { id: window.__phRemoteMediaCast ? window.__phRemoteMediaCast.id : `media-${Date.now()}`, status: 'stop', receiverStatus: 'stopped', receiverMessage: 'Media stopped from phone.', stoppedAt: Date.now() } }, { merge: true }); } catch (error) {}
       }
@@ -5111,17 +4408,6 @@
     });
     const seek = $('remoteMediaSeek');
     let seekTimer = null;
-    let lastSentSeekSecond = -1;
-    const sendSeekOnce = (seconds) => {
-      const target = Math.max(0, Number(seconds) || 0);
-      const rounded = Math.round(target * 10) / 10;
-      const now = Date.now();
-      if (Math.abs(rounded - lastSentSeekSecond) < 0.2 && now - Number(window.__phRemoteMediaLastSeekCommandAt || 0) < 900) return;
-      lastSentSeekSecond = rounded;
-      window.__phRemoteMediaLastSeekCommandAt = now;
-      clearTimeout(seekTimer);
-      command('seek', target);
-    };
     if (seek) {
       seek.addEventListener('input', () => {
         const playback = window.__phRemoteMediaPlayback || {};
@@ -5129,22 +4415,18 @@
         const seconds = duration ? (Number(seek.value) / 1000) * duration : 0;
         if ($('remoteMediaCurrentTime')) $('remoteMediaCurrentTime').textContent = formatMediaTime(seconds);
         if (!duration) return;
-        markRemoteMediaLocalControl(1800);
-        // While dragging, update the label only. Do not send repeated seekTo
-        // commands; YouTube buffers each one and looks like it repeats 3 times.
+        markRemoteMediaLocalControl(2400);
+        applyRemotePreviewMediaCommand('seek', seconds);
         window.__phRemoteMediaPlayback = { ...playback, currentTime: seconds };
+        clearTimeout(seekTimer);
+        seekTimer = setTimeout(() => command('seek', seconds), 180);
       });
       seek.addEventListener('change', () => {
         const playback = window.__phRemoteMediaPlayback || {};
         const duration = Number(playback.duration) || 0;
         if (!duration) return;
-        sendSeekOnce((Number(seek.value) / 1000) * duration);
-      });
-      seek.addEventListener('pointerup', () => {
-        const playback = window.__phRemoteMediaPlayback || {};
-        const duration = Number(playback.duration) || 0;
-        if (!duration) return;
-        sendSeekOnce((Number(seek.value) / 1000) * duration);
+        clearTimeout(seekTimer);
+        command('seek', (Number(seek.value) / 1000) * duration);
       });
     }
     const goTime = $('remoteMediaGoTime');
@@ -5170,7 +4452,6 @@
   }
 
   async function publishSessionState(force = false) {
-    if (state.activeFile && !state.mediaMode) scheduleViewerPreferencesSave();
     if (!state.sessionRef || (!state.activeFile && !state.mediaMode) || (state.publishLock && !force)) return;
     state.publishLock = true;
     setTimeout(() => { state.publishLock = false; }, force ? 0 : 120);
@@ -5183,9 +4464,6 @@
       currentPage: state.activeFile ? state.currentPage : 0,
       totalPages: state.activeFile ? state.totalPages : 0,
       mediaMode: !state.activeFile && !!state.mediaMode,
-      sessionAlive: true,
-      hostReady: true,
-      hostHeartbeatAt: Date.now(),
       zoom: state.zoom,
       viewportCenterX: state.viewportCenterX,
       viewportCenterY: state.viewportCenterY,
@@ -5617,128 +4895,28 @@
     }
   }
 
-  function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  let qrLibraryLoadPromise = null;
-  async function ensureQrCodeLibrary() {
-    if (typeof window.QRCode === 'function') return true;
-    if (qrLibraryLoadPromise) return qrLibraryLoadPromise;
-    qrLibraryLoadPromise = new Promise((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        resolve(typeof window.QRCode === 'function');
-      };
-
-      const existing = Array.from(document.scripts || []).find((script) => /qrcode/i.test(script.src || ''));
-      if (existing) existing.addEventListener('load', finish, { once: true });
-
-      setTimeout(() => {
-        if (typeof window.QRCode === 'function') return finish();
-        const fallback = document.createElement('script');
-        fallback.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
-        fallback.async = true;
-        fallback.onload = finish;
-        fallback.onerror = finish;
-        document.head.appendChild(fallback);
-        setTimeout(finish, 2600);
-      }, 160);
-    });
-    return qrLibraryLoadPromise;
-  }
-
-  function renderQrFallback(container, text) {
-    if (!container) return;
-    container.innerHTML = '';
-    const wrap = document.createElement('div');
-    wrap.className = 'qr-fallback-card';
-    const img = document.createElement('img');
-    img.className = 'qr-fallback-img';
-    img.width = 210;
-    img.height = 210;
-    img.alt = 'Remote QR code';
-    img.src = `https://api.qrserver.com/v1/create-qr-code/?size=210x210&margin=8&data=${encodeURIComponent(text)}`;
-    const link = document.createElement('a');
-    link.href = text;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    link.textContent = 'Open remote link';
-    const note = document.createElement('small');
-    note.textContent = 'If QR does not load, copy or open the link below.';
-    img.onerror = () => {
-      img.remove();
-      note.textContent = 'QR generator did not load. Use the remote link below.';
-    };
-    wrap.appendChild(img);
-    wrap.appendChild(note);
-    wrap.appendChild(link);
-    container.appendChild(wrap);
-  }
-
-  async function renderRemoteQr(container, text) {
-    if (!container) return;
-    container.innerHTML = '<div class="qr-loading">Generating QR...</div>';
-    const hasQrLib = await ensureQrCodeLibrary();
-    container.innerHTML = '';
-    if (hasQrLib && typeof window.QRCode === 'function') {
-      try {
-        new QRCode(container, { text, width: 210, height: 210 });
-        return;
-      } catch (error) {
-        console.warn('QRCode library failed; using image fallback.', error);
-      }
-    }
-    renderQrFallback(container, text);
-  }
-
   async function openQrModal() {
-    if (state.qrModalOpening) return;
-    state.qrModalOpening = true;
-    try {
-      if (!state.activeFile && !state.mediaMode) return;
-      if (!els.qrModal || !els.hostQr || !els.viewerQr) return;
-
-      showModal(els.qrModal);
-      if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-loading">Preparing control QR...</div>';
-      if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-loading">Preparing viewer QR...</div>';
-      if (els.hostRemoteLink) els.hostRemoteLink.value = 'Preparing remote link...';
-      if (els.viewerRemoteLink) els.viewerRemoteLink.value = 'Preparing viewer link...';
-      if (els.qrHelp) els.qrHelp.textContent = 'Preparing phone remote QR...';
-
-      const sessionReady = await ensureRemoteSessionReady({ fast: true });
-      if (!sessionReady || !state.sessionId || !state.sessionRef) {
-        if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-error">Remote session was not started. Check internet/Firebase config, then tap Remote QR again.</div>';
-        if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-error">Remote not ready yet.</div>';
-        if (els.hostRemoteLink) els.hostRemoteLink.value = '';
-        if (els.viewerRemoteLink) els.viewerRemoteLink.value = '';
-        if (els.qrHelp) els.qrHelp.textContent = 'Remote QR could not start quickly. Keep the file open, wait for Remote ready, then tap Remote QR again.';
-        return;
-      }
-
-      if (els.qrHelp) {
-        els.qrHelp.textContent = state.mediaMode && !state.activeFile
-          ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
-          : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
-      }
-
-      const session = state.sessionId;
-      const baseUrl = window.location.href.split('?')[0].split('#')[0];
-      const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
-      const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
-      const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
-
-      if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
-      if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
-      await Promise.all([
-        renderRemoteQr(els.hostQr, hostUrl),
-        renderRemoteQr(els.viewerQr, viewerUrl)
-      ]);
-    } finally {
-      setTimeout(() => { state.qrModalOpening = false; }, 350);
+    if (!state.activeFile && !state.mediaMode) return;
+    if (!state.firebaseReady) {
+      els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
+    } else {
+      await setupRemoteSessionIfPossible();
+      els.qrHelp.textContent = state.mediaMode && !state.activeFile ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.` : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
     }
+
+    const session = state.sessionId || 'NO-FIREBASE';
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+    const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
+    const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
+    const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
+
+    els.hostRemoteLink.value = hostUrl;
+    els.viewerRemoteLink.value = viewerUrl;
+    els.hostQr.innerHTML = '';
+    els.viewerQr.innerHTML = '';
+    new QRCode(els.hostQr, { text: hostUrl, width: 210, height: 210 });
+    new QRCode(els.viewerQr, { text: viewerUrl, width: 210, height: 210 });
+    showModal(els.qrModal);
   }
 
   function setRemoteMediaOnlyMode(enabled) {
@@ -6230,11 +5408,6 @@
       $('remoteStatusPill').textContent = 'Setup needed';
       return;
     }
-    if (!sessionId || sessionId === 'NO-FIREBASE') {
-      $('remoteFileLabel').textContent = 'Invalid remote link. Open Remote QR again from the desktop viewer.';
-      $('remoteStatusPill').textContent = 'Invalid QR';
-      return;
-    }
 
     initFirebaseIfConfigured().then(() => {
       if (!state.firebaseReady || !sessionId) {
@@ -6245,10 +5418,8 @@
       const ref = state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
       ref.onSnapshot((snap) => {
         if (!snap.exists) {
-          $('remoteFileLabel').textContent = 'Waiting for the desktop session. Keep this page open; the desktop now retries the live session automatically.';
-          $('remoteStatusPill').textContent = 'Waiting';
-          const preview = $('remotePreview');
-          if (preview) preview.innerHTML = '<span>Waiting for live desktop session...</span>';
+          $('remoteFileLabel').textContent = 'Session not found. Open QR from the desktop viewer first.';
+          $('remoteStatusPill').textContent = 'No session';
           return;
         }
         const data = snap.data();
