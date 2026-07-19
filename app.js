@@ -120,6 +120,7 @@
     mediaExpectedPlayback: {},
     youtubeAutoplayTimers: [],
     mediaUnmuteVolume: 0.9,
+    mediaLastSeekCommandAt: 0,
   };
 
 
@@ -3604,17 +3605,24 @@
       const info = data.info && typeof data.info === 'object' ? data.info : {};
       if (Number.isFinite(Number(info.currentTime))) {
         const t = Math.max(0, Number(info.currentTime) || 0);
+        const ignoreSeekUntil = Number(window.__phRemoteMediaPreviewIgnoreSeekUntil || 0);
+        if (now < ignoreSeekUntil) {
+          window.__phRemoteMediaPreviewLastTime = t;
+          window.__phRemoteMediaPreviewLastTimeAt = now;
+          return;
+        }
         const lastT = Number(window.__phRemoteMediaPreviewLastTime);
         const lastAt = Number(window.__phRemoteMediaPreviewLastTimeAt || 0);
         const elapsed = lastAt ? Math.max(0, (now - lastAt) / 1000) : 0;
         const expected = Number.isFinite(lastT) ? lastT + elapsed : t;
-        const jump = Number.isFinite(lastT) && Math.abs(t - expected) > 3.2;
+        const jump = Number.isFinite(lastT) && Math.abs(t - expected) > 4.5;
         const playback = window.__phRemoteMediaPlayback || {};
         const lastSentAt = Number(window.__phRemoteMediaPreviewLastSeekSentAt || 0);
-        const farFromDesktop = Math.abs(t - (Number(playback.currentTime) || 0)) > 1.25;
+        const farFromDesktop = Math.abs(t - (Number(playback.currentTime) || 0)) > 2.25;
         const previewPaused = Number(window.__phRemoteMediaPreviewLastState) === 2 || playback.paused === true;
-        if ((jump || previewPaused) && farFromDesktop && now - lastSentAt > 1200) {
+        if ((jump || previewPaused) && farFromDesktop && now - lastSentAt > 2200) {
           window.__phRemoteMediaPreviewLastSeekSentAt = now;
+          window.__phRemoteMediaPreviewIgnoreSeekUntil = now + 2600;
           send('seek', t);
         }
         window.__phRemoteMediaPreviewLastTime = t;
@@ -3648,10 +3656,16 @@
       if (action === 'volume') postRemoteYouTubePreviewCommand('setVolume', [Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)]);
       if (action === 'mute') postRemoteYouTubePreviewCommand('mute', []);
       if (action === 'unmute') postRemoteYouTubePreviewCommand('unMute', []);
-      if (action === 'seek') postRemoteYouTubePreviewCommand('seekTo', [Math.max(0, Number(value) || 0), true]);
-      if (action === 'skip') {
+      if (action === 'seek' || action === 'skip') {
         const current = Number(playback.currentTime) || 0;
-        postRemoteYouTubePreviewCommand('seekTo', [Math.max(0, current + (Number(value) || 0)), true]);
+        const target = action === 'seek' ? Math.max(0, Number(value) || 0) : Math.max(0, current + (Number(value) || 0));
+        window.__phRemoteMediaPreviewIgnoreSeekUntil = Date.now() + 3000;
+        window.__phRemoteMediaPreviewLastSeekSentAt = Date.now();
+        postRemoteYouTubePreviewCommand('seekTo', [target, true]);
+        // Resume once after seeking. Sending play several times was the reason
+        // the preview looked like it repeated before becoming smooth.
+        window.setTimeout(() => postRemoteYouTubePreviewCommand('playVideo', []), 140);
+        return;
       }
       if (action === 'fullscreen') {
         const frame = remoteYouTubePreviewFrames()[0];
@@ -3659,7 +3673,8 @@
       }
       if (action === 'exitFullscreen') { try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (error) {} }
       // Keep the phone preview following the selected muted/unmuted preference,
-      // while desktop volume remains controlled separately.
+      // while desktop volume remains controlled separately. Do not do this after
+      // seek/skip, because extra commands during seek make YouTube stutter.
       window.setTimeout(() => {
         postRemoteYouTubePreviewCommand('setVolume', [pct]);
         postRemoteYouTubePreviewCommand(phoneWantsMuted ? 'mute' : 'unMute', []);
@@ -4009,19 +4024,25 @@
       }
       if (action === 'seek') {
         const seconds = Math.max(0, Number(raw.seconds ?? raw.value) || 0);
-        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 900);
+        const shouldResume = raw.resume !== false;
+        state.mediaLastSeekCommandAt = Date.now();
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, 2600);
         sendYouTubeCommand('seekTo', [seconds, true], false);
-        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
-        clearMediaControlLockSoon(950);
+        if (shouldResume) window.setTimeout(() => sendYouTubeCommand('playVideo', [], false), 140);
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, true);
+        clearMediaControlLockSoon(2700);
         return;
       }
       if (action === 'skip') {
         const delta = Number(raw.value) || 0;
         const seconds = Math.max(0, current + delta);
-        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 900);
+        const shouldResume = raw.resume !== false;
+        state.mediaLastSeekCommandAt = Date.now();
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, 2600);
         sendYouTubeCommand('seekTo', [seconds, true], false);
-        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
-        clearMediaControlLockSoon(950);
+        if (shouldResume) window.setTimeout(() => sendYouTubeCommand('playVideo', [], false), 140);
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true, playing: shouldResume, paused: !shouldResume }, true);
+        clearMediaControlLockSoon(2700);
         return;
       }
       // TikTok and generic web iframes do not expose reliable seek/volume APIs.
@@ -4045,12 +4066,13 @@
     }
     if (action === 'mute') { setDirectPlayerMuted(player, true); return; }
     if (action === 'unmute') { setDirectPlayerMuted(player, false); return; }
-    if (action === 'seek') { seekDirectPlayer(player, raw.seconds ?? raw.value); return; }
+    if (action === 'seek') { seekDirectPlayer(player, raw.seconds ?? raw.value); try { player.play().catch(() => {}); } catch (error) {} return; }
     if (action === 'skip') {
       const delta = Number(raw.value) || 0;
       let current = 0;
       try { current = Number(player.currentTime) || 0; } catch (error) {}
       seekDirectPlayer(player, current + delta);
+      try { player.play().catch(() => {}); } catch (error) {}
     }
   }
 
@@ -4356,7 +4378,12 @@
     const command = (type, value, options = {}) => {
       if (!isHost) return;
       const now = Date.now();
-      markRemoteMediaLocalControl(type === 'seek' || type === 'skip' ? 2600 : 1500);
+      const isSeekLike = type === 'seek' || type === 'skip';
+      markRemoteMediaLocalControl(isSeekLike ? 3200 : 1500);
+      if (isSeekLike) {
+        window.__phRemoteMediaPreviewIgnoreSeekUntil = now + 3600;
+        window.__phRemoteMediaPreviewLastSeekSentAt = now;
+      }
       applyRemotePreviewMediaCommand(type, value);
       const currentPlayback = window.__phRemoteMediaPlayback || {};
       const patch = { ...currentPlayback };
@@ -4365,12 +4392,12 @@
       if (type === 'volume') { patch.volume = Math.max(0, Math.min(1, Number(value) || 0)); patch.muted = patch.volume <= 0; }
       if (type === 'mute') patch.muted = true;
       if (type === 'unmute') patch.muted = false;
-      if (type === 'seek') patch.currentTime = Math.max(0, Number(value) || 0);
-      if (type === 'skip') patch.currentTime = Math.max(0, (Number(patch.currentTime) || 0) + (Number(value) || 0));
+      if (type === 'seek') { patch.currentTime = Math.max(0, Number(value) || 0); patch.playing = true; patch.paused = false; }
+      if (type === 'skip') { patch.currentTime = Math.max(0, (Number(patch.currentTime) || 0) + (Number(value) || 0)); patch.playing = true; patch.paused = false; }
       window.__phRemoteMediaPlayback = patch;
       updateRemoteMediaPlaybackUI(patch);
       const commandId = `${now}-${Math.random().toString(36).slice(2, 7)}`;
-      sendRemoteCommand(ref, 'mediaCastControl', { type, value, source: options.source || 'remote', commandId, clientAt: now });
+      sendRemoteCommand(ref, 'mediaCastControl', { type, value, source: options.source || 'remote', commandId, clientAt: now, resume: isSeekLike ? true : undefined });
       if (type === 'stop') {
         try { ref.set({ mediaCast: { id: window.__phRemoteMediaCast ? window.__phRemoteMediaCast.id : `media-${Date.now()}`, status: 'stop', receiverStatus: 'stopped', receiverMessage: 'Media stopped from phone.', stoppedAt: Date.now() } }, { merge: true }); } catch (error) {}
       }
@@ -4408,6 +4435,17 @@
     });
     const seek = $('remoteMediaSeek');
     let seekTimer = null;
+    let lastSentSeekSecond = -1;
+    const sendSeekOnce = (seconds) => {
+      const target = Math.max(0, Number(seconds) || 0);
+      const rounded = Math.round(target * 10) / 10;
+      const now = Date.now();
+      if (Math.abs(rounded - lastSentSeekSecond) < 0.2 && now - Number(window.__phRemoteMediaLastSeekCommandAt || 0) < 900) return;
+      lastSentSeekSecond = rounded;
+      window.__phRemoteMediaLastSeekCommandAt = now;
+      clearTimeout(seekTimer);
+      command('seek', target);
+    };
     if (seek) {
       seek.addEventListener('input', () => {
         const playback = window.__phRemoteMediaPlayback || {};
@@ -4415,18 +4453,22 @@
         const seconds = duration ? (Number(seek.value) / 1000) * duration : 0;
         if ($('remoteMediaCurrentTime')) $('remoteMediaCurrentTime').textContent = formatMediaTime(seconds);
         if (!duration) return;
-        markRemoteMediaLocalControl(2400);
-        applyRemotePreviewMediaCommand('seek', seconds);
+        markRemoteMediaLocalControl(1800);
+        // While dragging, update the label only. Do not send repeated seekTo
+        // commands; YouTube buffers each one and looks like it repeats 3 times.
         window.__phRemoteMediaPlayback = { ...playback, currentTime: seconds };
-        clearTimeout(seekTimer);
-        seekTimer = setTimeout(() => command('seek', seconds), 180);
       });
       seek.addEventListener('change', () => {
         const playback = window.__phRemoteMediaPlayback || {};
         const duration = Number(playback.duration) || 0;
         if (!duration) return;
-        clearTimeout(seekTimer);
-        command('seek', (Number(seek.value) / 1000) * duration);
+        sendSeekOnce((Number(seek.value) / 1000) * duration);
+      });
+      seek.addEventListener('pointerup', () => {
+        const playback = window.__phRemoteMediaPlayback || {};
+        const duration = Number(playback.duration) || 0;
+        if (!duration) return;
+        sendSeekOnce((Number(seek.value) / 1000) * duration);
       });
     }
     const goTime = $('remoteMediaGoTime');
