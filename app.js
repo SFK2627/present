@@ -21,6 +21,8 @@
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
   const DRIVE_FOLDER_NAME = 'Presentation Hub Files';
+  const DEFAULT_GOOGLE_CLIENT_ID = '752163036148-vch4f0p8eggkimdgu4h4ppdcuijq5057.apps.googleusercontent.com';
+  const VIEWER_PREFS_STORAGE_KEY = 'presentationHubViewerPrefsV1';
   const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
   const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
   const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
@@ -132,6 +134,7 @@
     driveFolderId: localStorage.getItem('presentationHubDriveFolderId') || '',
     driveFiles: [],
     driveBusy: false,
+    viewerPrefsSaveTimer: null,
   };
 
 
@@ -405,6 +408,8 @@
     // the last-5-second alert still works later, including when autoplay is started by phone.
     document.addEventListener('pointerdown', primePresentationAudio, { passive: true });
     document.addEventListener('keydown', primePresentationAudio, true);
+    window.addEventListener('pagehide', saveViewerPreferencesNow);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveViewerPreferencesNow(); });
 
     if (els.timingModeSelect) els.timingModeSelect.addEventListener('change', () => {
       state.timingMode = els.timingModeSelect.value === 'per-slide' ? 'per-slide' : 'global';
@@ -545,7 +550,11 @@
 
 
   function loadDriveCloudConfig() {
-    state.driveClientId = (localStorage.getItem('presentationHubGoogleClientId') || '').trim();
+    // The public OAuth client ID is bundled with this static app, so the teacher
+    // only needs to tap Sign in with Google. Clear older manual values so a
+    // stale/wrong Client ID cannot override the built-in one.
+    localStorage.removeItem('presentationHubGoogleClientId');
+    state.driveClientId = DEFAULT_GOOGLE_CLIENT_ID;
     if (els.driveClientIdInput) els.driveClientIdInput.value = state.driveClientId;
   }
 
@@ -580,19 +589,12 @@
   }
 
   function saveDriveClientId() {
-    const value = (els.driveClientIdInput ? els.driveClientIdInput.value : '').trim();
-    if (!value) {
-      localStorage.removeItem('presentationHubGoogleClientId');
-      state.driveClientId = '';
-      state.driveTokenClient = null;
-      updateDriveStatus('Paste your Google OAuth Web Client ID first.', 'warning');
-      renderDriveCloud();
-      return;
-    }
-    localStorage.setItem('presentationHubGoogleClientId', value);
+    const value = (els.driveClientIdInput ? els.driveClientIdInput.value : '').trim() || DEFAULT_GOOGLE_CLIENT_ID;
     state.driveClientId = value;
+    if (value === DEFAULT_GOOGLE_CLIENT_ID) localStorage.removeItem('presentationHubGoogleClientId');
+    else localStorage.setItem('presentationHubGoogleClientId', value);
     state.driveTokenClient = null;
-    updateDriveStatus('Client ID saved. Tap Sign in with Google.', 'ready');
+    updateDriveStatus('Google Drive login is ready.', 'ready');
     renderDriveCloud();
   }
 
@@ -615,9 +617,9 @@
     if (els.driveRefreshBtn) els.driveRefreshBtn.disabled = state.driveBusy || !state.driveClientId;
     if (els.driveUploadInput) els.driveUploadInput.disabled = state.driveBusy || !state.driveClientId;
     if (els.driveUploadZone) els.driveUploadZone.classList.toggle('disabled', state.driveBusy || !state.driveClientId);
-    if (!state.driveClientId) updateDriveStatus('Paste Client ID first', 'warning');
+    if (!state.driveClientId) updateDriveStatus('Google Drive login is not configured.', 'warning');
     else if (signedIn) updateDriveStatus(`${state.driveFiles.length} Drive files ready`, 'ready');
-    else updateDriveStatus('Ready to sign in', '');
+    else updateDriveStatus('Ready to sign in with Google', 'ready');
 
     if (!els.driveFilesGrid) return;
     if (!state.driveFiles.length) {
@@ -663,13 +665,13 @@
   }
 
   async function ensureDriveAccessToken(interactive = true) {
-    const saved = (els.driveClientIdInput ? els.driveClientIdInput.value : state.driveClientId || '').trim();
+    const saved = ((els.driveClientIdInput && els.driveClientIdInput.value) || state.driveClientId || DEFAULT_GOOGLE_CLIENT_ID).trim();
     if (saved && saved !== state.driveClientId) {
       state.driveClientId = saved;
       localStorage.setItem('presentationHubGoogleClientId', saved);
       state.driveTokenClient = null;
     }
-    if (!state.driveClientId) throw new Error('Paste and save your Google OAuth Web Client ID first.');
+    if (!state.driveClientId) throw new Error('Google Drive login is not configured for this app yet.');
     if (state.driveAccessToken && Date.now() < state.driveTokenExpiry - 15000) return state.driveAccessToken;
     if (!interactive) throw new Error('Google Drive needs sign-in again.');
     await ensureGoogleIdentityScript();
@@ -927,6 +929,132 @@
     if (lower.endsWith('.webm')) return 'video/webm';
     if (lower.endsWith('.mov')) return 'video/quicktime';
     return 'application/octet-stream';
+  }
+
+  function getStoredViewerPreferences() {
+    try {
+      const raw = localStorage.getItem(VIEWER_PREFS_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function writeStoredViewerPreferences(data) {
+    try {
+      const entries = Object.entries(data || {}).sort((a, b) => String(b[1]?.updatedAt || '').localeCompare(String(a[1]?.updatedAt || '')));
+      const trimmed = Object.fromEntries(entries.slice(0, 120));
+      localStorage.setItem(VIEWER_PREFS_STORAGE_KEY, JSON.stringify(trimmed));
+    } catch (error) {
+      console.warn('Could not save viewer preferences.', error);
+    }
+  }
+
+  function viewerPreferenceKey(file = state.activeFile) {
+    if (!file) return '';
+    if (file.driveFileId) return `drive:${file.driveFileId}`;
+    if (file.id) return `local:${file.id}`;
+    const size = file.blob && Number.isFinite(Number(file.blob.size)) ? file.blob.size : '';
+    return `file:${file.name || 'presentation'}:${size}`;
+  }
+
+  function readViewerPreferencesForFile(file = state.activeFile) {
+    const key = viewerPreferenceKey(file);
+    if (!key) return null;
+    return getStoredViewerPreferences()[key] || null;
+  }
+
+  function collectViewerPreferences() {
+    return {
+      currentPage: Math.min(Math.max(1, Number(state.currentPage) || 1), Math.max(1, Number(state.totalPages) || 1)),
+      zoom: Math.min(4, Math.max(0.25, Number(state.zoom) || 1)),
+      viewportCenterX: clamp01(Number(state.viewportCenterX) || 0.5),
+      viewportCenterY: clamp01(Number(state.viewportCenterY) || 0.5),
+      timingMode: state.timingMode === 'per-slide' ? 'per-slide' : 'global',
+      perPageTiming: Object.fromEntries(Object.entries(state.perPageTiming || {}).filter(([, value]) => Number(value) > 0)),
+      globalTimingSelect: els.globalTimingSelect ? els.globalTimingSelect.value : '10',
+      customTimingSeconds: Math.max(1, Number(els.customTimingInput ? els.customTimingInput.value : 10) || 10),
+      countdownAlert: state.countdownAlert || 'off',
+      countdownVoiceGender: normalizeCountdownVoiceStyle(state.countdownVoiceGender),
+      countdownVoiceStart: getCountdownVoiceStart(),
+      transitionEffect: state.transitionEffect || 'fade',
+      timer: {
+        visible: !!state.timer.visible,
+        mode: state.timer.mode === 'down' ? 'down' : 'up',
+        countdownSeconds: Math.max(1, Number(state.timer.countdownSeconds) || 600),
+        position: ['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(state.timer.position) ? state.timer.position : 'bottom-right',
+        opacity: Math.max(10, Math.min(100, Number(state.timer.opacity) || 75)),
+        size: Math.max(16, Math.min(72, Number(state.timer.size) || 28)),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function saveViewerPreferencesNow() {
+    if (!state.activeFile || state.mediaMode) return;
+    const key = viewerPreferenceKey(state.activeFile);
+    if (!key) return;
+    const allPrefs = getStoredViewerPreferences();
+    allPrefs[key] = collectViewerPreferences();
+    writeStoredViewerPreferences(allPrefs);
+  }
+
+  function scheduleViewerPreferencesSave(delay = 280) {
+    if (!state.activeFile || state.mediaMode) return;
+    clearTimeout(state.viewerPrefsSaveTimer);
+    state.viewerPrefsSaveTimer = setTimeout(saveViewerPreferencesNow, delay);
+  }
+
+  function applyViewerPreferences(prefs) {
+    if (!prefs || typeof prefs !== 'object') return;
+    const maxPage = Math.max(1, Number(state.totalPages) || 1);
+    state.currentPage = Math.min(Math.max(1, Number(prefs.currentPage) || 1), maxPage);
+    state.zoom = Math.min(4, Math.max(0.25, Number(prefs.zoom) || 1));
+    state.viewportCenterX = clamp01(Number(prefs.viewportCenterX) || 0.5);
+    state.viewportCenterY = clamp01(Number(prefs.viewportCenterY) || 0.5);
+    state.timingMode = prefs.timingMode === 'per-slide' ? 'per-slide' : 'global';
+    state.perPageTiming = {};
+    Object.entries(prefs.perPageTiming || {}).forEach(([page, seconds]) => {
+      const pageNumber = Math.min(Math.max(1, Number(page) || 1), maxPage);
+      const safeSeconds = Math.max(1, Number(seconds) || 0);
+      if (safeSeconds > 0) state.perPageTiming[pageNumber] = safeSeconds;
+    });
+
+    if (els.globalTimingSelect) {
+      const allowed = Array.from(els.globalTimingSelect.options || []).map((option) => option.value);
+      const requested = String(prefs.globalTimingSelect || '10');
+      els.globalTimingSelect.value = allowed.includes(requested) ? requested : 'custom';
+    }
+    if (els.customTimingInput) els.customTimingInput.value = Math.max(1, Number(prefs.customTimingSeconds) || 10);
+    if (els.customTimingWrap && els.globalTimingSelect) els.customTimingWrap.classList.toggle('hidden', els.globalTimingSelect.value !== 'custom');
+
+    state.countdownAlert = ['off', 'sound', 'voice', 'both'].includes(prefs.countdownAlert) ? prefs.countdownAlert : 'off';
+    state.countdownVoiceGender = normalizeCountdownVoiceStyle(prefs.countdownVoiceGender);
+    state.countdownVoiceStart = Number(prefs.countdownVoiceStart) === 3 ? 3 : 5;
+    state.transitionEffect = prefs.transitionEffect || 'fade';
+
+    if (prefs.timer && typeof prefs.timer === 'object') {
+      state.timer = {
+        ...state.timer,
+        visible: !!prefs.timer.visible,
+        mode: prefs.timer.mode === 'down' ? 'down' : 'up',
+        countdownSeconds: Math.max(1, Number(prefs.timer.countdownSeconds) || 600),
+        position: ['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(prefs.timer.position) ? prefs.timer.position : 'bottom-right',
+        opacity: Math.max(10, Math.min(100, Number(prefs.timer.opacity) || 75)),
+        size: Math.max(16, Math.min(72, Number(prefs.timer.size) || 28)),
+      };
+    }
+
+    resetAutoClockForCurrentSlide();
+    applyTimerSettings();
+    if (state.timer.visible && els.timerOverlay) {
+      els.timerOverlay.classList.remove('hidden');
+      updateTimerText();
+    } else if (els.timerOverlay) {
+      els.timerOverlay.classList.add('hidden');
+    }
+    updateTimingModeUI();
   }
 
   function applySavedTheme() {
@@ -1609,6 +1737,7 @@
   async function openPresentation(id) {
     const file = state.files.find((item) => item.id === id);
     if (!file) return;
+    const savedViewerPrefs = readViewerPreferencesForFile(file);
     stopAutoPlay();
     stopTimerInterval();
     closeMediaCastOverlay(false);
@@ -1683,8 +1812,11 @@
         }
       }
       file.pageCount = state.totalPages;
+      applyViewerPreferences(savedViewerPrefs);
       els.pageTotalLabel.textContent = `/ ${state.totalPages}`;
       els.jumpInput.max = state.totalPages;
+      els.jumpInput.value = state.currentPage;
+      updateZoomLabel();
       updateViewerNavigationUI();
       renderThumbnailSidebar();
       await renderCurrentPage();
@@ -1698,6 +1830,7 @@
   }
 
   function closeViewer() {
+    saveViewerPreferencesNow();
     if (document.fullscreenElement === els.viewerView) document.exitFullscreen().catch(() => {});
     els.viewerView.classList.remove('presentation-fullscreen', 'media-viewer-mode');
     stopAutoPlay();
@@ -2020,6 +2153,7 @@
     updateZoomLabel();
     updateViewerNavigationUI();
     publishSessionState();
+    scheduleViewerPreferencesSave();
 
     if (state.activeFile.type === 'pdf' && state.activePdfRenderTask) {
       try { state.activePdfRenderTask.cancel(); } catch (error) {}
@@ -2162,6 +2296,7 @@
     state.slideChangePending = true;
     state.lastCountdownAlertSecond = null;
     resetAutoClockForCurrentSlide();
+    scheduleViewerPreferencesSave(120);
     if (isAutoClockActive()) resetTimer({ publish: false, start: state.autoPlaying });
     // Pro v10: publish the new slide number immediately before the heavier render/preview path.
     publishSessionState(true);
@@ -2943,6 +3078,7 @@
     els.timerModeSelect.value = state.timer.mode;
     els.timerPositionSelect.value = state.timer.position;
     els.timerOpacityInput.value = state.timer.opacity;
+    if (els.countdownMinutesInput) els.countdownMinutesInput.value = Math.max(1, Math.round((Number(state.timer.countdownSeconds) || 600) / 60));
     if (els.timerSizeInput) els.timerSizeInput.value = timerSize;
     if (els.timerSizeLabel) els.timerSizeLabel.textContent = `${timerSize}px`;
     if (els.countdownAlertSelect) els.countdownAlertSelect.value = state.countdownAlert || 'off';
@@ -4895,6 +5031,7 @@
   }
 
   async function publishSessionState(force = false) {
+    if (state.activeFile && !state.mediaMode) scheduleViewerPreferencesSave();
     if (!state.sessionRef || (!state.activeFile && !state.mediaMode) || (state.publishLock && !force)) return;
     state.publishLock = true;
     setTimeout(() => { state.publishLock = false; }, force ? 0 : 120);

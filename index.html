@@ -61,11 +61,13 @@
           <span id="driveCloudStatus" class="drive-cloud-status muted">Not connected</span>
         </div>
 
-        <div class="drive-cloud-setup">
-          <label class="drive-client-field">Google OAuth Client ID
-            <input id="driveClientIdInput" type="text" inputmode="text" autocomplete="off" placeholder="Paste your Google OAuth Web Client ID here" />
-          </label>
-          <button id="driveSaveClientBtn" type="button" class="text-button">Save Client ID</button>
+        <div class="drive-cloud-setup drive-cloud-ready-login">
+          <div class="drive-login-note">
+            <strong>Google Drive is ready.</strong>
+            <small>Sign in once, then your Drive files will load here.</small>
+          </div>
+          <input id="driveClientIdInput" type="hidden" value="752163036148-vch4f0p8eggkimdgu4h4ppdcuijq5057.apps.googleusercontent.com" />
+          <button id="driveSaveClientBtn" type="button" class="text-button hidden">Save Client ID</button>
           <button id="driveSignInBtn" type="button">Sign in with Google</button>
           <button id="driveSignOutBtn" type="button" class="text-button hidden">Sign out</button>
         </div>
@@ -81,7 +83,7 @@
         </div>
 
         <div id="driveFilesGrid" class="drive-files-grid"></div>
-        <p id="driveEmptyState" class="drive-empty-state">Paste a Client ID, sign in, then upload files to your Drive library.</p>
+        <p id="driveEmptyState" class="drive-empty-state">Sign in, then upload files to your Drive library. Your app settings and last-viewed slide will be remembered per file.</p>
       </section>
 
       <section class="toolbar-card glass">
