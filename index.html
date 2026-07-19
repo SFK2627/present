@@ -17,7 +17,7 @@
         <div class="brand-mark">PH</div>
         <div>
           <h1>Presentation Hub</h1>
-          <p>Pro v10 PDF kiosk, presentation viewer, and phone remote controller.</p>
+          <p>PDF/PPT presentation viewer, classroom randomizer, and phone remote controller.</p>
         </div>
       </div>
       <div class="topbar-actions">
@@ -30,22 +30,22 @@
     <main id="homeView" class="home-view">
       <section class="hero glass">
         <div class="hero-copy">
-          <span class="eyebrow">Presentation Hub Pro v10</span>
+          <span class="eyebrow">Presentation Hub Pro</span>
           <h2>Open, present, auto-play, and control slides from your phone.</h2>
-          <p>Upload PDF or PPTX files, organize your presentations, and launch a clean fullscreen viewer with timer and remote controls.</p>
+          <p>Upload PDF or PPTX files. PowerPoint files are automatically converted into a PDF-style viewer when possible.</p>
         </div>
         <label class="upload-zone" id="uploadZone">
           <input id="fileInput" type="file" multiple accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
           <span class="upload-icon">⬆</span>
           <strong>Upload presentations</strong>
-          <small>Drop or select multiple PDF/PPTX files</small>
+          <small>Drop or select PDF/PPTX files</small>
         </label>
       </section>
 
       <section class="toolbar-card glass">
         <div class="search-wrap">
           <span>⌕</span>
-          <input id="searchInput" type="search" placeholder="Search presentations, folders, or Canva links..." />
+          <input id="searchInput" type="search" placeholder="Search presentations or folders..." />
         </div>
         <div class="select-wrap">
           <label for="sortSelect">Sort by</label>
@@ -62,25 +62,11 @@
           <div class="mini-section-head">
             <div>
               <h3>Folders</h3>
-              <p>Organize files and Canva presentation links.</p>
+              <p>Organize your PDF and PowerPoint files.</p>
             </div>
             <button id="createFolderBtn" type="button">+ Folder</button>
           </div>
           <div id="folderList" class="folder-list"></div>
-        </div>
-        <div class="canva-panel">
-          <div class="mini-section-head compact">
-            <div>
-              <h3>Add Canva link</h3>
-              <p>Paste a public view or embed link to open it inside the viewer.</p>
-            </div>
-          </div>
-          <div class="canva-add-row">
-            <input id="canvaTitleInput" type="text" placeholder="Optional title" />
-            <input id="canvaLinkInput" type="url" placeholder="Paste any Canva share, view, present, public, or embed link" />
-            <button id="addCanvaBtn" type="button">Add Canva</button>
-          </div>
-          <p class="help-text small">Tip: accepts Canva share/view/present/embed links or full iframe code. Private links may still ask viewers to log in.</p>
         </div>
       </section>
 
@@ -234,7 +220,6 @@
         <div id="viewerCanvasWrap" class="viewer-canvas-wrap">
           <canvas id="pdfCanvas" class="pdf-canvas hidden"></canvas>
           <div id="pptxSlide" class="pptx-slide hidden"></div>
-          <iframe id="canvaFrame" class="canva-frame hidden" title="Canva presentation viewer" allowfullscreen></iframe>
           <canvas id="inkCanvas" class="ink-canvas hidden" aria-hidden="true"></canvas>
         </div>
         <div id="timerOverlay" class="timer-overlay bottom-right hidden">00:00:00</div>
@@ -272,18 +257,12 @@
             <label>Section<select id="sectionSelect"></select></label>
             <div class="classroom-inline"><input id="newSectionName" placeholder="New section name"><button id="addSectionBtn">Add</button></div>
             <label>Student names<textarea id="studentNamesInput" rows="10" placeholder="One name per line"></textarea></label>
-            <div class="classroom-import-box">
-              <input id="classListFileInput" type="file" accept=".xlsx,.xls,.csv" hidden>
-              <button id="importClassListBtn" type="button">Import Excel / CSV</button>
-              <small>Accepted columns: Student ID, Name, Gender, Section</small>
-              <div id="classImportStatus" class="class-import-status"></div>
-            </div>
             <button id="saveNamesBtn">Save Names</button>
           </section>
           <section class="classroom-controls">
             <div class="classroom-options"><label>Groups<input id="groupCountInput" type="number" min="2" max="20" value="6"></label><label><input id="removePickedInput" type="checkbox" checked> Remove after pick</label><label><input id="balancedGroupsInput" type="checkbox" checked> Balance groups</label></div>
             <div id="classroomResult" class="classroom-result"><span>Ready to pick</span></div>
-            <div class="classroom-actions"><button id="pickNameBtn">Pick Name</button><button id="rollGroupBtn">Roll Group</button><button id="resetPicksBtn">Reset</button></div><button id="presentClassroomBtn" class="classroom-present-btn" type="button">Present Classroom Randomizer Fullscreen</button>
+            <div class="classroom-actions"><button id="pickNameBtn">Pick Name</button><button id="rollGroupBtn">Roll Group</button><button id="pickRollBtn" class="primary">Pick + Roll</button><button id="resetPicksBtn">Reset</button></div>
             <div id="classroomRoster" class="classroom-roster"></div>
           </section>
         </div>
@@ -311,7 +290,6 @@
 
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>

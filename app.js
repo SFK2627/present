@@ -229,10 +229,10 @@
     [
       'app', 'remoteApp', 'homeView', 'viewerView', 'fileInput', 'uploadZone', 'searchInput', 'sortSelect',
       'cardsGrid', 'emptyState', 'libraryCount', 'clearLibraryBtn', 'themeToggle', 'firebaseStatus',
-      'createFolderBtn', 'folderList', 'canvaTitleInput', 'canvaLinkInput', 'addCanvaBtn',
+      'createFolderBtn', 'folderList',
       'thumbnailSidebar', 'viewerStage', 'viewerToolbar', 'controlPanel', 'settingsBtn', 'backHomeBtn',
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
-      'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'canvaFrame', 'inkCanvas',
+      'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'inkCanvas',
       'timingModeSelect', 'globalTimingSelect', 'customTimingWrap', 'customTimingInput', 'perSlideTimingWrap', 'perSlideTimingInput',
       'countdownAlertSelect', 'countdownVoiceSelect', 'countdownVoiceStartSelect', 'soundTestBtn', 'slideTransitionSelect',
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
@@ -260,8 +260,6 @@
     if (els.sortSelect) els.sortSelect.addEventListener('change', renderLibrary);
     if (els.clearLibraryBtn) els.clearLibraryBtn.addEventListener('click', clearLibrary);
     if (els.createFolderBtn) els.createFolderBtn.addEventListener('click', createFolder);
-    if (els.addCanvaBtn) els.addCanvaBtn.addEventListener('click', addCanvaLink);
-    if (els.canvaLinkInput) els.canvaLinkInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') addCanvaLink(); });
     if (els.themeToggle) els.themeToggle.addEventListener('click', toggleTheme);
     if (els.firebaseStatus) els.firebaseStatus.addEventListener('click', () => showModal(els.setupModal));
     if (els.closeSetupBtn) els.closeSetupBtn.addEventListener('click', () => hideModal(els.setupModal));
@@ -546,6 +544,9 @@
     if (!window.html2canvas) {
       await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
     }
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    }
   }
 
   function openDb() {
@@ -604,7 +605,10 @@
 
   async function loadLibrary() {
     try {
-      state.files = await dbGetAll();
+      const allFiles = await dbGetAll();
+      const removedCanva = allFiles.filter((file) => file && file.type === 'canva');
+      state.files = allFiles.filter((file) => file && file.type !== 'canva');
+      if (removedCanva.length) removedCanva.forEach((file) => dbDelete(file.id).catch(() => undefined));
     } catch (error) {
       console.warn(error);
       state.files = [];
@@ -801,133 +805,11 @@
       const before = output;
       output = decodeLooseHtml(output).replace(/&amp;/gi, '&').trim();
       try {
-        const decoded = decodeURIComponent(output);
-        if (/canva\./i.test(decoded)) output = decoded.trim();
+        output = decodeURIComponent(output).trim();
       } catch (error) {}
       if (output === before) break;
     }
     return output;
-  }
-
-  function extractCanvaCandidate(raw) {
-    let value = decodeMaybeEncodedUrl(raw)
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      .replace(/[“”]/g, '"')
-      .replace(/[‘’]/g, "'")
-      .trim();
-    if (!value) return '';
-
-    // Accept iframe snippets, embed snippets, anchor tags, copied text around a link,
-    // and links escaped by the Canva app/browser.
-    const attrMatch = value.match(/(?:src|href)\s*=\s*["']([^"']*canva\.[^"']+)["']/i);
-    if (attrMatch) return decodeMaybeEncodedUrl(attrMatch[1]);
-
-    const fullUrlMatch = value.match(/https?:\/\/[^\s<>"']*canva\.[^\s<>"']+/i);
-    if (fullUrlMatch) return decodeMaybeEncodedUrl(fullUrlMatch[0]);
-
-    const bareUrlMatch = value.match(/(?:www\.)?canva\.(?:com|site|cn|me|link)\/[^\s<>"']+/i);
-    if (bareUrlMatch) return decodeMaybeEncodedUrl(bareUrlMatch[0]);
-
-    // Sometimes users paste only the tail after the protocol was stripped by another app.
-    const hostless = value.match(/(?:^|\s)((?:www\.)?canva\.(?:com|site|cn|me|link)(?:\/\S*)?)/i);
-    return hostless ? decodeMaybeEncodedUrl(hostless[1]) : value;
-  }
-
-  function normalizeCanvaUrl(raw) {
-    let value = extractCanvaCandidate(raw);
-    if (!value) return null;
-
-    value = value
-      .replace(/&amp;/gi, '&')
-      .trim()
-      .replace(/^[<({\["']+/, '')
-      .replace(/[>)}\]"']+$/g, '')
-      .replace(/[),.;]+$/g, '');
-
-    if (!/^https?:\/\//i.test(value)) value = `https://${value.replace(/^\/\//, '')}`;
-
-    let url;
-    try { url = new URL(value); } catch (error) { return null; }
-
-    const host = url.hostname.toLowerCase().replace(/^www\./, '');
-    const allowed = host === 'canva.com' || host.endsWith('.canva.com') ||
-      host === 'canva.site' || host.endsWith('.canva.site') ||
-      host === 'canva.cn' || host.endsWith('.canva.cn') ||
-      host === 'canva.me' || host.endsWith('.canva.me') ||
-      host === 'canva.link' || host.endsWith('.canva.link');
-    if (!allowed) return null;
-
-    // Convert common Canva editor/presentation paths into a public-view-style embed URL.
-    // Private edit links still need Canva sharing set to public/viewable, but the app
-    // should not reject their URL shape before trying to load it.
-    if (host === 'canva.com' || host.endsWith('.canva.com') || host === 'canva.cn' || host.endsWith('.canva.cn')) {
-      url.pathname = url.pathname
-        .replace(/\/edit\/?$/i, '/view')
-        .replace(/\/present\/?$/i, '/view')
-        .replace(/\/watch\/?$/i, '/view');
-      if (/\/design\//i.test(url.pathname) && !/\/(view|embed)\/?$/i.test(url.pathname)) {
-        url.pathname = url.pathname.replace(/\/?$/, '/view');
-      }
-      if (!url.searchParams.has('embed')) url.searchParams.set('embed', '');
-    }
-
-    return url.toString();
-  }
-
-  async function addCanvaLink() {
-    const raw = els.canvaLinkInput ? els.canvaLinkInput.value : '';
-    const embedUrl = normalizeCanvaUrl(raw);
-    if (!embedUrl) {
-      alert('Please paste a valid Canva public view or embed link.');
-      return;
-    }
-    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
-    const now = new Date().toISOString();
-    let title = els.canvaTitleInput && els.canvaTitleInput.value.trim();
-    if (!title) title = 'Canva presentation';
-    const record = {
-      id,
-      name: title,
-      type: 'canva',
-      url: raw.trim(),
-      embedUrl,
-      uploadedAt: now,
-      lastViewed: now,
-      pageCount: 1,
-      folderId: getUploadFolderId(),
-      thumbnail: createCanvaThumbDataUrl(title),
-      note: 'Canva links are embedded in the viewer. Use a public view or embed link; private Canva links may require login.',
-    };
-    state.files.unshift(record);
-    await dbPut(record);
-    if (els.canvaTitleInput) els.canvaTitleInput.value = '';
-    if (els.canvaLinkInput) els.canvaLinkInput.value = '';
-    renderFolderList();
-    renderLibrary();
-  }
-
-  function createCanvaThumbDataUrl(name) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 640;
-    canvas.height = 400;
-    const ctx = canvas.getContext('2d');
-    const gradient = ctx.createLinearGradient(0, 0, 640, 400);
-    gradient.addColorStop(0, '#00c4cc');
-    gradient.addColorStop(0.55, '#7d2ae8');
-    gradient.addColorStop(1, '#ff66c4');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 640, 400);
-    ctx.fillStyle = 'rgba(255,255,255,.18)';
-    roundRect(ctx, 54, 54, 532, 292, 30);
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 48px Inter, Arial';
-    ctx.fillText('CANVA', 86, 150);
-    ctx.font = '26px Inter, Arial';
-    ctx.fillText('Embedded presentation link', 86, 198);
-    ctx.font = '22px Inter, Arial';
-    wrapCanvasText(ctx, name, 86, 255, 460, 30, 2);
-    return canvas.toDataURL('image/jpeg', 0.86);
   }
 
   async function handleFiles(fileList, folderIdOverride) {
@@ -962,7 +844,7 @@
         const result = await inspectPptx(buffer.slice(0));
         pageCount = result.count;
         thumbnail = createPptxThumbDataUrl(file.name, pageCount);
-        note = 'PowerPoint opens with the visual renderer when possible. For exact layout, export PPTX as PDF and upload the PDF.';
+        note = 'PowerPoint will auto-convert into a PDF-style viewer when opened. Conversion uses the browser renderer and may take a moment.';
       }
     } catch (error) {
       console.warn('Could not inspect file:', error);
@@ -1166,11 +1048,11 @@
 
   function cardTemplate(file) {
     const date = new Date(file.uploadedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-    const typeLabel = file.type === 'pdf' ? 'PDF' : file.type === 'pptx' ? 'PPTX' : 'CANVA';
-    const countLabel = file.type === 'pdf' ? `${file.pageCount} pages` : file.type === 'pptx' ? `${file.pageCount} slides` : 'Canva link';
+    const typeLabel = file.type === 'pdf' ? 'PDF' : 'PPTX';
+    const countLabel = file.type === 'pdf' ? `${file.pageCount} pages` : `${file.pageCount} slides`;
     return `
       <article class="presentation-card glass" data-card-id="${file.id}" draggable="true" title="Drag this card to a folder">
-        <span class="file-badge ${file.type === 'canva' ? 'canva-badge' : ''}">${typeLabel}</span>
+        <span class="file-badge">${typeLabel}</span>
         <div class="card-thumb"><img src="${file.thumbnail || createGenericThumbDataUrl(file.name, file.type)}" alt="${escapeHtml(file.name)} thumbnail"></div>
         <div class="card-body">
           <h4 title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</h4>
@@ -1252,15 +1134,12 @@
     els.viewerView.classList.remove('hidden');
     els.pdfCanvas.classList.add('hidden');
     els.pptxSlide.classList.add('hidden');
-    if (els.canvaFrame) {
-      els.canvaFrame.classList.add('hidden');
-      els.canvaFrame.removeAttribute('src');
-    }
     els.pageTotalLabel.textContent = `/ ${state.totalPages}`;
     els.jumpInput.max = state.totalPages;
     els.jumpInput.value = '1';
     updateZoomLabel();
     updateTimingModeUI();
+    updateViewerNavigationUI();
 
     try {
       if (file.type === 'pdf') {
@@ -1269,16 +1148,28 @@
         state.totalPages = state.activePdf.numPages;
       } else if (file.type === 'pptx') {
         await preparePptxVisualRenderer(file.blob);
-        if (!state.pptxVisualReady) {
+        if (state.pptxVisualReady) {
+          const convertedBlob = await convertRenderedPptxToPdfBlob();
+          if (convertedBlob) {
+            const buffer = await convertedBlob.arrayBuffer();
+            state.activePdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+            state.totalPages = state.activePdf.numPages;
+            state.activeFile.originalType = 'pptx';
+            state.activeFile.type = 'pdf';
+            state.activeFile.convertedFromPptx = true;
+            state.pptxVisualReady = false;
+            els.pptxSlide.classList.add('hidden');
+          }
+        }
+        if (!state.activePdf && !state.pptxVisualReady) {
           state.activePptxSlides = await parsePptxSlides(file.blob);
           state.totalPages = state.activePptxSlides.length;
         }
-      } else if (file.type === 'canva') {
-        state.totalPages = 1;
       }
       file.pageCount = state.totalPages;
       els.pageTotalLabel.textContent = `/ ${state.totalPages}`;
       els.jumpInput.max = state.totalPages;
+      updateViewerNavigationUI();
       renderThumbnailSidebar();
       await renderCurrentPage();
       setupRemoteSessionIfPossible();
@@ -1314,10 +1205,6 @@
     if (state.pptxBlobUrl) {
       URL.revokeObjectURL(state.pptxBlobUrl);
       state.pptxBlobUrl = '';
-    }
-    if (els.canvaFrame) {
-      els.canvaFrame.classList.add('hidden');
-      els.canvaFrame.removeAttribute('src');
     }
     state.activeFile = null;
     els.viewerView.classList.add('hidden');
@@ -1395,6 +1282,45 @@
       state.pptxVisualReady = false;
       state.pptxRenderedSlides = [];
       els.pptxSlide.classList.remove('visual-pptx');
+    }
+  }
+
+  async function convertRenderedPptxToPdfBlob() {
+    if (!state.pptxVisualReady || !state.pptxRenderedSlides.length || !window.html2canvas || !window.jspdf || !window.jspdf.jsPDF) return null;
+    const sourceSlides = state.pptxRenderedSlides.slice();
+    els.pptxSlide.innerHTML = '<div class="viewer-message">Converting PowerPoint to PDF viewer...</div>';
+    await wait(120);
+    try {
+      const { jsPDF } = window.jspdf;
+      let pdf = null;
+      for (let index = 0; index < sourceSlides.length; index++) {
+        const slide = sourceSlides[index];
+        slide.classList.remove('hidden');
+        slide.style.display = '';
+        slide.style.visibility = 'visible';
+        slide.style.opacity = '1';
+        els.pptxSlide.innerHTML = '';
+        els.pptxSlide.appendChild(slide);
+        await wait(80);
+        const canvas = await html2canvas(slide, {
+          backgroundColor: '#ffffff',
+          scale: Math.min(2, window.devicePixelRatio || 1.5),
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+        });
+        const width = Math.max(1, canvas.width);
+        const height = Math.max(1, canvas.height);
+        const orientation = width >= height ? 'landscape' : 'portrait';
+        const image = canvas.toDataURL('image/jpeg', 0.95);
+        if (!pdf) pdf = new jsPDF({ orientation, unit: 'px', format: [width, height], compress: true });
+        else pdf.addPage([width, height], orientation);
+        pdf.addImage(image, 'JPEG', 0, 0, width, height);
+      }
+      return pdf ? pdf.output('blob') : null;
+    } catch (error) {
+      console.warn('PPTX to PDF-style conversion failed:', error);
+      return null;
     }
   }
 
@@ -1499,6 +1425,7 @@
     updateTimingModeUI();
     updateActiveThumb();
     updateZoomLabel();
+    updateViewerNavigationUI();
     publishSessionState();
 
     if (state.activeFile.type === 'pdf' && state.activePdfRenderTask) {
@@ -1507,25 +1434,15 @@
     }
 
     try {
-      if (state.activeFile.type === 'canva') {
-        els.pdfCanvas.classList.add('hidden');
-        els.pptxSlide.classList.add('hidden');
-        if (els.canvaFrame) {
-          els.canvaFrame.classList.remove('hidden');
-          if (els.canvaFrame.getAttribute('src') !== state.activeFile.embedUrl) els.canvaFrame.setAttribute('src', state.activeFile.embedUrl);
-        }
-        applyViewportScroll();
-      } else if (state.activeFile.type === 'pdf') {
-        if (els.canvaFrame) els.canvaFrame.classList.add('hidden');
-        els.pptxSlide.classList.add('hidden');
+      if (state.activeFile.type === 'pdf') {
+            els.pptxSlide.classList.add('hidden');
         await renderPdfPageSmooth(token);
         if (token !== state.renderToken) return;
         warmAdjacentPdfPages();
         warmAdjacentPdfBitmaps();
         applyViewportScroll();
       } else {
-        if (els.canvaFrame) els.canvaFrame.classList.add('hidden');
-        els.pdfCanvas.classList.add('hidden');
+            els.pdfCanvas.classList.add('hidden');
         els.pptxSlide.classList.remove('hidden');
         if (state.pptxVisualReady) {
           showOnlyCurrentPptxSlide();
@@ -1535,8 +1452,8 @@
           els.pptxSlide.style.transform = '';
           els.pptxSlide.innerHTML = `
             <div class="viewer-message viewer-message-warning">
-              <strong>PowerPoint visual render is not available.</strong>
-              <span>For the exact colors, pictures, fonts, and layout, export this PPTX as PDF and upload the PDF here. Static browser PPTX rendering cannot guarantee every PowerPoint element.</span>
+              <strong>PowerPoint conversion is not available.</strong>
+              <span>The app tried to convert this PPTX into a PDF-style viewer. For perfect fidelity, export the file as PDF from PowerPoint and upload the PDF.</span>
             </div>
           `;
         }
@@ -1561,7 +1478,7 @@
       item.dataset.page = String(i);
       item.innerHTML = `
         <div class="thumb-canvas-wrap" data-thumb-wrap="${i}"><span>Loading...</span></div>
-        <div class="thumb-label"><span>${state.activeFile.type === 'pdf' ? 'Page' : state.activeFile.type === 'canva' ? 'Canva' : 'Slide'} ${i}</span><span>${state.perPageTiming[i] ? state.perPageTiming[i] + 's' : ''}</span></div>
+        <div class="thumb-label"><span>${state.activeFile.type === 'pdf' ? 'Page' : 'Slide'} ${i}</span><span>${state.perPageTiming[i] ? state.perPageTiming[i] + 's' : ''}</span></div>
       `;
       item.addEventListener('click', () => jumpToPage(i));
       els.thumbnailSidebar.appendChild(item);
@@ -1585,12 +1502,7 @@
     wrap.dataset.rendered = '1';
     wrap.innerHTML = '';
 
-    if (state.activeFile.type === 'canva') {
-      const img = document.createElement('img');
-      img.alt = 'Canva presentation link';
-      img.src = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
-      wrap.appendChild(img);
-    } else if (state.activeFile.type === 'pdf') {
+    if (state.activeFile.type === 'pdf') {
       const page = await state.activePdf.getPage(pageNumber);
       const viewportBase = page.getViewport({ scale: 1 });
       const scale = 170 / viewportBase.width;
@@ -1729,73 +1641,17 @@
     els.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
   }
 
-
-  function getMagicEffectByShortcut(key) {
-    if (!key || key.length !== 1) return null;
-    return MAGIC_EFFECT_MAP[key.toLowerCase()] || null;
-  }
-
-  function createMagicLayer() {
-    let layer = document.getElementById('magicEffectLayer');
-    const host = document.fullscreenElement || els.viewerView || document.body;
-    if (!layer) {
-      layer = document.createElement('div');
-      layer.id = 'magicEffectLayer';
-      layer.className = 'magic-effect-layer hidden';
+  function updateViewerNavigationUI() {
+    if (!state.activeFile) return;
+    if (els.prevBtn) els.prevBtn.disabled = state.currentPage <= 1;
+    if (els.nextBtn) els.nextBtn.disabled = state.currentPage >= state.totalPages;
+    if (els.jumpInput) {
+      els.jumpInput.disabled = false;
+      els.jumpInput.placeholder = '';
+      els.jumpInput.max = state.totalPages || 1;
+      els.jumpInput.value = String(state.currentPage || 1);
     }
-    if (layer.parentElement !== host) host.appendChild(layer);
-    return layer;
-  }
-
-  function makeParticles(count, className, symbols = []) {
-    const items = [];
-    for (let i = 0; i < count; i++) {
-      const x = Math.round(Math.random() * 100);
-      const delay = (Math.random() * 0.85).toFixed(2);
-      const drift = Math.round((Math.random() - 0.5) * 140);
-      const size = Math.round(10 + Math.random() * 18);
-      const symbol = symbols.length ? symbols[i % symbols.length] : '';
-      items.push(`<i class="${className}" style="--x:${x}%;--d:${delay}s;--drift:${drift}px;--s:${size}px">${symbol}</i>`);
-    }
-    return items.join('');
-  }
-
-  function magicEffectMarkup(effectId) {
-    const effect = MAGIC_EFFECT_MAP[effectId] || MAGIC_EFFECT_MAP.confetti;
-    switch (effect.id) {
-      case 'drumroll':
-        return `<div class="magic-stage-flash subtle"></div><div class="magic-center magic-plain magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-stick right"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span></div></div>`;
-      case 'confetti':
-        return `<canvas class="magic-fx-canvas magic-confetti-canvas"></canvas>`;
-      case 'micdrop':
-        return `<div class="magic-stage-flash"></div><div class="magic-center magic-plain magic-micdrop-hero"><span class="magic-mic">🎤</span><span class="magic-mic-shadow"></span></div>`;
-      case 'curtain':
-        return `<div class="magic-curtain-stage"><div class="magic-curtain valance"></div><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain-tie left"></div><div class="magic-curtain-tie right"></div><div class="magic-reveal-shine"></div></div>`;
-      case 'bubbles':
-        return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas>`;
-      case 'quiet':
-        return `<div class="magic-quiet-backdrop"></div><div class="magic-quiet-halo halo-one"></div><div class="magic-quiet-halo halo-two"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-quiet-aura"></div><div class="magic-emoji">🤫</div><span class="magic-shush-wave one"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span></div>`;
-      case 'applause':
-        return `<div class="magic-particles applause-full">${makeParticles(120, 'magic-symbol', ['👏','👏','👏','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div></div>`;
-      case 'spotlight':
-        return `<div class="magic-spotlight-dimmer"></div><div class="magic-moving-spotlight"></div>`;
-      case 'correct':
-        return `<div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct"><div class="magic-mark">✅</div></div><div class="magic-particles">${makeParticles(72, 'magic-symbol', ['✅','✨','★'])}</div>`;
-      case 'wrong':
-        return `<div class="magic-stage-flash red"></div><div class="magic-center magic-plain magic-big-mark wrong"><div class="magic-mark">❌</div></div><div class="magic-particles">${makeParticles(42, 'magic-symbol', ['❌','⚡'])}</div>`;
-      case 'timesup':
-        return `<div class="magic-stage-flash amber"></div><div class="magic-center magic-plain magic-clock-wrap"><div class="magic-clock">⏰</div></div><div class="magic-time-rings"></div>`;
-      case 'sparkle':
-        return `<div class="magic-glow-ring rainbow"></div><div class="magic-particles">${makeParticles(130, 'magic-symbol', ['✨','✦','✧','★'])}</div><div class="magic-center magic-plain magic-sparkle-hero"><div class="magic-emoji">✨</div></div>`;
-      case 'stars':
-        return `<div class="magic-particles">${makeParticles(140, 'magic-symbol', ['🌟','⭐','✦','★'])}</div><div class="magic-center magic-plain magic-stars-hero"><div class="magic-emoji">🌟</div></div>`;
-      case 'hype':
-        return `<div class="magic-glow-ring fire"></div><div class="magic-particles">${makeParticles(120, 'magic-symbol', ['🔥','⚡','✨','★'])}</div><div class="magic-center magic-plain magic-hype-hero"><div class="magic-emoji">🔥</div></div>`;
-      case 'freeze':
-        return `<div class="magic-freeze"></div><div class="magic-particles">${makeParticles(110, 'magic-symbol', ['❄️','✦','✧','🧊'])}</div><div class="magic-center magic-plain magic-freeze-hero"><div class="magic-emoji">🧊</div></div>`;
-      default:
-        return `<div class="magic-center magic-plain magic-generic-hero"><div class="magic-emoji">${effect.emoji}</div></div>`;
-    }
+    if (els.pageTotalLabel) els.pageTotalLabel.textContent = `/ ${state.totalPages || 1}`;
   }
 
   function triggerMagicEffect(effectId) {
@@ -2830,9 +2686,6 @@
       if (state.activeFile.type === 'pdf' && state.activePdf) {
         return await renderPdfPageToDataUrl(state.activePdf, state.currentPage, 680, 0.72);
       }
-      if (state.activeFile.type === 'canva') {
-        return state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
-      }
       if (state.activeFile.type === 'pptx') {
         if (state.pptxVisualReady && window.html2canvas && state.pptxRenderedSlides[state.currentPage - 1]) {
           const canvas = await window.html2canvas(state.pptxRenderedSlides[state.currentPage - 1], {
@@ -3099,7 +2952,6 @@
   function getActiveSlideSurface() {
     if (state.activeFile && state.activeFile.type === 'pdf') return state.activePdfCanvas || els.pdfCanvas;
     if (state.activeFile && state.activeFile.type === 'pptx') return state.pptxRenderedSlides[state.currentPage - 1] || els.pptxSlide;
-    if (state.activeFile && state.activeFile.type === 'canva') return els.canvaFrame;
     return null;
   }
 
@@ -3166,9 +3018,8 @@
           src = await renderPdfPageToDataUrl(state.activePdf, page, 120, 0.34);
         } else if (state.activeFile.type === 'pptx') {
           src = createPptxThumbDataUrl(`Slide ${page}`, page);
-        } else if (state.activeFile.type === 'canva') {
-          src = state.activeFile.thumbnail || createCanvaThumbDataUrl(state.activeFile.name);
         }
+
         if (!src) continue;
         lite[String(page)] = src;
         // Try subcollection for projects with broader rules, but never depend on it.
@@ -3529,8 +3380,8 @@
         window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
         window.__phRemoteInkStrokes = Array.isArray(data.inkStrokes) ? data.inkStrokes : [];
         $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
-        $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
-        $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : data.type === 'canva' ? 'Canva' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFileLabel').textContent = data.fileName || 'Active presentation';
         if (data.thumb) latestThumb = data.thumb;
         const preview = $('remotePreview');
