@@ -304,7 +304,6 @@
     // Do not block the dashboard while Firebase signs in. The viewer can open fast,
     // then the remote status updates as soon as Firebase is ready.
     const firebaseInitPromise = initFirebaseIfConfigured();
-    state.firebaseInitPromise = firebaseInitPromise;
 
     if (isRemoteMode) {
       await firebaseInitPromise;
@@ -4898,76 +4897,26 @@
 
   async function openQrModal() {
     if (!state.activeFile && !state.mediaMode) return;
-    if (!els.qrModal || !els.hostQr || !els.viewerQr) return;
+    if (!state.firebaseReady) {
+      els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
+    } else {
+      await setupRemoteSessionIfPossible();
+      els.qrHelp.textContent = state.mediaMode && !state.activeFile ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.` : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
+    }
 
-    state.sessionId = state.sessionId || makeSessionId();
-    const session = state.sessionId;
+    const session = state.sessionId || 'NO-FIREBASE';
     const baseUrl = window.location.href.split('?')[0].split('#')[0];
     const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
     const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
     const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
 
-    if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
-    if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
-    if (els.qrHelp) els.qrHelp.textContent = 'Preparing live remote session... Scan the Control QR after it appears.';
-
-    const renderQrBox = (box, url, label) => {
-      if (!box) return;
-      box.innerHTML = '';
-      const fallback = () => {
-        box.innerHTML = `
-          <div class="qr-fallback-link">
-            <strong>${label}</strong>
-            <span>QR library is still loading. Open this link on your phone:</span>
-            <a href="${url}" target="_blank" rel="noopener">Open remote link</a>
-          </div>
-        `;
-      };
-      try {
-        if (typeof window.QRCode === 'function') {
-          new QRCode(box, { text: url, width: 210, height: 210 });
-        } else {
-          fallback();
-        }
-      } catch (error) {
-        console.warn('QR render failed:', error);
-        fallback();
-      }
-    };
-
-    // Show the modal first. The old flow waited for Firebase before opening this
-    // modal, so any slow auth/write made the Remote QR button look broken.
+    els.hostRemoteLink.value = hostUrl;
+    els.viewerRemoteLink.value = viewerUrl;
+    els.hostQr.innerHTML = '';
+    els.viewerQr.innerHTML = '';
+    new QRCode(els.hostQr, { text: hostUrl, width: 210, height: 210 });
+    new QRCode(els.viewerQr, { text: viewerUrl, width: 210, height: 210 });
     showModal(els.qrModal);
-    renderQrBox(els.hostQr, hostUrl, 'Control remote');
-    renderQrBox(els.viewerQr, viewerUrl, 'Viewer preview');
-
-    // Start/reconnect the live Firebase session in the background. The QR/link is
-    // stable because the session id is already fixed above.
-    (async () => {
-      try {
-        if (!state.firebaseReady) {
-          if (state.firebaseInitPromise && typeof state.firebaseInitPromise.then === 'function') {
-            await state.firebaseInitPromise.catch(() => false);
-          }
-          if (!state.firebaseReady) {
-            await initFirebaseIfConfigured();
-          }
-        }
-        if (!state.firebaseReady) {
-          if (els.qrHelp) els.qrHelp.textContent = 'Remote setup is not connected. Check firebase-config.js, enable Firebase Anonymous Auth, then refresh.';
-          return;
-        }
-        await setupRemoteSessionIfPossible();
-        if (els.qrHelp) {
-          els.qrHelp.textContent = state.mediaMode && !state.activeFile
-            ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
-            : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
-        }
-      } catch (error) {
-        console.warn('Remote session prepare failed:', error);
-        if (els.qrHelp) els.qrHelp.textContent = 'Remote QR is ready, but the live session failed to start. Check Firebase Anonymous Auth and Firestore rules, then refresh.';
-      }
-    })();
   }
 
   function setRemoteMediaOnlyMode(enabled) {
