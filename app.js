@@ -100,6 +100,9 @@
     unsubscribeSession: null,
     lastCommandId: null,
     remoteCommandPollTimer: null,
+    remoteSessionHeartbeatTimer: null,
+    remoteSessionHeartbeatBusy: false,
+    remoteSessionLastWriteAt: 0,
     processedRemoteCommands: new Set(),
     publishLock: false,
     inkStrokes: [],
@@ -1848,6 +1851,7 @@
     const mediaWelcome = document.getElementById('mediaViewerWelcome');
     if (mediaWelcome) mediaWelcome.remove();
     if (state.unsubscribeSession) state.unsubscribeSession();
+    stopRemoteSessionHeartbeat();
     state.unsubscribeSession = null;
     state.sessionRef = null;
     state.sessionId = null;
@@ -3500,6 +3504,53 @@
     };
   }
 
+
+  function stopRemoteSessionHeartbeat() {
+    if (state.remoteSessionHeartbeatTimer) clearInterval(state.remoteSessionHeartbeatTimer);
+    state.remoteSessionHeartbeatTimer = null;
+    state.remoteSessionHeartbeatBusy = false;
+  }
+
+  async function writeRemoteSessionHeartbeat(reason = 'heartbeat') {
+    if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return false;
+    if (state.remoteSessionHeartbeatBusy) return false;
+    state.remoteSessionHeartbeatBusy = true;
+    const now = Date.now();
+    try {
+      const payload = {
+        ...buildRemoteSessionPayload(),
+        sessionAlive: true,
+        hostReady: true,
+        hostHeartbeatAt: now,
+        hostUpdatedAt: now,
+        updatedAt: now,
+        remoteProtocol: 'fast-heartbeat-v2',
+        lastHeartbeatReason: reason
+      };
+      await state.sessionRef.set(payload, { merge: true });
+      state.remoteSessionLastWriteAt = now;
+      return true;
+    } catch (error) {
+      console.warn('Remote heartbeat/session write failed:', error);
+      return false;
+    } finally {
+      state.remoteSessionHeartbeatBusy = false;
+    }
+  }
+
+  function startRemoteSessionHeartbeat() {
+    if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return;
+    if (state.remoteSessionHeartbeatTimer) clearInterval(state.remoteSessionHeartbeatTimer);
+    // Immediate + repeated host presence. This fixes the stuck phone state where
+    // the QR opens but the remote stays on "Waiting for live desktop session"
+    // because the first Firestore write was slow, dropped, or blocked by a cache race.
+    writeRemoteSessionHeartbeat('start');
+    state.remoteSessionHeartbeatTimer = setInterval(() => {
+      if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return stopRemoteSessionHeartbeat();
+      writeRemoteSessionHeartbeat('interval');
+    }, 1350);
+  }
+
   async function ensureRemoteSessionReady(options = {}) {
     const fast = !!options.fast;
     const ready = await ensureFirebaseReadyForRemote(fast ? 2400 : 4200);
@@ -3512,13 +3563,14 @@
 
     try {
       if (fast) {
-        // Important: show the QR immediately. Firestore writes can be slow on
-        // school WiFi/mobile data, but the phone remote already waits for the
-        // live session document. Waiting here caused the QR to stay on
-        // "Preparing..." for too long.
-        state.sessionRef.set(basePayload, { merge: true }).catch((error) => {
-          console.warn('Remote session warm-up failed:', error);
-        });
+        // Show the QR fast, but keep writing the host heartbeat until the phone
+        // sees the live session. A single fire-and-forget write was too fragile
+        // after adding Drive/login work, especially on mobile data or slow WiFi.
+        startRemoteSessionHeartbeat();
+        Promise.race([
+          writeRemoteSessionHeartbeat('qr-open'),
+          sleep(850)
+        ]).catch(() => {});
         setupRemoteSessionIfPossible().catch((error) => {
           console.warn('Remote background setup failed:', error);
         });
@@ -3539,6 +3591,7 @@
     if (state.unsubscribeSession) state.unsubscribeSession();
     state.sessionId = state.sessionId || makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+    startRemoteSessionHeartbeat();
     state.lastCommandId = null;
     if (state.remoteCommandPollTimer) clearInterval(state.remoteCommandPollTimer);
     state.processedRemoteCommands = new Set();
@@ -3551,6 +3604,7 @@
       }
     } catch (error) {}
     await publishSessionState(true);
+    startRemoteSessionHeartbeat();
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
       const data = snap.data();
@@ -5129,6 +5183,9 @@
       currentPage: state.activeFile ? state.currentPage : 0,
       totalPages: state.activeFile ? state.totalPages : 0,
       mediaMode: !state.activeFile && !!state.mediaMode,
+      sessionAlive: true,
+      hostReady: true,
+      hostHeartbeatAt: Date.now(),
       zoom: state.zoom,
       viewportCenterX: state.viewportCenterX,
       viewportCenterY: state.viewportCenterY,
@@ -6188,7 +6245,7 @@
       const ref = state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
       ref.onSnapshot((snap) => {
         if (!snap.exists) {
-          $('remoteFileLabel').textContent = 'Waiting for the desktop session. Keep this page open, then reopen Remote QR on the desktop if it stays here.';
+          $('remoteFileLabel').textContent = 'Waiting for the desktop session. Keep this page open; the desktop now retries the live session automatically.';
           $('remoteStatusPill').textContent = 'Waiting';
           const preview = $('remotePreview');
           if (preview) preview.innerHTML = '<span>Waiting for live desktop session...</span>';
