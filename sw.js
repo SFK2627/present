@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-remote-reconnect-v11-0';
+const CACHE_NAME = 'presentation-hub-remote-emergency-v11-1';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,7 @@ const CORE_ASSETS = [
   './icon.svg'
 ];
 
-// remote-reconnect-heartbeat-fix
+// remote-emergency-qr-session-fix
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
   self.skipWaiting();

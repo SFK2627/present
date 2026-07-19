@@ -1098,7 +1098,10 @@
       state.firebaseDb = firebase.firestore();
       let user = firebase.auth().currentUser;
       if (!user) {
-        const cred = await firebase.auth().signInAnonymously();
+        const cred = await Promise.race([
+          firebase.auth().signInAnonymously(),
+          sleep(5200).then(() => { throw new Error('Firebase anonymous sign-in timed out.'); })
+        ]);
         user = cred.user;
       }
       state.firebaseUser = user;
@@ -3461,32 +3464,42 @@
     } catch (error) {}
   }
 
-  async function ensureFirebaseReadyForRemote(timeout = 3600) {
+  async function ensureFirebaseReadyForRemote(timeout = 1800) {
     if (state.firebaseReady && state.firebaseDb) return true;
     if (!hasFirebaseConfig()) {
       updateFirebaseStatus('Remote setup needed');
       return false;
     }
-    try {
-      state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
-      const ok = await Promise.race([
-        state.firebaseInitPromise.then(Boolean).catch(() => false),
-        sleep(timeout).then(() => false)
-      ]);
-      if (ok && state.firebaseReady && state.firebaseDb) return true;
-    } catch (error) {}
-    try {
-      // A short second chance is enough for the QR path. Do not block the QR
-      // modal for 8-12 seconds; that made it look broken after adding Drive.
-      state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
-      const retryOk = await Promise.race([
-        state.firebaseInitPromise.then(Boolean).catch(() => false),
-        sleep(1400).then(() => false)
-      ]);
-      return !!(retryOk && state.firebaseReady && state.firebaseDb);
-    } catch (error) {
+    if (!window.firebase) {
+      updateFirebaseStatus('Remote loading');
       return false;
     }
+
+    const runInit = async () => {
+      try {
+        state.firebaseInitPromise = initFirebaseIfConfigured();
+        return await Promise.race([
+          state.firebaseInitPromise.then(Boolean).catch(() => false),
+          sleep(timeout).then(() => false)
+        ]);
+      } catch (error) {
+        return false;
+      }
+    };
+
+    // If an older initialization promise got stuck, do not let it block QR forever.
+    let ok = false;
+    if (state.firebaseInitPromise) {
+      ok = await Promise.race([
+        state.firebaseInitPromise.then(Boolean).catch(() => false),
+        sleep(Math.max(650, Math.min(timeout, 1400))).then(() => false)
+      ]).catch(() => false);
+      if (ok && state.firebaseReady && state.firebaseDb) return true;
+      state.firebaseInitPromise = null;
+    }
+
+    ok = await runInit();
+    return !!(ok && state.firebaseReady && state.firebaseDb);
   }
 
   function buildRemoteSessionPayload() {
@@ -3552,59 +3565,76 @@
   }
 
   async function ensureRemoteSessionReady(options = {}) {
-    const fast = !!options.fast;
-    const ready = await ensureFirebaseReadyForRemote(fast ? 2400 : 4200);
-    if (!ready) return false;
     if (!state.activeFile && !state.mediaMode) return false;
     if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
-    state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
-
-    const basePayload = buildRemoteSessionPayload();
-
-    try {
-      if (fast) {
-        // Show the QR fast, but keep writing the host heartbeat until the phone
-        // sees the live session. A single fire-and-forget write was too fragile
-        // after adding Drive/login work, especially on mobile data or slow WiFi.
-        startRemoteSessionHeartbeat();
-        Promise.race([
-          writeRemoteSessionHeartbeat('qr-open'),
-          sleep(850)
-        ]).catch(() => {});
-        setupRemoteSessionIfPossible().catch((error) => {
-          console.warn('Remote background setup failed:', error);
-        });
-        return true;
-      }
-      await state.sessionRef.set(basePayload, { merge: true });
-      await publishSessionState(true);
-      return true;
-    } catch (error) {
-      console.warn('Could not create remote session:', error);
-      return false;
+    if (state.firebaseReady && state.firebaseDb) {
+      state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+      return await setupRemoteSessionIfPossible();
     }
+    return await ensureFirebaseReadyForRemote(options.fast ? 900 : 1800).then((ready) => {
+      if (!ready) return false;
+      state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+      return setupRemoteSessionIfPossible();
+    }).catch(() => false);
+  }
+
+  function startRemoteSessionStartupLoop(reason = 'qr-open') {
+    if (!state.activeFile && !state.mediaMode) return;
+    if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
+    if (state.remoteSessionStartupRunning) return;
+    state.remoteSessionStartupRunning = true;
+
+    const startedAt = Date.now();
+    const attempt = async () => {
+      let ok = false;
+      try { ok = await setupRemoteSessionIfPossible(); } catch (error) { ok = false; }
+      if (ok && state.sessionRef) {
+        state.remoteSessionStartupRunning = false;
+        if (state.remoteSessionStartupTimer) clearTimeout(state.remoteSessionStartupTimer);
+        state.remoteSessionStartupTimer = null;
+        if (els.qrHelp && els.qrModal && !els.qrModal.classList.contains('hidden')) {
+          els.qrHelp.textContent = state.mediaMode && !state.activeFile
+            ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
+            : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
+        }
+        return;
+      }
+
+      const elapsed = Date.now() - startedAt;
+      if (els.qrHelp && els.qrModal && !els.qrModal.classList.contains('hidden')) {
+        els.qrHelp.textContent = elapsed > 9000
+          ? 'QR is ready. Still reconnecting the desktop live session; keep this viewer open and make sure internet/Firebase is allowed.'
+          : 'QR is ready. Starting the desktop live session...';
+      }
+      if (elapsed < 45000 && (state.activeFile || state.mediaMode)) {
+        state.remoteSessionStartupTimer = setTimeout(attempt, elapsed < 5000 ? 850 : 1800);
+      } else {
+        state.remoteSessionStartupRunning = false;
+      }
+    };
+    attempt();
   }
 
   async function setupRemoteSessionIfPossible() {
-    if ((!state.firebaseReady || !state.firebaseDb) && !(await ensureFirebaseReadyForRemote(6500))) return;
-    if (!state.activeFile && !state.mediaMode) return;
+    if (!state.activeFile && !state.mediaMode) return false;
+    const ready = (state.firebaseReady && state.firebaseDb) || await ensureFirebaseReadyForRemote(1800);
+    if (!ready || !state.firebaseDb) return false;
+
     if (state.unsubscribeSession) state.unsubscribeSession();
-    state.sessionId = state.sessionId || makeSessionId();
+    state.sessionId = state.sessionId && state.sessionId !== 'NO-FIREBASE' ? state.sessionId : makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
-    startRemoteSessionHeartbeat();
     state.lastCommandId = null;
     if (state.remoteCommandPollTimer) clearInterval(state.remoteCommandPollTimer);
     state.processedRemoteCommands = new Set();
-    // v10.6 cleanup: old builds stored every slide thumbnail inside the live
-    // session document. That made every phone command feel delayed. Remove it
-    // once, then keep thumbnails in a lightweight subcollection instead.
+
     try {
-      if (window.firebase && window.firebase.firestore && window.firebase.firestore.FieldValue) {
-        await state.sessionRef.set({ slideThumbs: window.firebase.firestore.FieldValue.delete() }, { merge: true });
-      }
-    } catch (error) {}
-    await publishSessionState(true);
-    startRemoteSessionHeartbeat();
+      await state.sessionRef.set(buildRemoteSessionPayload(), { merge: true });
+      await publishSessionState(true);
+    } catch (error) {
+      console.warn('Could not create/publish remote session:', error);
+      return false;
+    }
+
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
       const data = snap.data();
@@ -3615,6 +3645,8 @@
       console.warn('Remote live listener failed; command polling fallback remains active.', error);
     });
     startRemoteCommandFallbackPoll();
+    startRemoteSessionHeartbeat();
+    return true;
   }
 
   function processRemoteCommand(command, source = 'unknown') {
@@ -5701,43 +5733,29 @@
       if (!state.activeFile && !state.mediaMode) return;
       if (!els.qrModal || !els.hostQr || !els.viewerQr) return;
 
-      showModal(els.qrModal);
-      if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-loading">Preparing control QR...</div>';
-      if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-loading">Preparing viewer QR...</div>';
-      if (els.hostRemoteLink) els.hostRemoteLink.value = 'Preparing remote link...';
-      if (els.viewerRemoteLink) els.viewerRemoteLink.value = 'Preparing viewer link...';
-      if (els.qrHelp) els.qrHelp.textContent = 'Preparing phone remote QR...';
-
-      const sessionReady = await ensureRemoteSessionReady({ fast: true });
-      if (!sessionReady || !state.sessionId || !state.sessionRef) {
-        if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-error">Remote session was not started. Check internet/Firebase config, then tap Remote QR again.</div>';
-        if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-error">Remote not ready yet.</div>';
-        if (els.hostRemoteLink) els.hostRemoteLink.value = '';
-        if (els.viewerRemoteLink) els.viewerRemoteLink.value = '';
-        if (els.qrHelp) els.qrHelp.textContent = 'Remote QR could not start quickly. Keep the file open, wait for Remote ready, then tap Remote QR again.';
-        return;
-      }
-
-      if (els.qrHelp) {
-        els.qrHelp.textContent = state.mediaMode && !state.activeFile
-          ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
-          : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
-      }
-
+      if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
       const session = state.sessionId;
       const baseUrl = window.location.href.split('?')[0].split('#')[0];
       const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
       const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
       const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
 
+      showModal(els.qrModal);
       if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
       if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
-      await Promise.all([
-        renderRemoteQr(els.hostQr, hostUrl),
-        renderRemoteQr(els.viewerQr, viewerUrl)
-      ]);
+      if (els.qrHelp) els.qrHelp.textContent = 'QR is ready. Starting the desktop live session...';
+
+      // Render the QR immediately. Never block the QR screen while Firebase/Drive/auth loads.
+      renderRemoteQr(els.hostQr, hostUrl).catch(() => renderQrFallback(els.hostQr, hostUrl));
+      renderRemoteQr(els.viewerQr, viewerUrl).catch(() => renderQrFallback(els.viewerQr, viewerUrl));
+
+      if (!hasFirebaseConfig()) {
+        if (els.qrHelp) els.qrHelp.textContent = 'QR is visible, but phone control across devices needs firebase-config.js.';
+      } else {
+        startRemoteSessionStartupLoop('qr-open');
+      }
     } finally {
-      setTimeout(() => { state.qrModalOpening = false; }, 350);
+      setTimeout(() => { state.qrModalOpening = false; }, 250);
     }
   }
 
