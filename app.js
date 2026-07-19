@@ -20,6 +20,7 @@
   const DB_VERSION = 1;
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
+  const REMOTE_REST_TRANSPORT = false; // v6: use Firestore SDK realtime sync; REST caused 429 quota spikes
   const DEFAULT_REMOTE_BASE_URL = 'https://sfk2627.github.io/present/';
   const MEDIA_CAST_ICE_SERVERS = {
     iceServers: [
@@ -110,6 +111,7 @@
     classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, groupRollMode: 'balanced', rolledGroups: [], pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null, revealMode: '', busy: false },
     classroomSyncTimer: null,
     firebaseUser: null,
+    remoteRestTransportReady: false,
     mediaCastReceiver: null,
     mediaCastReceiverId: '',
     mediaCastBlobUrl: '',
@@ -564,7 +566,23 @@
     }
     try {
       if (!firebase.apps.length) firebase.initializeApp(window.PRESENTATION_HUB_FIREBASE_CONFIG);
-      state.firebaseDb = firebase.firestore();
+      const db = firebase.firestore();
+      try {
+        // Some school/mobile networks block Firestore WebChannel, which makes
+        // writes stay pending until our QR modal times out. Auto long-polling
+        // is the official web fallback for those environments and keeps the
+        // same Firestore rules/path. Settings must be applied before any first
+        // read/write on this page, so do it inside the one Firestore init path.
+        db.settings({
+          experimentalAutoDetectLongPolling: true,
+          ignoreUndefinedProperties: true,
+        });
+      } catch (settingsError) {
+        // If Firestore was already used on this page, settings() may throw.
+        // Keep going with the existing instance instead of breaking Remote QR.
+        console.warn('Firestore long-polling settings not applied:', settingsError);
+      }
+      state.firebaseDb = db;
       state.firebaseReady = !!state.firebaseDb;
       updateFirebaseStatus(state.firebaseAuthReady ? undefined : 'Remote ready');
       return true;
@@ -2963,6 +2981,244 @@
     });
   }
 
+
+  function getFirebaseRemoteConfig() {
+    const cfg = window.PRESENTATION_HUB_FIREBASE_CONFIG || {};
+    if (!cfg.apiKey || !cfg.projectId) throw new Error('Firebase config is missing apiKey/projectId.');
+    return cfg;
+  }
+
+  function firestoreRestDocumentUrl(sessionId, maskFields = null) {
+    const cfg = getFirebaseRemoteConfig();
+    const safeId = encodeURIComponent(String(sessionId || ''));
+    const url = new URL(`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(cfg.projectId)}/databases/(default)/documents/${SESSION_COLLECTION}/${safeId}`);
+    url.searchParams.set('key', cfg.apiKey);
+    if (Array.isArray(maskFields) && maskFields.length) {
+      Array.from(new Set(maskFields.filter(Boolean))).forEach((field) => url.searchParams.append('updateMask.fieldPaths', field));
+    }
+    return url.toString();
+  }
+
+  function firestoreRestEncodeValue(value) {
+    if (value === undefined) return null;
+    if (value === null) return { nullValue: null };
+    if (typeof value === 'boolean') return { booleanValue: value };
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return { doubleValue: 0 };
+      return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+    }
+    if (typeof value === 'string') return { stringValue: value };
+    if (Array.isArray(value)) {
+      return { arrayValue: { values: value.map(firestoreRestEncodeValue).filter(Boolean) } };
+    }
+    if (typeof value === 'object') {
+      const fields = {};
+      Object.entries(value).forEach(([key, val]) => {
+        const encoded = firestoreRestEncodeValue(val);
+        if (encoded) fields[key] = encoded;
+      });
+      return { mapValue: { fields } };
+    }
+    return { stringValue: String(value) };
+  }
+
+  function firestoreRestDecodeValue(value) {
+    if (!value || typeof value !== 'object') return undefined;
+    if ('nullValue' in value) return null;
+    if ('booleanValue' in value) return !!value.booleanValue;
+    if ('integerValue' in value) return Number(value.integerValue) || 0;
+    if ('doubleValue' in value) return Number(value.doubleValue) || 0;
+    if ('stringValue' in value) return value.stringValue || '';
+    if ('timestampValue' in value) return value.timestampValue || '';
+    if ('arrayValue' in value) return ((value.arrayValue && value.arrayValue.values) || []).map(firestoreRestDecodeValue);
+    if ('mapValue' in value) {
+      const out = {};
+      const fields = (value.mapValue && value.mapValue.fields) || {};
+      Object.entries(fields).forEach(([key, val]) => { out[key] = firestoreRestDecodeValue(val); });
+      return out;
+    }
+    return undefined;
+  }
+
+  function firestoreRestEncodeFields(data = {}) {
+    const fields = {};
+    Object.entries(data || {}).forEach(([key, value]) => {
+      const encoded = firestoreRestEncodeValue(value);
+      if (encoded) fields[key] = encoded;
+    });
+    return { fields };
+  }
+
+  function firestoreRestDecodeDocument(doc) {
+    if (!doc || !doc.fields) return null;
+    const out = {};
+    Object.entries(doc.fields).forEach(([key, value]) => { out[key] = firestoreRestDecodeValue(value); });
+    return out;
+  }
+
+  function sanitizeFirestoreData(value, seen = new WeakSet()) {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    const type = typeof value;
+    if (type === 'string' || type === 'boolean') return value;
+    if (type === 'number') return Number.isFinite(value) ? value : 0;
+    if (type === 'bigint') return Number.isSafeInteger(Number(value)) ? Number(value) : String(value);
+    if (type === 'function' || type === 'symbol') return undefined;
+    if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => sanitizeFirestoreData(item, seen))
+        .filter((item) => item !== undefined);
+    }
+    if (type === 'object') {
+      if (seen.has(value)) return undefined;
+      seen.add(value);
+      try {
+        if (typeof Element !== 'undefined' && value instanceof Element) return undefined;
+        if (typeof Blob !== 'undefined' && value instanceof Blob) {
+          return {
+            name: value.name || '',
+            type: value.type || '',
+            size: Number(value.size) || 0,
+            lastModified: Number(value.lastModified) || 0,
+          };
+        }
+      } catch (error) {}
+      const out = {};
+      Object.entries(value).forEach(([key, val]) => {
+        if (!key || key === '__proto__' || key === 'prototype' || key === 'constructor') return;
+        const clean = sanitizeFirestoreData(val, seen);
+        if (clean !== undefined) out[key] = clean;
+      });
+      seen.delete(value);
+      return out;
+    }
+    return String(value);
+  }
+
+  function undotPatch(data = {}) {
+    const out = {};
+    Object.entries(data || {}).forEach(([key, value]) => {
+      if (!key.includes('.')) { out[key] = value; return; }
+      const parts = key.split('.').filter(Boolean);
+      let cursor = out;
+      parts.forEach((part, index) => {
+        if (index === parts.length - 1) cursor[part] = value;
+        else cursor = cursor[part] = cursor[part] && typeof cursor[part] === 'object' ? cursor[part] : {};
+      });
+    });
+    return out;
+  }
+
+  function topLevelMaskFields(data = {}) {
+    return Object.keys(data || {}).map((key) => key.split('.')[0]).filter(Boolean);
+  }
+
+  async function firestoreRestPatch(sessionId, data = {}, label = 'Firestore REST write timed out') {
+    const clean = sanitizeFirestoreData(undotPatch(data));
+    const mask = topLevelMaskFields(clean);
+    const url = firestoreRestDocumentUrl(sessionId, mask);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8500);
+    try {
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(firestoreRestEncodeFields(clean)),
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        let message = text;
+        try { message = JSON.parse(text).error.message || message; } catch (error) {}
+        throw new Error(`Firestore REST ${res.status}: ${message}`);
+      }
+      return text ? firestoreRestDecodeDocument(JSON.parse(text)) : null;
+    } catch (error) {
+      if (error && error.name === 'AbortError') throw new Error(label);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function firestoreRestGet(sessionId, label = 'Firestore REST read timed out') {
+    const url = firestoreRestDocumentUrl(sessionId);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8500);
+    try {
+      const res = await fetch(url, { method: 'GET', signal: controller.signal });
+      const text = await res.text();
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        let message = text;
+        try { message = JSON.parse(text).error.message || message; } catch (error) {}
+        throw new Error(`Firestore REST ${res.status}: ${message}`);
+      }
+      return text ? firestoreRestDecodeDocument(JSON.parse(text)) : null;
+    } catch (error) {
+      if (error && error.name === 'AbortError') throw new Error(label);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function makeRestSnapshot(data) {
+    return { exists: !!data, data: () => data || {} };
+  }
+
+  function makeRestSessionRef(sessionId) {
+    return {
+      id: sessionId,
+      __rest: true,
+      set(data = {}, options = {}) { return firestoreRestPatch(sessionId, data, 'Remote REST session write timed out'); },
+      update(data = {}) { return firestoreRestPatch(sessionId, data, 'Remote REST session update timed out'); },
+      async get() { return makeRestSnapshot(await firestoreRestGet(sessionId)); },
+      onSnapshot(onNext, onError) {
+        let stopped = false;
+        let lastJson = '';
+        const poll = async () => {
+          if (stopped) return;
+          try {
+            const data = await firestoreRestGet(sessionId, 'Remote REST session read timed out');
+            const json = JSON.stringify(data || null);
+            if (json !== lastJson) {
+              lastJson = json;
+              onNext(makeRestSnapshot(data));
+            }
+          } catch (error) {
+            if (onError) onError(error);
+          }
+        };
+        poll();
+        const timer = setInterval(poll, 6000);
+        return () => { stopped = true; clearInterval(timer); };
+      },
+      collection(name) {
+        // Keep slide thumbnail subcollection optional in REST fallback. The live
+        // controls still work; thumbnails can still use the main thumb field.
+        return { doc() { return { set() { return Promise.resolve(); }, get: async () => makeRestSnapshot(null) }; } };
+      }
+    };
+  }
+
+  function makeRemoteSessionRef(sessionId) {
+    if (REMOTE_REST_TRANSPORT) return makeRestSessionRef(sessionId);
+    if (!state.firebaseDb) throw new Error('Firebase Firestore is not ready.');
+    return state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
+  }
+
+  async function ensureRemoteTransportReady() {
+    if (REMOTE_REST_TRANSPORT) {
+      getFirebaseRemoteConfig();
+      state.remoteRestTransportReady = true;
+      updateFirebaseStatus('Remote ready');
+      return true;
+    }
+    return ensureRemoteAccessReady();
+  }
+
   async function ensureRemoteFirebaseReady() {
     if (state.firebaseReady && state.firebaseDb) return true;
     if (!hasFirebaseConfig()) throw new Error('Firebase config is missing. Check firebase-config.js.');
@@ -3008,7 +3264,7 @@
     try {
       const snap = await promiseWithTimeout(
         ref.get({ source: 'server' }),
-        8000,
+        12000,
         'Firestore session verification timed out'
       );
       if (!snap.exists) throw new Error('Firestore session was not created on the server');
@@ -3019,7 +3275,7 @@
       // never stays on Connecting forever.
       const snap = await promiseWithTimeout(
         ref.get(),
-        8000,
+        12000,
         'Firestore session readback timed out'
       );
       if (!snap.exists) throw serverError;
@@ -3060,7 +3316,7 @@
     const isMedia = !state.activeFile && !!state.mediaMode;
     return {
       status: 'live',
-      remoteVersion: 'fresh-remote-v3-firestore-only',
+      remoteVersion: 'fresh-remote-v7-sdk-longpoll',
       fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
       type: state.activeFile ? state.activeFile.type : 'media',
       currentPage: state.activeFile ? (state.currentPage || 1) : 0,
@@ -3076,7 +3332,7 @@
 
   async function createFreshRemoteSession(preferredSessionId) {
     if (!state.activeFile && !state.mediaMode) throw new Error('Open a PDF/PPT or Media Viewing first.');
-    await ensureRemoteAccessReady();
+    await ensureRemoteTransportReady();
     if (state.unsubscribeSession) {
       try { state.unsubscribeSession(); } catch (error) {}
       state.unsubscribeSession = null;
@@ -3086,7 +3342,7 @@
       state.remoteCommandPollTimer = null;
     }
     state.sessionId = preferredSessionId || state.sessionId || makeSessionId();
-    state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+    state.sessionRef = makeRemoteSessionRef(state.sessionId);
     state.lastCommandId = null;
     state.processedRemoteCommands = new Set();
 
@@ -3094,7 +3350,7 @@
     // something to connect to before thumbnails/full state are published.
     await promiseWithTimeout(
       state.sessionRef.set(baseRemoteSessionPayload(), { merge: true }),
-      9000,
+      18000,
       'Firestore session create timed out'
     );
     await verifyRemoteSessionDocument(state.sessionRef);
@@ -3128,14 +3384,20 @@
       .catch((error) => {
         console.error('Fresh remote session failed:', error);
         const message = error && error.message ? error.message : String(error || 'Unknown error');
-        const publicRuleHint = /permission|insufficient|denied/i.test(message)
-          ? ' Firestore blocked the remote session. Either enable Firebase Anonymous Auth with request.auth rules, or allow public read/write for presentationHubSessions.'
-          : (/Anonymous Firebase sign-in/i.test(message) ? ' Enable Firebase Authentication > Sign-in method > Anonymous, or use public temporary session rules.' : '');
+        const publicRuleHint = /quota|429/i.test(message)
+          ? ' Firestore quota is temporarily throttled. Wait a few minutes, hard refresh, then try again.'
+          : (/permission|insufficient|denied|403/i.test(message)
+            ? ' Firestore rules still block presentationHubSessions. Publish public read/write for presentationHubSessions, then hard refresh.'
+            : (/timed out|Failed to fetch|NetworkError|unavailable|offline/i.test(message)
+              ? ' Firestore connection is slow or blocked. This build uses auto long-polling for stricter networks; hard refresh once and try again. If it remains, check ad blocker, Firestore database status, or internet.'
+              : ''));
         if (els.qrHelp) {
           els.qrHelp.textContent = `Remote session error: ${message}.${publicRuleHint}`;
         }
         const badge = $('qrSessionBadge');
-        if (badge) badge.textContent = 'Needs rules';
+        if (badge) {
+          badge.textContent = /quota|429/i.test(message) ? 'Quota cooldown' : (/permission|insufficient|denied|403/i.test(message) ? 'Needs rules' : 'Retry');
+        }
         throw error;
       })
       .finally(() => { state.remoteSessionStarting = null; state.remoteSessionStartingId = ''; });
@@ -3145,10 +3407,10 @@
   async function setupRemoteSessionIfPossible() {
     if (!state.activeFile && !state.mediaMode) return;
     try {
-      await ensureRemoteAccessReady();
+      await ensureRemoteTransportReady();
       if (!state.sessionRef || !state.sessionId) {
         state.sessionId = makeSessionId();
-        state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+        state.sessionRef = makeRemoteSessionRef(state.sessionId);
         state.processedRemoteCommands = new Set();
       }
       await promiseWithTimeout(
@@ -3201,7 +3463,7 @@
         processRemoteCommand(data && data.lastMagicCommand, 'poll-magic');
         processMediaCastSignal(data && data.mediaCast);
       } catch (error) {}
-    }, 700);
+    }, state.sessionRef && state.sessionRef.__rest ? 6000 : 8000);
   }
 
 
@@ -4686,7 +4948,7 @@
   async function publishSessionState(force = false) {
     if (!state.sessionRef || (!state.activeFile && !state.mediaMode) || (state.publishLock && !force)) return;
     state.publishLock = true;
-    setTimeout(() => { state.publishLock = false; }, force ? 0 : 120);
+    setTimeout(() => { state.publishLock = false; }, force ? 80 : 450);
 
     // Keep the hot remote-control path light: write slide/control state first,
     // then upload the heavier thumbnail preview in a short deferred task.
@@ -5701,7 +5963,7 @@
     const remoteClassSection = $('remoteClassSection');
     const remoteNameRepeat = $('remoteNameRepeat');
     const remoteGroupMode = $('remoteGroupMode');
-    const remoteRef = () => state.firebaseDb && sessionId ? state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId) : null;
+    const remoteRef = () => sessionId ? makeRemoteSessionRef(sessionId) : null;
     if (remoteClassSection) remoteClassSection.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetSection', remoteClassSection.value); });
     if (remoteNameRepeat) remoteNameRepeat.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetRepeatMode', remoteNameRepeat.value); });
     if (remoteGroupMode) remoteGroupMode.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetGroupMode', remoteGroupMode.value); });
@@ -5716,13 +5978,13 @@
       return;
     }
 
-    Promise.resolve(ensureRemoteAccessReady()).then(() => {
-      if (!state.firebaseReady || !state.firebaseDb || !sessionId) {
-        $('remoteFileLabel').textContent = 'Could not connect to Firebase or missing session.';
+    Promise.resolve(ensureRemoteTransportReady()).then(() => {
+      if (!sessionId) {
+        $('remoteFileLabel').textContent = 'Missing session id. Reopen Remote QR on the desktop.';
         $('remoteStatusPill').textContent = 'Offline';
         return;
       }
-      const ref = state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
+      const ref = makeRemoteSessionRef(sessionId);
       ref.onSnapshot((snap) => {
         if (!snap.exists) {
           $('remoteFileLabel').textContent = 'Waiting for the desktop live session. Keep this page open.';

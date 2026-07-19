@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v4-remote-auth-hybrid-debug';
+const CACHE_NAME = 'presentation-hub-v7-longpoll';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,7 @@ const CORE_ASSETS = [
   './icon.svg'
 ];
 
-// fresh-remote-v4-auth-hybrid-debug
+// fresh-remote-v6-rest-direct-sanitize-fix
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
   self.skipWaiting();
