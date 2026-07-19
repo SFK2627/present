@@ -116,6 +116,8 @@
     mediaPlaybackPublishTimer: null,
     youtubeStatusTimer: null,
     youtubeMessageListenerReady: false,
+    mediaControlLockUntil: 0,
+    mediaExpectedPlayback: {},
   };
 
 
@@ -3278,6 +3280,24 @@
     state.mediaPlaybackPublishTimer = setTimeout(publish, 110);
   }
 
+  function setMediaControlLock(expectedPatch = {}, ms = 1700) {
+    const until = Date.now() + Math.max(250, Number(ms) || 1700);
+    state.mediaControlLockUntil = Math.max(Number(state.mediaControlLockUntil) || 0, until);
+    state.mediaExpectedPlayback = { ...(state.mediaExpectedPlayback || {}), ...(expectedPatch || {}), updatedAt: Date.now() };
+  }
+
+  function mediaControlLockActive() {
+    return Date.now() < Number(state.mediaControlLockUntil || 0);
+  }
+
+  function clearMediaControlLockSoon(ms = 220) {
+    window.setTimeout(() => {
+      if (Date.now() >= Number(state.mediaControlLockUntil || 0) - 50) {
+        state.mediaExpectedPlayback = {};
+      }
+    }, Math.max(80, Number(ms) || 220));
+  }
+
   function readDirectPlayerPlayback(player, extra = {}) {
     if (!player) return extra;
     let duration = null;
@@ -3331,6 +3351,8 @@
     if (!data || (data.event !== 'infoDelivery' && data.event !== 'onStateChange')) return;
     const frame = document.getElementById('mediaCastLinkFrame');
     if (!frame || frame.dataset.provider !== 'youtube') return;
+    if (frame.contentWindow && event.source && event.source !== frame.contentWindow) return;
+
     const info = data.info || {};
     const patch = { provider: 'youtube', kind: 'youtube', canSeek: true };
     if (typeof data.info === 'number') {
@@ -3347,6 +3369,20 @@
       patch.playing = Number(info.playerState) === 1;
       patch.paused = Number(info.playerState) === 2 || Number(info.playerState) === 0;
     }
+
+    // Classboard-style stability: when a remote command just arrived, keep that
+    // command as the temporary source of truth. YouTube often reports one or two
+    // stale currentTime/playerState values right after play/pause/seek; publishing
+    // those stale values is what made the phone preview and desktop jump back.
+    if (mediaControlLockActive()) {
+      const safePatch = { provider: 'youtube', kind: 'youtube', canSeek: true };
+      if (Number.isFinite(Number(patch.duration))) safePatch.duration = Number(patch.duration);
+      if (Number.isFinite(Number(patch.volume))) safePatch.volume = Number(patch.volume);
+      if (typeof patch.muted === 'boolean') safePatch.muted = patch.muted;
+      if (Object.keys(safePatch).length > 3) updateMediaPlaybackStatus(safePatch, false);
+      return;
+    }
+
     if (Object.keys(patch).length > 3) updateMediaPlaybackStatus(patch, false);
   }
 
@@ -3551,12 +3587,27 @@
         if (st === 2 || st === 0) send('pause', 0);
       }
       // Do not continuously push the preview iframe's currentTime back to the
-      // desktop while both videos are playing. YouTube sends currentTime info many
-      // times per second; treating that as a seek command made the desktop jump
-      // backward/forward and feel laggy. Real seek/volume changes should come from
-      // the remote controls below (seek bar, 10s buttons, volume slider). Native
-      // preview play/pause is still mirrored through onStateChange above.
+      // desktop while both videos are playing. Only treat the preview time as a
+      // user seek when there is a clear jump, or when the preview is paused.
       const info = data.info && typeof data.info === 'object' ? data.info : {};
+      if (Number.isFinite(Number(info.currentTime))) {
+        const t = Math.max(0, Number(info.currentTime) || 0);
+        const lastT = Number(window.__phRemoteMediaPreviewLastTime);
+        const lastAt = Number(window.__phRemoteMediaPreviewLastTimeAt || 0);
+        const elapsed = lastAt ? Math.max(0, (now - lastAt) / 1000) : 0;
+        const expected = Number.isFinite(lastT) ? lastT + elapsed : t;
+        const jump = Number.isFinite(lastT) && Math.abs(t - expected) > 3.2;
+        const playback = window.__phRemoteMediaPlayback || {};
+        const lastSentAt = Number(window.__phRemoteMediaPreviewLastSeekSentAt || 0);
+        const farFromDesktop = Math.abs(t - (Number(playback.currentTime) || 0)) > 1.25;
+        const previewPaused = Number(window.__phRemoteMediaPreviewLastState) === 2 || playback.paused === true;
+        if ((jump || previewPaused) && farFromDesktop && now - lastSentAt > 1200) {
+          window.__phRemoteMediaPreviewLastSeekSentAt = now;
+          send('seek', t);
+        }
+        window.__phRemoteMediaPreviewLastTime = t;
+        window.__phRemoteMediaPreviewLastTimeAt = now;
+      }
       if (typeof info.muted === 'boolean') {
         window.__phRemoteMediaPreviewMutedState = info.muted;
       }
@@ -3885,31 +3936,37 @@
     }
     if (provider === 'youtube') {
       const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
-      if (action === 'play') { sendYouTubeCommand('playVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, true); return; }
-      if (action === 'pause') { sendYouTubeCommand('pauseVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: false, paused: true }, true); return; }
+      if (action === 'play') { setMediaControlLock({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, 1600); sendYouTubeCommand('playVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, true); clearMediaControlLockSoon(1700); return; }
+      if (action === 'pause') { const current = Number(state.mediaPlayback && state.mediaPlayback.currentTime) || 0; setMediaControlLock({ provider: 'youtube', kind: 'youtube', playing: false, paused: true, currentTime: current }, 1600); sendYouTubeCommand('pauseVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: false, paused: true, currentTime: current }, true); clearMediaControlLockSoon(1700); return; }
       if (action === 'toggle') { sendYouTubeCommand('playVideo', []); return; }
       if (action === 'volume') {
         state.mediaLinkVolume = value;
-        sendYouTubeCommand('setVolume', [Math.round(value * 100)], false);
-        if (value <= 0) sendYouTubeCommand('mute', [], false);
-        else sendYouTubeCommand('unMute', [], false);
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', volume: value, muted: value <= 0 }, 900);
+        sendYouTubeCommand('setVolume', [Math.round(value * 100)], true);
+        if (value <= 0) sendYouTubeCommand('mute', [], true);
+        else sendYouTubeCommand('unMute', [], true);
         updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', volume: value, muted: value <= 0 }, true);
+        clearMediaControlLockSoon(950);
         return;
       }
-      if (action === 'mute') { sendYouTubeCommand('mute', [], false); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: true }, true); return; }
-      if (action === 'unmute') { sendYouTubeCommand('unMute', [], false); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: false }, true); return; }
+      if (action === 'mute') { setMediaControlLock({ provider: 'youtube', kind: 'youtube', muted: true }, 900); sendYouTubeCommand('mute', [], true); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: true }, true); clearMediaControlLockSoon(950); return; }
+      if (action === 'unmute') { setMediaControlLock({ provider: 'youtube', kind: 'youtube', muted: false }, 900); sendYouTubeCommand('unMute', [], true); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: false }, true); clearMediaControlLockSoon(950); return; }
       if (action === 'seek') {
         const seconds = Math.max(0, Number(raw.seconds ?? raw.value) || 0);
-        sendYouTubeCommand('seekTo', [seconds, true]);
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 2400);
+        sendYouTubeCommand('seekTo', [seconds, true], true);
         updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
+        clearMediaControlLockSoon(2500);
         return;
       }
       if (action === 'skip') {
         const delta = Number(raw.value) || 0;
         const current = Number(state.mediaPlayback && state.mediaPlayback.currentTime) || 0;
         const seconds = Math.max(0, current + delta);
-        sendYouTubeCommand('seekTo', [seconds, true]);
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 2400);
+        sendYouTubeCommand('seekTo', [seconds, true], true);
         updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
+        clearMediaControlLockSoon(2500);
         return;
       }
       // TikTok and generic web iframes do not expose reliable seek/volume APIs.
@@ -5041,9 +5098,8 @@
             </label>
 
             <div class="remote-media-phone-preview-card remote-media-phone-preview-card--hidden" aria-hidden="true">
-              <label class="hidden"><input id="remoteMediaWatchPhone" type="checkbox" checked> Watch the same link on this phone</label>
-              <label class="hidden"><input id="remoteMediaPhoneMuted" type="checkbox" checked> Keep phone preview muted</label>
-              <div id="remoteMediaPhonePreview" class="remote-media-phone-preview hidden"><span></span></div>
+              <input id="remoteMediaWatchPhone" type="checkbox" checked hidden aria-hidden="true">
+              <input id="remoteMediaPhoneMuted" type="checkbox" checked hidden aria-hidden="true">
             </div>
 
             <details class="remote-media-file-details" open>
@@ -5384,7 +5440,22 @@
         if ($('remoteMagicSound')) $('remoteMagicSound').checked = data.magicEffectSound !== false;
         if ($('remoteMagicIntensity')) $('remoteMagicIntensity').value = data.magicEffectIntensity || 'grand';
         syncRemoteMediaStatus(data && data.mediaCast);
-        window.__phRemoteMediaPlayback = data && data.mediaPlayback ? data.mediaPlayback : {};
+        const incomingMediaPlayback = data && data.mediaPlayback ? data.mediaPlayback : {};
+        if (remoteMediaLocalControlActive() && window.__phRemoteMediaPlayback) {
+          const local = window.__phRemoteMediaPlayback || {};
+          window.__phRemoteMediaPlayback = {
+            ...incomingMediaPlayback,
+            ...local,
+            url: incomingMediaPlayback.url || local.url,
+            link: incomingMediaPlayback.link || local.link,
+            youtubeId: incomingMediaPlayback.youtubeId || local.youtubeId,
+            provider: incomingMediaPlayback.provider || local.provider,
+            kind: incomingMediaPlayback.kind || local.kind,
+            duration: Number.isFinite(Number(incomingMediaPlayback.duration)) ? incomingMediaPlayback.duration : local.duration,
+          };
+        } else {
+          window.__phRemoteMediaPlayback = incomingMediaPlayback;
+        }
         updateRemoteMediaPlaybackUI(window.__phRemoteMediaPlayback);
         $('remoteAutoLabel').textContent = data.autoPlaying
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`

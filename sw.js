@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v-media-sync-smooth-20260719a';
+const CACHE_NAME = 'presentation-hub-v-media-sync-smooth-20260719a-v20260719-classboard-media-sync';
 const CORE_ASSETS = [
   './',
   './index.html',
