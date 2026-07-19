@@ -4502,3 +4502,70 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* Pro v11.27: clean visual-only magic effects and louder classroom randomizer polish */
+.magic-effect-layer .magic-center,
+.magic-effect-layer .magic-center.magic-grand,
+.magic-effect-layer .magic-center.magic-plain {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  padding: 0 !important;
+  min-width: 0 !important;
+  width: auto !important;
+  max-width: 96vw !important;
+}
+.magic-effect-layer .magic-center strong,
+.magic-effect-layer .magic-center small {
+  display: none !important;
+}
+.magic-effect-layer .magic-vignette {
+  display: none !important;
+}
+.magic-effect-layer .magic-emoji {
+  font-size: clamp(8rem, 25vw, 18rem) !important;
+  line-height: 1 !important;
+}
+.magic-drum-kit {
+  width: min(94vw, 880px) !important;
+  height: min(52vw, 390px) !important;
+}
+.magic-drum-emoji.main { font-size: clamp(8.5rem, 26vw, 17rem) !important; }
+.magic-drum-emoji.left,
+.magic-drum-emoji.right { font-size: clamp(5rem, 15vw, 10rem) !important; }
+.magic-stick {
+  height: 56% !important;
+  width: 16px !important;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.14), 0 18px 32px rgba(0,0,0,.35) !important;
+}
+.magic-micdrop-hero {
+  width: min(58vw, 420px) !important;
+  height: min(62vw, 480px) !important;
+}
+.magic-mic { font-size: clamp(9rem, 28vw, 18rem) !important; }
+.magic-curtain-emoji { font-size: clamp(8rem, 24vw, 16rem) !important; }
+.magic-clock { font-size: clamp(10rem, 30vw, 19rem) !important; }
+.magic-big-mark .magic-mark { font-size: clamp(12rem, 38vw, 25rem) !important; }
+.magic-quiet-hero .magic-emoji,
+.magic-applause-hero .magic-emoji,
+.magic-sparkle-hero .magic-emoji,
+.magic-stars-hero .magic-emoji,
+.magic-hype-hero .magic-emoji,
+.magic-freeze-hero .magic-emoji {
+  font-size: clamp(8rem, 25vw, 17rem) !important;
+}
+.magic-effect-layer.magic-drumroll,
+.magic-effect-layer.magic-micdrop,
+.magic-effect-layer.magic-curtain,
+.magic-effect-layer.magic-timesup {
+  background: transparent !important;
+}
+.magic-effect-layer.magic-drumroll::after,
+.magic-effect-layer.magic-micdrop::after,
+.magic-effect-layer.magic-curtain::after,
+.magic-effect-layer.magic-timesup::after {
+  display: none !important;
+}

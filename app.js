@@ -147,45 +147,46 @@
     }).join('');
   }
 
-  function magicCenter(icon, title, subtitle = '', extraClass = '') {
-    const small = subtitle ? `<small>${subtitle}</small>` : '';
-    return `<div class="magic-center ${extraClass}"><div class="magic-emoji">${icon}</div><strong>${title}</strong>${small}</div>`;
+  function magicCenter(icon, title = '', subtitle = '', extraClass = '') {
+    // Magic effects are visual-only on the presentation screen: no card titles,
+    // no labels, and no subtitle text. The phone remote can still show names.
+    return `<div class="magic-center magic-visual-only ${extraClass}"><div class="magic-emoji" aria-hidden="true">${icon}</div></div>`;
   }
 
   function magicEffectMarkup(effectId) {
     switch (effectId) {
       case 'drumroll':
-        return `<div class="magic-vignette"></div><div class="magic-stage-flash amber"></div><div class="magic-center magic-plain"><div class="magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span><span class="magic-stick right"></span></div></div><strong>Drumroll...</strong><small>Build the suspense</small></div>`;
+        return `<div class="magic-stage-flash amber"></div><div class="magic-center magic-plain magic-visual-only"><div class="magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span><span class="magic-stick right"></span></div></div></div>`;
       case 'confetti':
-        return `<canvas class="magic-fx-canvas"></canvas><div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles confetti-full">${magicParticleMarkup('confetti', 110)}</div>${magicCenter('🎉', 'Great Job!', 'Celebrate the moment', 'magic-pop')}`;
+        return `<canvas class="magic-fx-canvas"></canvas><div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles confetti-full">${magicParticleMarkup('confetti', 120)}</div>${magicCenter('🎉', '', '', 'magic-pop')}`;
       case 'micdrop':
-        return `<div class="magic-vignette"></div><div class="magic-reveal-shine"></div><div class="magic-center magic-plain"><div class="magic-micdrop-hero"><div class="magic-mic">🎤</div><div class="magic-mic-shadow"></div></div><strong>Mic Drop!</strong><small>Powerful ending</small></div>`;
+        return `<div class="magic-reveal-shine"></div><div class="magic-center magic-plain magic-visual-only"><div class="magic-micdrop-hero"><div class="magic-mic">🎤</div><div class="magic-mic-shadow"></div></div></div>`;
       case 'curtain':
-        return `<div class="magic-vignette"></div><div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div><div class="magic-center magic-reveal"><div class="magic-emoji">🎭</div><strong>Reveal!</strong><small>Ta-da!</small></div>`;
+        return `<div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div><div class="magic-center magic-plain magic-reveal magic-visual-only"><div class="magic-emoji magic-curtain-emoji">🎭</div></div>`;
       case 'bubbles':
-        return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas><div class="magic-glow-ring"></div><div class="magic-particles bubbles-full">${magicParticleMarkup('bubble', 88)}</div>${magicCenter('🫧', 'Bubbles!', 'Light and fun', 'magic-pop')}`;
+        return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas><div class="magic-glow-ring"></div><div class="magic-particles bubbles-full">${magicParticleMarkup('bubble', 96)}</div>${magicCenter('🫧', '', '', 'magic-pop')}`;
       case 'quiet':
-        return `<div class="magic-quiet-backdrop"></div><div class="magic-quiet-halo"></div><div class="magic-quiet-halo halo-two"></div><div class="magic-center magic-plain magic-quiet-hero"><span class="magic-quiet-aura"></span><span class="magic-shush-wave"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span><div class="magic-emoji">🤫</div><strong>Be Quiet</strong><small>Eyes here, voices low</small></div>`;
+        return `<div class="magic-quiet-backdrop"></div><div class="magic-quiet-halo"></div><div class="magic-quiet-halo halo-two"></div><div class="magic-center magic-plain magic-quiet-hero magic-visual-only"><span class="magic-quiet-aura"></span><span class="magic-shush-wave"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span><div class="magic-emoji">🤫</div></div>`;
       case 'applause':
-        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring green"></div><div class="magic-particles applause-full">${magicParticleMarkup('symbol', 72, ['👏','🙌','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div><strong>Applause!</strong><small>Well done</small></div>`;
+        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring green"></div><div class="magic-particles applause-full">${magicParticleMarkup('symbol', 84, ['👏','🙌','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero magic-visual-only"><div class="magic-emoji">👏</div></div>`;
       case 'spotlight':
         return `<div class="magic-spotlight-dimmer"></div><div class="magic-moving-spotlight"></div>`;
       case 'correct':
-        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct"><div class="magic-mark">✅</div><strong>Correct!</strong></div>`;
+        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring green"></div><div class="magic-center magic-plain magic-big-mark correct magic-visual-only"><div class="magic-mark">✅</div></div>`;
       case 'wrong':
-        return `<div class="magic-stage-flash red"></div><div class="magic-center magic-plain magic-big-mark wrong"><div class="magic-mark">❌</div><strong>Try Again</strong></div>`;
+        return `<div class="magic-stage-flash red"></div><div class="magic-center magic-plain magic-big-mark wrong magic-visual-only"><div class="magic-mark">❌</div></div>`;
       case 'timesup':
-        return `<div class="magic-vignette"></div><div class="magic-time-rings"></div><div class="magic-center magic-plain magic-clock-wrap"><div class="magic-clock">⏰</div><strong>Time's Up!</strong></div>`;
+        return `<div class="magic-time-rings"></div><div class="magic-center magic-plain magic-clock-wrap magic-visual-only"><div class="magic-clock">⏰</div></div>`;
       case 'sparkle':
-        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles">${magicParticleMarkup('symbol', 76, ['✨','✦','✧','💫'])}</div><div class="magic-center magic-plain magic-sparkle-hero"><div class="magic-emoji">✨</div><strong>Sparkle!</strong></div>`;
+        return `<div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles">${magicParticleMarkup('symbol', 90, ['✨','✦','✧','💫'])}</div><div class="magic-center magic-plain magic-sparkle-hero magic-visual-only"><div class="magic-emoji">✨</div></div>`;
       case 'stars':
-        return `<div class="magic-glow-ring rainbow"></div><div class="magic-particles">${magicParticleMarkup('symbol', 88, ['⭐','🌟','✦','✨'])}</div><div class="magic-center magic-plain magic-stars-hero"><div class="magic-emoji">🌟</div><strong>Star Moment!</strong></div>`;
+        return `<div class="magic-glow-ring rainbow"></div><div class="magic-particles">${magicParticleMarkup('symbol', 96, ['⭐','🌟','✦','✨'])}</div><div class="magic-center magic-plain magic-stars-hero magic-visual-only"><div class="magic-emoji">🌟</div></div>`;
       case 'hype':
-        return `<div class="magic-stage-flash amber"></div><div class="magic-glow-ring fire"></div><div class="magic-particles">${magicParticleMarkup('symbol', 76, ['🔥','⚡','✨'])}</div><div class="magic-center magic-plain magic-hype-hero"><div class="magic-emoji">🔥</div><strong>Hype!</strong></div>`;
+        return `<div class="magic-stage-flash amber"></div><div class="magic-glow-ring fire"></div><div class="magic-particles">${magicParticleMarkup('symbol', 88, ['🔥','⚡','✨'])}</div><div class="magic-center magic-plain magic-hype-hero magic-visual-only"><div class="magic-emoji">🔥</div></div>`;
       case 'freeze':
-        return `<div class="magic-freeze"></div><div class="magic-center magic-plain magic-freeze-hero"><div class="magic-emoji">🧊</div><strong>Freeze!</strong><small>Hold that thought</small></div>`;
+        return `<div class="magic-freeze"></div><div class="magic-center magic-plain magic-freeze-hero magic-visual-only"><div class="magic-emoji">🧊</div></div>`;
       default:
-        return magicCenter('✨', 'Magic!', '', 'magic-pop');
+        return magicCenter('✨', '', '', 'magic-pop');
     }
   }
 
@@ -1804,10 +1805,10 @@
     if (volume <= 0) return;
 
     const effectMixMap = {
-      drumroll: 1.08,
-      confetti: 1.06,
-      micdrop: 0.98,
-      curtain: 0.94,
+      drumroll: 1.24,
+      confetti: 1.1,
+      micdrop: 1.05,
+      curtain: 1.0,
       bubbles: 0.86,
       quiet: 0.78,
       applause: 1.02,
@@ -1833,10 +1834,10 @@
       compressor.attack.setValueAtTime(0.004, now);
       compressor.release.setValueAtTime(0.28, now);
     } catch (error) {}
-    master.gain.setValueAtTime(Math.min(1.18, (0.62 + volume * 0.14) * effectMix), now);
+    master.gain.setValueAtTime(Math.min(1.32, (0.68 + volume * 0.16) * effectMix), now);
     master.connect(compressor).connect(ctx.destination);
 
-    const clampGain = (gainValue) => Math.max(0.0001, Math.min(0.78, gainValue * volume * Math.min(1.08, 0.92 + effectMix * 0.12)));
+    const clampGain = (gainValue) => Math.max(0.0001, Math.min(0.92, gainValue * volume * Math.min(1.14, 0.94 + effectMix * 0.14)));
 
     const disconnectLater = (node, delay = 3.5) => {
       window.setTimeout(() => {
@@ -4770,20 +4771,28 @@
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       const filter = ctx.createBiquadFilter();
+      const compressor = ctx.createDynamicsCompressor();
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(kind === 'dice' ? 1800 : 2600, now);
-      osc.type = kind === 'dice' ? 'square' : 'sine';
-      const base = kind === 'select' ? 660 : kind === 'land' ? 220 : kind === 'dice' ? 120 + (step % 5) * 24 : 420 + (step % 7) * 26;
+      filter.frequency.setValueAtTime(kind === 'dice' ? 2600 : 3400, now);
+      try {
+        compressor.threshold.setValueAtTime(-18, now);
+        compressor.knee.setValueAtTime(20, now);
+        compressor.ratio.setValueAtTime(5, now);
+        compressor.attack.setValueAtTime(0.003, now);
+        compressor.release.setValueAtTime(0.18, now);
+      } catch (error) {}
+      osc.type = kind === 'dice' ? 'square' : kind === 'land' ? 'triangle' : 'sine';
+      const base = kind === 'select' ? 720 : kind === 'land' ? 260 : kind === 'dice' ? 150 + (step % 5) * 34 : 500 + (step % 7) * 34;
       osc.frequency.setValueAtTime(base, now);
-      if (kind === 'select') osc.frequency.exponentialRampToValueAtTime(980, now + 0.22);
-      if (kind === 'land') osc.frequency.exponentialRampToValueAtTime(110, now + 0.28);
-      const peak = kind === 'select' ? 0.12 : kind === 'land' ? 0.14 : kind === 'dice' ? 0.045 : 0.035;
+      if (kind === 'select') osc.frequency.exponentialRampToValueAtTime(1220, now + 0.24);
+      if (kind === 'land') osc.frequency.exponentialRampToValueAtTime(95, now + 0.34);
+      const peak = kind === 'select' ? 0.32 : kind === 'land' ? 0.36 : kind === 'dice' ? 0.13 : 0.1;
       gain.gain.setValueAtTime(0.0001, now);
       gain.gain.exponentialRampToValueAtTime(peak, now + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === 'select' ? 0.28 : kind === 'land' ? 0.34 : 0.07));
-      osc.connect(filter).connect(gain).connect(ctx.destination);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + (kind === 'select' ? 0.32 : kind === 'land' ? 0.42 : 0.085));
+      osc.connect(filter).connect(gain).connect(compressor).connect(ctx.destination);
       osc.start(now);
-      osc.stop(now + (kind === 'select' ? 0.3 : kind === 'land' ? 0.36 : 0.09));
+      osc.stop(now + (kind === 'select' ? 0.35 : kind === 'land' ? 0.45 : 0.105));
     } catch (error) {}
   }
   function fitClassroomNames(root) {
