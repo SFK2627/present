@@ -3482,6 +3482,109 @@
       volume.value = String(pct);
       if (volumeLabel) volumeLabel.textContent = `${pct}%`;
     }
+    syncRemotePhoneMediaPreview(playback);
+  }
+
+  function remoteYouTubePreviewFrames() {
+    return Array.from(document.querySelectorAll('iframe.remote-media-youtube-preview-frame, iframe[data-remote-youtube-preview="1"]'))
+      .filter((frame) => frame && frame.contentWindow);
+  }
+
+  function postRemoteYouTubePreviewCommand(func, args = []) {
+    remoteYouTubePreviewFrames().forEach((frame) => {
+      try { frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), '*'); } catch (error) {}
+    });
+  }
+
+  function applyRemotePreviewMediaCommand(type, value) {
+    const action = String(type || '');
+    const playback = window.__phRemoteMediaPlayback || {};
+    const provider = String(playback.provider || playback.kind || '').toLowerCase();
+    const phoneMuted = $('remoteMediaPhoneMuted');
+    const phoneWantsMuted = !phoneMuted || phoneMuted.checked;
+
+    if (provider === 'youtube' || playback.youtubeId) {
+      const pctNode = $('remoteMediaVolume');
+      const pct = pctNode ? Math.max(0, Math.min(100, Number(pctNode.value) || 0)) : Math.round((Number(playback.volume) || 0.9) * 100);
+      if (action === 'play') postRemoteYouTubePreviewCommand('playVideo', []);
+      if (action === 'pause') postRemoteYouTubePreviewCommand('pauseVideo', []);
+      if (action === 'volume') postRemoteYouTubePreviewCommand('setVolume', [Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)]);
+      if (action === 'mute') postRemoteYouTubePreviewCommand('mute', []);
+      if (action === 'unmute') postRemoteYouTubePreviewCommand('unMute', []);
+      if (action === 'seek') postRemoteYouTubePreviewCommand('seekTo', [Math.max(0, Number(value) || 0), true]);
+      if (action === 'skip') {
+        const current = Number(playback.currentTime) || 0;
+        postRemoteYouTubePreviewCommand('seekTo', [Math.max(0, current + (Number(value) || 0)), true]);
+      }
+      if (action === 'fullscreen') {
+        const frame = remoteYouTubePreviewFrames()[0];
+        if (frame && frame.requestFullscreen) { try { frame.requestFullscreen().catch(() => {}); } catch (error) {} }
+      }
+      if (action === 'exitFullscreen') { try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (error) {} }
+      // Keep the phone preview following the selected muted/unmuted preference,
+      // while desktop volume remains controlled separately.
+      window.setTimeout(() => {
+        postRemoteYouTubePreviewCommand('setVolume', [pct]);
+        postRemoteYouTubePreviewCommand(phoneWantsMuted ? 'mute' : 'unMute', []);
+      }, 80);
+      return;
+    }
+
+    const directPlayers = Array.from(document.querySelectorAll('#remoteMediaPhonePreview video, #remoteMediaPhonePreview audio, #remotePreview video, #remotePreview audio'));
+    directPlayers.forEach((player) => {
+      try {
+        if (action === 'play') player.play().catch(() => {});
+        if (action === 'pause') player.pause();
+        if (action === 'volume') { player.volume = Math.max(0, Math.min(1, Number(value) || 0)); player.muted = player.volume <= 0; }
+        if (action === 'mute') player.muted = true;
+        if (action === 'unmute') player.muted = false;
+        if (action === 'seek') player.currentTime = Math.max(0, Number(value) || 0);
+        if (action === 'skip') player.currentTime = Math.max(0, (Number(player.currentTime) || 0) + (Number(value) || 0));
+      } catch (error) {}
+    });
+  }
+
+  function syncRemotePhoneMediaPreview(playback = {}) {
+    const phoneWatch = $('remoteMediaWatchPhone');
+    if (phoneWatch && !phoneWatch.checked) return;
+    const provider = String(playback.provider || playback.kind || '').toLowerCase();
+    if (!(provider === 'youtube' || playback.youtubeId)) {
+      const directPlayers = Array.from(document.querySelectorAll('#remoteMediaPhonePreview video, #remoteMediaPhonePreview audio, #remotePreview video, #remotePreview audio'));
+      const current = Math.max(0, Number(playback.currentTime) || 0);
+      directPlayers.forEach((player) => {
+        try {
+          if (Number.isFinite(player.duration) && Math.abs((Number(player.currentTime) || 0) - current) > 1.5) player.currentTime = Math.min(current, player.duration || current);
+          player.muted = !!($('remoteMediaPhoneMuted') && $('remoteMediaPhoneMuted').checked);
+          if (playback.playing && player.paused) player.play().catch(() => {});
+          if (playback.paused && !player.paused) player.pause();
+        } catch (error) {}
+      });
+      return;
+    }
+
+    const frames = remoteYouTubePreviewFrames();
+    if (!frames.length) return;
+    const current = Math.max(0, Number(playback.currentTime) || 0);
+    const duration = Math.max(0, Number(playback.duration) || 0);
+    const phoneMuted = $('remoteMediaPhoneMuted');
+    const muted = !phoneMuted || phoneMuted.checked;
+    const volume = Math.max(0, Math.min(100, Math.round((Number(playback.volume) || state.mediaLinkVolume || 0.9) * 100)));
+    const now = Date.now();
+    frames.forEach((frame) => {
+      try {
+        const lastSeek = Number(frame.dataset.lastPhonePreviewSeekAt || 0);
+        const lastSecond = Number(frame.dataset.lastPhonePreviewSecond || -999);
+        if (duration && (Math.abs(current - lastSecond) > 3 || now - lastSeek > 3500)) {
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [current, true] }), '*');
+          frame.dataset.lastPhonePreviewSeekAt = String(now);
+          frame.dataset.lastPhonePreviewSecond = String(current);
+        }
+        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'setVolume', args: [volume] }), '*');
+        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: muted ? 'mute' : 'unMute', args: [] }), '*');
+        if (playback.playing) frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+        if (playback.paused || playback.ended) frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }), '*');
+      } catch (error) {}
+    });
   }
 
   function normalizeOnlineMediaUrl(value = '') {
@@ -3541,15 +3644,25 @@
 
   function syncYouTubeMediaControls(volume = state.mediaLinkVolume || 0.9, autoplay = true) {
     const pct = Math.max(0, Math.min(100, Math.round((Number(volume) || 0) * 100)));
-    const run = () => {
+    const wantSound = pct > 0;
+    const runMutedStart = () => {
+      // YouTube/Chrome are far more reliable when autoplay starts muted first.
+      // After the player is moving, the remote volume/unmute command is applied.
+      postYouTubeCommand('mute');
       postYouTubeCommand('setVolume', [pct]);
-      if (pct <= 0) postYouTubeCommand('mute');
-      else postYouTubeCommand('unMute');
       if (autoplay) postYouTubeCommand('playVideo');
     };
-    // The iframe can accept commands only after it initializes. Retry a few
-    // times so the phone remote feels instant and reliable.
-    [120, 450, 950, 1600, 2600].forEach((delay) => window.setTimeout(run, delay));
+    const runSoundSync = () => {
+      postYouTubeCommand('setVolume', [pct]);
+      if (wantSound) postYouTubeCommand('unMute');
+      else postYouTubeCommand('mute');
+      if (autoplay) postYouTubeCommand('playVideo');
+    };
+    // The iframe can accept commands only after it initializes. Retry several
+    // times so the phone remote controls become real commands, not one-shot
+    // buttons that are missed while YouTube is still loading.
+    [80, 240, 520, 980, 1500].forEach((delay) => window.setTimeout(runMutedStart, delay));
+    [1800, 2600, 3800].forEach((delay) => window.setTimeout(runSoundSync, delay));
   }
 
   function tryAutoplayDirectMedia(player, volume = state.mediaLinkVolume || 0.9) {
@@ -3599,7 +3712,8 @@
       const id = extractYouTubeId(parsed);
       if (!id) { showMediaCastStatus('Could not read the YouTube video ID.', 'warning'); return; }
       const origin = encodeURIComponent(window.location.origin || '');
-      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&mute=1`;
+      const startSeconds = Math.max(0, Math.floor(Number(payload.currentTime || payload.start || 0) || 0));
+      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&mute=1${startSeconds ? `&start=${startSeconds}` : ''}`;
       content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="youtube" data-media-url="${safeUrl}" data-youtube-id="${escapeHtml(id)}" src="${escapeHtml(embed)}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
     } else if (kind === 'tiktok') {
       const id = extractTikTokVideoId(parsed);
@@ -3875,8 +3989,11 @@
     if (kind === 'youtube') {
       const id = playback.youtubeId || extractYouTubeId(parsed);
       if (!id) return '<span class="remote-media-preview-placeholder">YouTube link loaded on desktop.</span>';
-      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?playsinline=1&controls=1&rel=0&modestbranding=1&mute=${muted ? 1 : 0}`;
-      return `<iframe class="remote-media-desktop-preview-frame" src="${escapeHtml(embed)}" title="YouTube preview matching desktop" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+      const origin = encodeURIComponent(window.location.origin || '');
+      const start = Math.max(0, Math.floor(Number(playback.currentTime) || 0));
+      const autoplay = playback.playing ? 1 : 0;
+      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&playsinline=1&controls=1&rel=0&modestbranding=1&autoplay=${autoplay}&mute=${muted ? 1 : 0}${start ? `&start=${start}` : ''}`;
+      return `<iframe class="remote-media-desktop-preview-frame remote-media-youtube-preview-frame" data-remote-youtube-preview="1" data-youtube-id="${escapeHtml(id)}" src="${escapeHtml(embed)}" title="YouTube preview matching desktop" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
     }
     if (kind === 'tiktok') {
       const id = extractTikTokVideoId(parsed);
@@ -3926,8 +4043,13 @@
       if (kind === 'youtube') {
         const id = extractYouTubeId(parsed);
         if (!id) return '<span>Paste a valid YouTube link.</span>';
-        const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?playsinline=1&controls=1&rel=0&modestbranding=1&mute=${phoneMuted && phoneMuted.checked ? 1 : 0}`;
-        return `<iframe class="remote-media-phone-frame" src="${escapeHtml(embed)}" title="Phone YouTube preview" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+        const playback = window.__phRemoteMediaPlayback || {};
+        const origin = encodeURIComponent(window.location.origin || '');
+        const start = Math.max(0, Math.floor(Number(playback.currentTime) || 0));
+        const autoplay = playback.playing ? 1 : 0;
+        const mutedFlag = phoneMuted && phoneMuted.checked ? 1 : 0;
+        const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&playsinline=1&controls=1&rel=0&modestbranding=1&autoplay=${autoplay}&mute=${mutedFlag}${start ? `&start=${start}` : ''}`;
+        return `<iframe class="remote-media-phone-frame remote-media-youtube-preview-frame" data-remote-youtube-preview="1" data-youtube-id="${escapeHtml(id)}" src="${escapeHtml(embed)}" title="Phone YouTube preview" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
       }
       if (kind === 'tiktok') {
         const id = extractTikTokVideoId(parsed);
@@ -3987,9 +4109,11 @@
       selectedFile = null;
       const volumeNode = $('remoteMediaVolume');
       const volumeValue = volumeNode ? Math.max(0, Math.min(1, Number(volumeNode.value) / 100)) : 0.9;
+      if (phoneWatch) phoneWatch.checked = true;
       sendRemoteCommand(ref, 'mediaLinkCast', { url, volume: volumeValue, autoplay: true });
-      setRemoteMediaStatus('Link sent. Desktop should open and play it now.', 'busy');
+      setRemoteMediaStatus('Link sent. Desktop should open and autoplay now.', 'busy');
       updatePhonePreview();
+      window.setTimeout(() => applyRemotePreviewMediaCommand('play'), 450);
     };
     if (linkBtn && linkInput) {
       linkBtn.addEventListener('click', castMediaLink);
@@ -4011,12 +4135,13 @@
       });
     }
 
-    if (phoneWatch) phoneWatch.addEventListener('change', updatePhonePreview);
-    if (phoneMuted) phoneMuted.addEventListener('change', updatePhonePreview);
+    if (phoneWatch) phoneWatch.addEventListener('change', () => { updatePhonePreview(); window.setTimeout(() => syncRemotePhoneMediaPreview(window.__phRemoteMediaPlayback || {}), 250); });
+    if (phoneMuted) phoneMuted.addEventListener('change', () => { updatePhonePreview(); window.setTimeout(() => syncRemotePhoneMediaPreview(window.__phRemoteMediaPlayback || {}), 250); });
 
     const command = (type, value) => {
       if (!isHost) return;
-      sendRemoteCommand(ref, 'mediaCastControl', { type, value });
+      applyRemotePreviewMediaCommand(type, value);
+      sendRemoteCommand(ref, 'mediaCastControl', { type, value, clientAt: Date.now() });
       if (type === 'stop') {
         try { ref.set({ mediaCast: { id: window.__phRemoteMediaCast ? window.__phRemoteMediaCast.id : `media-${Date.now()}`, status: 'stop', receiverStatus: 'stopped', receiverMessage: 'Media stopped from phone.', stoppedAt: Date.now() } }, { merge: true }); } catch (error) {}
       }
@@ -5095,6 +5220,11 @@
           }
         }
         if (isMediaSession && playbackForPreview.url && $('remoteMediaLink') && document.activeElement !== $('remoteMediaLink')) $('remoteMediaLink').value = playbackForPreview.url;
+        if (isMediaSession && playbackForPreview.url && $('remoteMediaWatchPhone') && $('remoteMediaWatchPhone').checked && $('remoteMediaPhonePreview') && !$('remoteMediaPhonePreview').querySelector('iframe,video,audio,img')) {
+          const evt = new Event('input', { bubbles: true });
+          const linkNode = $('remoteMediaLink');
+          if (linkNode) linkNode.dispatchEvent(evt);
+        }
         const fullImg = $('remoteFullImg');
         if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
         if (!window.__presentationHubRemoteGestureActive) {
