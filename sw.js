@@ -9,6 +9,7 @@ const CORE_ASSETS = [
   './icon.svg'
 ];
 
+// media-preview-stable-sync-fix
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
   self.skipWaiting();

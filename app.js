@@ -3502,7 +3502,11 @@
   }
 
   function remoteYouTubePreviewFrames() {
-    return Array.from(document.querySelectorAll('iframe.remote-media-youtube-preview-frame, iframe[data-remote-youtube-preview="1"]'))
+    // Use ONLY the single top media preview inside #remotePreview.
+    // The hidden/lower phone preview area may still exist in old cached layouts,
+    // but it must never receive YouTube sync commands because two iframes will
+    // fight each other and make the desktop video jump back and forth.
+    return Array.from(document.querySelectorAll('#remotePreview iframe.remote-media-youtube-preview-frame, #remotePreview iframe[data-remote-youtube-preview="1"]'))
       .filter((frame) => frame && frame.contentWindow);
   }
 
@@ -3540,6 +3544,9 @@
       };
       if (data.event === 'onStateChange' || typeof data.info === 'number') {
         const st = Number(typeof data.info === 'number' ? data.info : data.data);
+        const lastState = Number(window.__phRemoteMediaPreviewLastState);
+        if (st === lastState) return;
+        window.__phRemoteMediaPreviewLastState = st;
         if (st === 1) send('play', 1);
         if (st === 2 || st === 0) send('pause', 0);
       }
@@ -3647,10 +3654,12 @@
         const lastSecond = Number(frame.dataset.lastPhonePreviewSecond || -999);
         const lastState = frame.dataset.lastPhonePreviewState || '';
         const nextState = playback.playing ? 'playing' : (playback.paused || playback.ended) ? 'paused' : 'loaded';
-        // While playing, avoid constant re-seeks. Only correct a very large drift.
-        // When paused, keep the exact chosen time synced.
+        // Do NOT auto-seek the phone preview while media is playing.
+        // Autocorrection during playback causes the visible back-and-forth lag.
+        // Only exact-sync the preview when paused/loaded, or when the user
+        // deliberately presses seek/10s controls.
         const drift = Math.abs(current - lastSecond);
-        const shouldSeek = duration && (lastSecond < -100 || (!playback.playing && drift > 0.7) || (playback.playing && drift > 12));
+        const shouldSeek = duration && !playback.playing && (lastSecond < -100 || drift > 0.7);
         if (shouldSeek) {
           frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'seekTo', args: [current, true] }), '*');
           frame.dataset.lastPhonePreviewSecond = String(current);
@@ -5342,10 +5351,12 @@
           }
         }
         if (isMediaSession && playbackForPreview.url && $('remoteMediaLink') && document.activeElement !== $('remoteMediaLink')) $('remoteMediaLink').value = playbackForPreview.url;
-        if (isMediaSession && playbackForPreview.url && $('remoteMediaWatchPhone') && $('remoteMediaWatchPhone').checked && $('remoteMediaPhonePreview') && !$('remoteMediaPhonePreview').querySelector('iframe,video,audio,img')) {
-          const evt = new Event('input', { bubbles: true });
-          const linkNode = $('remoteMediaLink');
-          if (linkNode) linkNode.dispatchEvent(evt);
+        // Media Viewing mode uses the top #remotePreview only. Do not auto-build
+        // the older lower phone preview, because it creates duplicate players and
+        // broken sync.
+        if (isMediaSession && $('remoteMediaPhonePreview')) {
+          $('remoteMediaPhonePreview').innerHTML = '';
+          $('remoteMediaPhonePreview').classList.add('hidden');
         }
         const fullImg = $('remoteFullImg');
         if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
