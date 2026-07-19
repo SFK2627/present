@@ -4070,3 +4070,100 @@ body > .magic-effect-layer { position: fixed !important; }
   min-height:40px;
   border-radius:10px;
 }
+
+/* v11.17 portrait preview: stable pinch, anchored zoom, and true fit-to-screen */
+.remote-full-preview.remote-portrait-preview:not(.hidden){
+  overscroll-behavior:none!important;
+  touch-action:none!important;
+}
+.remote-portrait-preview .remote-full-stage.remote-monitor-stage{
+  padding:46px 6px 8px!important;
+  overflow:hidden!important;
+  overscroll-behavior:none!important;
+  touch-action:none!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  -webkit-touch-callout:none!important;
+}
+.remote-portrait-preview .remote-monitor-frame{
+  width:min(98vw,calc((100dvh - 150px) * 1.7777778),760px)!important;
+  max-width:98vw!important;
+  max-height:calc(100dvh - 150px)!important;
+  display:block!important;
+  padding:0!important;
+  margin:0!important;
+  border-radius:20px!important;
+  transform:none!important;
+}
+.remote-portrait-preview .remote-monitor-camera,
+.remote-portrait-preview .remote-monitor-neck,
+.remote-portrait-preview .remote-monitor-base{
+  display:none!important;
+}
+.remote-portrait-preview .remote-monitor-screen{
+  position:relative!important;
+  width:100%!important;
+  max-width:100%!important;
+  aspect-ratio:16/9!important;
+  border-radius:18px!important;
+  overflow:hidden!important;
+  touch-action:none!important;
+  overscroll-behavior:none!important;
+  box-shadow:0 18px 60px rgba(0,0,0,.48),0 0 0 1px rgba(255,255,255,.12)!important;
+}
+.remote-portrait-preview .remote-monitor-screen img{
+  position:absolute!important;
+  display:block!important;
+  margin:0!important;
+  object-fit:fill!important;
+  transform:none!important;
+  transform-origin:0 0!important;
+  user-select:none!important;
+  -webkit-user-drag:none!important;
+  will-change:left,top,width,height!important;
+  backface-visibility:hidden!important;
+}
+.remote-portrait-preview .remote-draw-toolbar{
+  scrollbar-width:none!important;
+}
+.remote-portrait-preview .remote-draw-toolbar::-webkit-scrollbar{display:none!important}
+.remote-portrait-preview .remote-preview-zoom-btn{
+  min-width:30px!important;
+  padding:0 .62rem!important;
+  font-size:.76rem!important;
+  font-weight:900!important;
+  background:rgba(30,41,59,.94)!important;
+}
+.remote-portrait-preview .remote-preview-zoom-label{
+  flex:0 0 auto!important;
+  min-width:46px!important;
+  height:30px!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  padding:0 .42rem!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  background:rgba(15,23,42,.64)!important;
+  color:#e2e8f0!important;
+  font-size:.68rem!important;
+  font-weight:900!important;
+  font-variant-numeric:tabular-nums!important;
+}
+.remote-portrait-preview .remote-tool-divider{
+  flex:0 0 1px!important;
+  width:1px!important;
+  height:22px!important;
+  background:rgba(255,255,255,.18)!important;
+  margin:0 2px!important;
+}
+.remote-portrait-preview .remote-full-help{
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+@media(max-height:620px){
+  .remote-portrait-preview .remote-full-stage.remote-monitor-stage{padding-top:36px!important;padding-bottom:4px!important}
+  .remote-portrait-preview .remote-monitor-frame{width:min(98vw,calc((100dvh - 118px) * 1.7777778),760px)!important;max-height:calc(100dvh - 118px)!important}
+  .remote-portrait-preview .remote-full-help{display:none!important}
+}

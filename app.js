@@ -3402,7 +3402,12 @@
           <button id="remoteBackToControls" class="remote-back-controls">Controls</button>
           <button id="remoteClosePreview">Close</button>
         </div>
-        <div class="remote-draw-toolbar" data-host-only="true" aria-label="Drawing tools. Pinch and drag always zooms/pans unless Pen, Highlight, or Erase is active.">
+        <div class="remote-draw-toolbar" data-host-only="true" aria-label="Preview zoom and drawing tools. Pinch and drag zooms or pans unless a drawing tool is active.">
+          <button id="remotePreviewFit" class="remote-preview-zoom-btn" type="button">Fit</button>
+          <button id="remotePreviewZoomOut" class="remote-preview-zoom-btn" type="button">−</button>
+          <span id="remotePreviewZoomLabel" class="remote-preview-zoom-label">100%</span>
+          <button id="remotePreviewZoomIn" class="remote-preview-zoom-btn" type="button">+</button>
+          <span class="remote-tool-divider" aria-hidden="true"></span>
           <button id="remoteToolPen" type="button">Pen</button>
           <button id="remoteToolHighlighter" type="button">Highlight</button>
           <button id="remoteToolErase" type="button">Erase</button>
@@ -3902,22 +3907,38 @@
     const backBtn = $('remoteBackToControls');
     const full = $('remoteFullPreview');
     const stage = $('remoteFullStage');
+    const fullImg = $('remoteFullImg');
+    const fitBtn = $('remotePreviewFit');
+    const zoomOutBtn = $('remotePreviewZoomOut');
+    const zoomInBtn = $('remotePreviewZoomIn');
+    const zoomLabel = $('remotePreviewZoomLabel');
     if (!openBtn || !full || !stage) return;
 
-    const safeViewport = (value) => clampViewportToRemoteScreen(value || {});
+    const normalizeViewport = (value = {}) => ({
+      zoom: Math.min(4, Math.max(1, Number(value.zoom) || 1)),
+      centerX: Math.max(0, Math.min(1, Number.isFinite(Number(value.centerX)) ? Number(value.centerX) : 0.5)),
+      centerY: Math.max(0, Math.min(1, Number.isFinite(Number(value.centerY)) ? Number(value.centerY) : 0.5)),
+    });
+    const safeViewport = (value) => clampViewportToRemoteScreen(normalizeViewport(value));
 
-    let localViewport = safeViewport(getViewport());
+    let localViewport = normalizeViewport(getViewport());
     let rafId = 0;
     let gestureSettleTimer = null;
+    let resizeFrame = 0;
 
-    const sendViewport = throttle((viewport) => {
+    const sendViewportLive = throttle((viewport) => {
       if (!isHost) return;
       sendRemoteCommand(ref, 'setViewport', safeViewport(viewport));
-    }, 110);
+    }, 145);
+
+    function updateZoomLabel() {
+      if (zoomLabel) zoomLabel.textContent = `${Math.round((localViewport.zoom || 1) * 100)}%`;
+    }
 
     function renderLocal(viewport) {
       localViewport = safeViewport(viewport);
       setLocalViewport(localViewport);
+      updateZoomLabel();
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
@@ -3925,53 +3946,98 @@
       });
     }
 
+    function commitViewport(viewport = localViewport) {
+      localViewport = safeViewport(viewport);
+      renderLocal(localViewport);
+      if (isHost) sendRemoteCommand(ref, 'setViewport', localViewport);
+    }
+
     function beginGesture() {
       window.__presentationHubRemoteGestureActive = true;
       clearTimeout(gestureSettleTimer);
     }
 
-    function endGesture() {
+    function endGesture(delay = 110) {
       clearTimeout(gestureSettleTimer);
       gestureSettleTimer = setTimeout(() => {
         window.__presentationHubRemoteGestureActive = false;
-        sendViewport(localViewport);
-      }, 220);
+        commitViewport(localViewport);
+      }, delay);
+    }
+
+    function fitPreview() {
+      beginGesture();
+      renderLocal({ zoom: 1, centerX: 0.5, centerY: 0.5 });
+      endGesture(40);
+    }
+
+    function stepZoom(multiplier) {
+      beginGesture();
+      const current = safeViewport(localViewport || getViewport());
+      const nextZoom = Math.min(4, Math.max(1, current.zoom * multiplier));
+      renderLocal({ ...current, zoom: nextZoom });
+      endGesture(40);
+    }
+
+    function refreshPreviewLayout() {
+      if (full.classList.contains('hidden')) return;
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(() => {
+        renderLocal(localViewport);
+        requestAnimationFrame(() => renderLocal(localViewport));
+      });
     }
 
     function openFullPreview() {
-      localViewport = safeViewport(getViewport());
-      renderLocal(localViewport);
+      localViewport = normalizeViewport(getViewport());
       full.classList.remove('hidden');
       document.body.classList.add('remote-fullscreen-open');
+      requestAnimationFrame(() => {
+        renderLocal(localViewport);
+        requestAnimationFrame(() => renderLocal(localViewport));
+      });
+      if (fullImg && !fullImg.complete) fullImg.addEventListener('load', refreshPreviewLayout, { once: true });
       if (full.requestFullscreen) full.requestFullscreen().catch(() => {});
     }
 
     function closeFullPreview() {
+      clearTimeout(gestureSettleTimer);
       window.__presentationHubRemoteGestureActive = false;
       full.classList.add('hidden');
       document.body.classList.remove('remote-fullscreen-open');
       document.documentElement.classList.add('presentation-hub-remote-mode');
       document.body.classList.add('presentation-hub-remote-mode');
       if (document.fullscreenElement === full) document.exitFullscreen().catch(() => {});
-      requestAnimationFrame(() => {
-        document.body.classList.remove('remote-fullscreen-open');
-      });
+      requestAnimationFrame(() => document.body.classList.remove('remote-fullscreen-open'));
     }
 
     openBtn.addEventListener('click', openFullPreview);
     if (closeBtn) closeBtn.addEventListener('click', closeFullPreview);
     if (backBtn) backBtn.addEventListener('click', closeFullPreview);
+    if (fitBtn) fitBtn.addEventListener('click', fitPreview);
+    if (zoomOutBtn) zoomOutBtn.addEventListener('click', () => stepZoom(0.8));
+    if (zoomInBtn) zoomInBtn.addEventListener('click', () => stepZoom(1.25));
     document.addEventListener('fullscreenchange', () => {
       if (!document.fullscreenElement && !full.classList.contains('hidden')) closeFullPreview();
+      else refreshPreviewLayout();
     });
+    window.addEventListener('resize', refreshPreviewLayout, { passive: true });
+    window.addEventListener('orientationchange', () => setTimeout(refreshPreviewLayout, 160), { passive: true });
+    if (window.ResizeObserver) {
+      const screen = stage.querySelector('.remote-monitor-screen') || stage;
+      new ResizeObserver(refreshPreviewLayout).observe(screen);
+    }
+    if (fullImg) fullImg.addEventListener('load', refreshPreviewLayout);
 
     if (!isHost) return;
 
     let startDistance = 0;
     let startZoom = 1;
     let startCenter = { centerX: 0.5, centerY: 0.5 };
-    let startMid = { x: 0.5, y: 0.5 };
+    let pinchAnchor = { x: 0.5, y: 0.5 };
     let startPoint = null;
+    let touchMoved = false;
+    let lastTapAt = 0;
 
     const distance = (touches) => {
       const dx = touches[0].clientX - touches[1].clientX;
@@ -3979,9 +4045,9 @@
       return Math.hypot(dx, dy);
     };
 
-    const midpoint = (touches, rect) => ({
-      x: ((touches[0].clientX + touches[1].clientX) / 2 - rect.left) / Math.max(1, rect.width),
-      y: ((touches[0].clientY + touches[1].clientY) / 2 - rect.top) / Math.max(1, rect.height),
+    const midpointPixels = (touches, rect) => ({
+      x: ((touches[0].clientX + touches[1].clientX) / 2) - rect.left,
+      y: ((touches[0].clientY + touches[1].clientY) / 2) - rect.top,
     });
 
     const gestureRect = () => {
@@ -4004,6 +4070,30 @@
       }
       return { rect, fitW, fitH, contentW: fitW * zoomValue, contentH: fitH * zoomValue };
     };
+
+    function startPanGesture(touch) {
+      const current = safeViewport(localViewport || getViewport());
+      startZoom = current.zoom;
+      startCenter = { centerX: current.centerX, centerY: current.centerY };
+      startPoint = { x: touch.clientX, y: touch.clientY };
+      startDistance = 0;
+      touchMoved = false;
+    }
+
+    function startPinchGesture(touches) {
+      const current = safeViewport(localViewport || getViewport());
+      const geometry = screenGeometry(current.zoom);
+      const mid = midpointPixels(touches, geometry.rect);
+      startZoom = current.zoom;
+      startCenter = { centerX: current.centerX, centerY: current.centerY };
+      startDistance = Math.max(1, distance(touches));
+      pinchAnchor = {
+        x: current.centerX + ((mid.x - geometry.rect.width / 2) / Math.max(1, geometry.contentW)),
+        y: current.centerY + ((mid.y - geometry.rect.height / 2) / Math.max(1, geometry.contentH)),
+      };
+      startPoint = null;
+      touchMoved = false;
+    }
 
     // No separate Move tool: the normal state is zoom/pan.
     // Tap Pen/Highlight/Erase to draw; tap the same tool again to return to zoom/pan.
@@ -4067,18 +4157,8 @@
         return;
       }
       beginGesture();
-      const current = safeViewport(localViewport || getViewport());
-      startZoom = current.zoom;
-      startCenter = { centerX: current.centerX, centerY: current.centerY };
-      const rect = gestureRect();
-      if (event.touches.length === 2) {
-        startDistance = Math.max(1, distance(event.touches));
-        startMid = midpoint(event.touches, rect);
-        startPoint = null;
-      } else if (event.touches.length === 1) {
-        startPoint = { x: event.touches[0].clientX, y: event.touches[0].clientY };
-        startDistance = 0;
-      }
+      if (event.touches.length >= 2) startPinchGesture(event.touches);
+      else if (event.touches.length === 1) startPanGesture(event.touches[0]);
     }, { passive: false });
 
     stage.addEventListener('touchmove', (event) => {
@@ -4099,37 +4179,41 @@
         return;
       }
       beginGesture();
-      const rect = gestureRect();
       let next = safeViewport(localViewport || getViewport());
 
-      if (event.touches.length === 2 && startDistance) {
-        const ratio = distance(event.touches) / startDistance;
-        const mid = midpoint(event.touches, rect);
-        const nextZoom = Math.min(4, Math.max(1, startZoom * ratio));
+      if (event.touches.length === 2) {
+        if (!startDistance) startPinchGesture(event.touches);
+        const nextZoom = Math.min(4, Math.max(1, startZoom * (distance(event.touches) / Math.max(1, startDistance))));
         const geometry = screenGeometry(nextZoom);
-        const dragX = ((mid.x - startMid.x) * geometry.rect.width) / Math.max(1, geometry.contentW);
-        const dragY = ((mid.y - startMid.y) * geometry.rect.height) / Math.max(1, geometry.contentH);
+        const mid = midpointPixels(event.touches, geometry.rect);
         next = safeViewport({
           zoom: nextZoom,
-          centerX: startCenter.centerX - dragX,
-          centerY: startCenter.centerY - dragY,
+          centerX: pinchAnchor.x - ((mid.x - geometry.rect.width / 2) / Math.max(1, geometry.contentW)),
+          centerY: pinchAnchor.y - ((mid.y - geometry.rect.height / 2) / Math.max(1, geometry.contentH)),
         });
-      } else if (event.touches.length === 1 && startPoint) {
+        touchMoved = true;
+      } else if (event.touches.length === 1) {
+        if (!startPoint) startPanGesture(event.touches[0]);
         const dx = event.touches[0].clientX - startPoint.x;
         const dy = event.touches[0].clientY - startPoint.y;
-        const geometry = screenGeometry(startZoom);
-        next = safeViewport({
-          zoom: startZoom,
-          centerX: startCenter.centerX - dx / Math.max(1, geometry.contentW),
-          centerY: startCenter.centerY - dy / Math.max(1, geometry.contentH),
-        });
+        if (Math.hypot(dx, dy) > 4) touchMoved = true;
+        if (startZoom > 1.001) {
+          const geometry = screenGeometry(startZoom);
+          next = safeViewport({
+            zoom: startZoom,
+            centerX: startCenter.centerX - dx / Math.max(1, geometry.contentW),
+            centerY: startCenter.centerY - dy / Math.max(1, geometry.contentH),
+          });
+        } else {
+          next = { zoom: 1, centerX: 0.5, centerY: 0.5 };
+        }
       }
 
       renderLocal(next);
-      sendViewport(next);
+      sendViewportLive(next);
     }, { passive: false });
 
-    stage.addEventListener('touchend', () => {
+    stage.addEventListener('touchend', (event) => {
       if (currentStroke) {
         const finished = currentStroke;
         currentStroke = null;
@@ -4138,27 +4222,59 @@
         renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
         return;
       }
+      if (event.touches && event.touches.length === 1) {
+        startPanGesture(event.touches[0]);
+        touchMoved = true;
+        return;
+      }
+      if (!touchMoved && !activeTool) {
+        const now = Date.now();
+        if (now - lastTapAt < 320) {
+          lastTapAt = 0;
+          fitPreview();
+          return;
+        }
+        lastTapAt = now;
+      }
+      startDistance = 0;
+      startPoint = null;
       endGesture();
     }, { passive: true });
+
     stage.addEventListener('touchcancel', () => {
       currentStroke = null;
       window.__phRemoteTempStroke = null;
       renderRemoteInkPreview(window.__phRemoteInkStrokes || [], window.__phRemoteCurrentPage || 1, localViewport);
+      startDistance = 0;
+      startPoint = null;
       endGesture();
     }, { passive: true });
+
+    stage.addEventListener('dblclick', (event) => {
+      if (activeTool) return;
+      event.preventDefault();
+      fitPreview();
+    });
 
     stage.addEventListener('wheel', (event) => {
       event.preventDefault();
       beginGesture();
       const current = safeViewport(localViewport || getViewport());
-      const rect = gestureRect();
+      const geometry = screenGeometry(current.zoom);
+      const pointer = { x: event.clientX - geometry.rect.left, y: event.clientY - geometry.rect.top };
+      const anchor = {
+        x: current.centerX + ((pointer.x - geometry.rect.width / 2) / Math.max(1, geometry.contentW)),
+        y: current.centerY + ((pointer.y - geometry.rect.height / 2) / Math.max(1, geometry.contentH)),
+      };
+      const nextZoom = Math.min(4, Math.max(1, current.zoom * (event.deltaY < 0 ? 1.12 : 0.89)));
+      const nextGeometry = screenGeometry(nextZoom);
       const next = safeViewport({
-        zoom: current.zoom + (event.deltaY < 0 ? 0.12 : -0.12),
-        centerX: (event.clientX - rect.left) / Math.max(1, rect.width),
-        centerY: (event.clientY - rect.top) / Math.max(1, rect.height),
+        zoom: nextZoom,
+        centerX: anchor.x - ((pointer.x - nextGeometry.rect.width / 2) / Math.max(1, nextGeometry.contentW)),
+        centerY: anchor.y - ((pointer.y - nextGeometry.rect.height / 2) / Math.max(1, nextGeometry.contentH)),
       });
       renderLocal(next);
-      sendViewport(next);
+      sendViewportLive(next);
       endGesture();
     }, { passive: false });
   }
