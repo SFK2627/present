@@ -3172,9 +3172,9 @@
     if (safe.kind === 'image') {
       mediaHtml = `<img class="media-cast-image" src="${url}" alt="${title}">`;
     } else if (safe.kind === 'video') {
-      mediaHtml = `<video id="mediaCastPlayer" class="media-cast-player" src="${url}" controls playsinline preload="metadata"></video>`;
+      mediaHtml = `<video id="mediaCastPlayer" class="media-cast-player" src="${url}" controls playsinline autoplay preload="auto"></video>`;
     } else if (safe.kind === 'audio') {
-      mediaHtml = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">♪</div><strong>${title}</strong><audio id="mediaCastPlayer" class="media-cast-player" src="${url}" controls preload="metadata"></audio></div>`;
+      mediaHtml = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">♪</div><strong>${title}</strong><audio id="mediaCastPlayer" class="media-cast-player" src="${url}" controls autoplay preload="auto"></audio></div>`;
     } else {
       mediaHtml = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">FILE</div><strong>${title}</strong><small>This file type cannot be previewed.</small></div>`;
     }
@@ -3190,9 +3190,11 @@
     if (close) close.addEventListener('click', () => closeMediaCastOverlay(true));
     const player = document.getElementById('mediaCastPlayer');
     if (player) {
-      player.volume = 0.92;
+      const startVolume = state.mediaLinkVolume || 0.92;
+      player.volume = startVolume;
       player.addEventListener('play', () => layer.classList.add('is-playing'));
       player.addEventListener('pause', () => layer.classList.remove('is-playing'));
+      tryAutoplayDirectMedia(player, startVolume);
     }
   }
 
@@ -3277,10 +3279,56 @@
 
   function postYouTubeCommand(func, args = []) {
     const frame = document.getElementById('mediaCastLinkFrame');
-    if (!frame || !frame.contentWindow || frame.dataset.provider !== 'youtube') return;
+    if (!frame || !frame.contentWindow || frame.dataset.provider !== 'youtube') return false;
     try {
       frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), '*');
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function syncYouTubeMediaControls(volume = state.mediaLinkVolume || 0.9, autoplay = true) {
+    const pct = Math.max(0, Math.min(100, Math.round((Number(volume) || 0) * 100)));
+    const run = () => {
+      postYouTubeCommand('setVolume', [pct]);
+      if (pct <= 0) postYouTubeCommand('mute');
+      else postYouTubeCommand('unMute');
+      if (autoplay) postYouTubeCommand('playVideo');
+    };
+    // The iframe can accept commands only after it initializes. Retry a few
+    // times so the phone remote feels instant and reliable.
+    [120, 450, 950, 1600, 2600].forEach((delay) => window.setTimeout(run, delay));
+  }
+
+  function tryAutoplayDirectMedia(player, volume = state.mediaLinkVolume || 0.9) {
+    if (!player) return;
+    const value = Math.max(0, Math.min(1, Number(volume) || 0));
+    try {
+      player.volume = value;
+      player.muted = value <= 0;
+      player.autoplay = true;
+      player.preload = 'auto';
+      if ('playsInline' in player) player.playsInline = true;
     } catch (error) {}
+    const attempt = () => {
+      try {
+        const playPromise = player.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {
+            // Browser may block remote-triggered audio. Fall back to muted
+            // autoplay so the video starts visually, then show a one-tap desktop
+            // unlock for sound when needed.
+            try { player.muted = true; player.play().catch(() => {}); } catch (error) {}
+            if (value > 0) showMediaCastGesturePrompt(player);
+          });
+        }
+      } catch (error) {
+        if (value > 0) showMediaCastGesturePrompt(player);
+      }
+    };
+    window.setTimeout(attempt, 80);
+    window.setTimeout(attempt, 600);
   }
 
   function showOnlineMediaCast(payload = {}) {
@@ -3299,7 +3347,8 @@
     if (kind === 'youtube') {
       const id = extractYouTubeId(parsed);
       if (!id) { showMediaCastStatus('Could not read the YouTube video ID.', 'warning'); return; }
-      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+      const origin = encodeURIComponent(window.location.origin || '');
+      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&mute=1`;
       content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="youtube" src="${escapeHtml(embed)}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
     } else if (kind === 'tiktok') {
       const id = extractTikTokVideoId(parsed);
@@ -3329,15 +3378,10 @@
     const player = document.getElementById('mediaCastPlayer');
     if (player) {
       try { player.volume = volume; player.muted = volume <= 0; } catch (error) {}
-      if (payload.autoplay !== false) {
-        try { player.play().catch(() => showMediaCastGesturePrompt(player)); } catch (error) { showMediaCastGesturePrompt(player); }
-      }
+      if (payload.autoplay !== false) tryAutoplayDirectMedia(player, volume);
     }
     if (kind === 'youtube') {
-      window.setTimeout(() => {
-        postYouTubeCommand('setVolume', [Math.round(volume * 100)]);
-        if (payload.autoplay !== false) postYouTubeCommand('playVideo');
-      }, 1400);
+      syncYouTubeMediaControls(volume, payload.autoplay !== false);
     }
   }
 
@@ -3351,20 +3395,19 @@
     if (action === 'hide') { if (layer) layer.classList.add('media-cast-minimized'); return; }
     if (action === 'show') { if (layer) layer.classList.remove('media-cast-minimized', 'hidden'); return; }
     if (provider === 'youtube') {
-      if (action === 'play') { postYouTubeCommand('playVideo'); return; }
+      if (action === 'play') { syncYouTubeMediaControls(state.mediaLinkVolume || 0.9, true); return; }
       if (action === 'pause') { postYouTubeCommand('pauseVideo'); return; }
-      if (action === 'toggle') { postYouTubeCommand('playVideo'); return; }
+      if (action === 'toggle') { syncYouTubeMediaControls(state.mediaLinkVolume || 0.9, true); return; }
       if (action === 'volume') {
         const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
         state.mediaLinkVolume = value;
-        postYouTubeCommand('setVolume', [Math.round(value * 100)]);
-        if (value <= 0) postYouTubeCommand('mute'); else postYouTubeCommand('unMute');
+        syncYouTubeMediaControls(value, false);
         return;
       }
     }
     if (!player) return;
     if (action === 'play') {
-      try { player.play().catch(() => showMediaCastGesturePrompt(player)); } catch (error) { showMediaCastGesturePrompt(player); }
+      tryAutoplayDirectMedia(player, state.mediaLinkVolume || 0.9);
       return;
     }
     if (action === 'pause') { try { player.pause(); } catch (error) {} return; }
@@ -4035,8 +4078,9 @@
 
     const session = state.sessionId || 'NO-FIREBASE';
     const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls`;
-    const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview`;
+    const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
+    const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
+    const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
 
     els.hostRemoteLink.value = hostUrl;
     els.viewerRemoteLink.value = viewerUrl;
@@ -4048,15 +4092,51 @@
   }
 
   function setRemoteMediaOnlyMode(enabled) {
+    const isMediaOnly = !!enabled;
     const dashboard = $('remoteControlDashboard');
-    if (dashboard) dashboard.classList.toggle('remote-media-only-mode', !!enabled);
-    document.body.classList.toggle('remote-media-only-mode', !!enabled);
+    if (dashboard) dashboard.classList.toggle('remote-media-only-mode', isMediaOnly);
+    document.body.classList.toggle('remote-media-only-mode', isMediaOnly);
+
+    // Do not only rely on CSS. Force-hide presentation-only controls in the
+    // phone host remote when the desktop is in Media Viewing mode, then restore
+    // them when a PDF/PPT session is active again.
+    const presentationOnlySelectors = [
+      '.remote-nav-pad',
+      '.remote-magic-section',
+      '.remote-classroom-section',
+      '.remote-presentation-section',
+      '.remote-zoom-section',
+      '.remote-autoplay-section',
+      '.remote-timer-section',
+      '.remote-hint',
+      '.remote-preview-actions',
+      '.remote-control-banner',
+      '.remote-draw-toolbar'
+    ];
+    presentationOnlySelectors.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((node) => {
+        if (isMediaOnly) {
+          node.dataset.mediaOnlyHidden = 'true';
+          node.hidden = true;
+          node.style.display = 'none';
+        } else if (node.dataset.mediaOnlyHidden === 'true') {
+          node.hidden = false;
+          node.style.display = '';
+          delete node.dataset.mediaOnlyHidden;
+        }
+      });
+    });
+
     const title = $('remoteMediaSectionTitle');
-    if (title) title.textContent = enabled ? 'Media Viewing Remote' : 'Media Remote Control';
+    if (title) title.textContent = isMediaOnly ? 'Media Viewing Remote' : 'Media Remote Control';
     const sub = $('remoteMediaSectionSub');
-    if (sub) sub.textContent = enabled ? 'Focused controls for links, audio, video, and pictures' : 'Paste links first, or cast files from this phone';
+    if (sub) sub.textContent = isMediaOnly ? 'Paste a link, control playback, or cast one file from this phone' : 'Paste links first, or cast files from this phone';
     const fileDetails = document.querySelector('.remote-media-file-details');
-    if (fileDetails && enabled && !fileDetails.dataset.userTouched) fileDetails.open = false;
+    if (fileDetails && isMediaOnly && !fileDetails.dataset.userTouched) fileDetails.open = false;
+    const linkInput = $('remoteMediaLink');
+    if (linkInput && isMediaOnly && document.activeElement !== linkInput) {
+      try { linkInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (error) {}
+    }
   }
 
   function renderRemoteApp() {
@@ -4070,6 +4150,7 @@
     const requestedRole = (qs.get('role') || 'host').toLowerCase();
     const role = requestedRole === 'viewer' ? 'viewer' : 'host';
     const isHost = role === 'host';
+    const urlMediaMode = (qs.get('mode') || '').toLowerCase() === 'media';
     let remoteViewport = { zoom: 1, centerX: 0.5, centerY: 0.5 };
     let latestThumb = '';
     let latestRemoteData = null;
@@ -4079,7 +4160,7 @@
     let remoteMagicVolumeTimer = null;
 
     els.remoteApp.innerHTML = `
-      <main id="remoteControlDashboard" class="remote-card remote-premium-card ${isHost ? '' : 'remote-viewer-only'}">
+      <main id="remoteControlDashboard" class="remote-card remote-premium-card ${isHost ? '' : 'remote-viewer-only'} ${urlMediaMode ? 'remote-media-only-mode' : ''}">
         <div class="remote-head remote-premium-head">
           <div class="remote-title-block">
             <span class="remote-eyebrow">${isHost ? 'HOST REMOTE' : 'VIEW ONLY'}</span>
@@ -4366,6 +4447,8 @@
         <div class="remote-full-help">Pinch to zoom. Drag to pan when zoomed. Tap Pen/Highlight/Erase only when you want to draw.</div>
       </div>
     `;
+
+    if (urlMediaMode) setRemoteMediaOnlyMode(true);
 
     if (!isHost) {
       els.remoteApp.querySelectorAll('[data-host-only="true"]').forEach((node) => {
