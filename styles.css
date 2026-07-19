@@ -3928,3 +3928,133 @@ body > .magic-effect-layer { position: fixed !important; }
 @keyframes diceShadowPulse{from{transform:translateX(-50%) scale(.72);opacity:.45}to{transform:translateX(-50%) scale(1.08);opacity:.8}}
 
 @media(max-width:700px){.die-pips .pip{width:20%}.die-pips.pip-grid .pip{max-width:12px}}
+
+/* v11.14 spotlight restyle: noir circle spotlight like reference */
+.magic-spotlight-dimmer{
+  background:rgba(0,0,0,.88)!important;
+  backdrop-filter:none!important;
+}
+.magic-moving-spotlight{
+  width:clamp(240px,24vw,420px)!important;
+  height:clamp(240px,24vw,420px)!important;
+  border-radius:50%!important;
+  background:
+    radial-gradient(circle at 50% 50%,
+      rgba(246,236,149,.98) 0 56%,
+      rgba(238,228,133,.95) 57% 66%,
+      rgba(233,222,121,.52) 67% 73%,
+      rgba(233,222,121,.14) 74% 81%,
+      rgba(233,222,121,0) 82%)!important;
+  box-shadow:
+    0 0 0 1px rgba(250,242,180,.12),
+    0 0 30px rgba(244,233,142,.20),
+    0 0 72px rgba(244,233,142,.12)!important;
+  mix-blend-mode:screen!important;
+  backdrop-filter:brightness(1.5) contrast(1.06)!important;
+  animation:spotlightSearchNoir 5.2s cubic-bezier(.35,.02,.18,1) forwards!important;
+}
+.magic-moving-spotlight:before{
+  content:"";
+  position:absolute;
+  inset:0!important;
+  border-radius:50%;
+  background:radial-gradient(circle at 50% 50%,rgba(255,250,206,.18) 0 25%,rgba(255,250,206,0) 58%)!important;
+  filter:none!important;
+  opacity:1!important;
+}
+.magic-moving-spotlight:after{
+  content:"";
+  position:absolute;
+  inset:-5%!important;
+  width:auto!important;
+  height:auto!important;
+  border-radius:50%;
+  border:1px solid rgba(249,239,171,.10);
+  background:none!important;
+  box-shadow:none!important;
+}
+@keyframes spotlightSearchNoir{
+  0%,10%{transform:translate3d(8vw,10vh,0) scale(1)}
+  20%,30%{transform:translate3d(58vw,12vh,0) scale(1.01)}
+  42%,52%{transform:translate3d(64vw,49vh,0) scale(.99)}
+  64%,74%{transform:translate3d(16vw,54vh,0) scale(1.01)}
+  86%,94%{transform:translate3d(48vw,34vh,0) scale(1)}
+  100%{transform:translate3d(40vw,26vh,0) scale(1)}
+}
+@media(max-width:700px){
+  .magic-moving-spotlight{
+    width:clamp(190px,42vw,300px)!important;
+    height:clamp(190px,42vw,300px)!important;
+  }
+}
+
+/* v11.15 real reveal spotlight: dim surroundings, readable content inside */
+.magic-spotlight-dimmer{
+  background:transparent!important;
+  backdrop-filter:none!important;
+}
+.magic-moving-spotlight{
+  width:clamp(240px,24vw,420px)!important;
+  height:clamp(240px,24vw,420px)!important;
+  border-radius:50%!important;
+  overflow:visible!important;
+  background:
+    radial-gradient(circle at 50% 50%,
+      rgba(255,248,184,.20) 0 50%,
+      rgba(255,241,143,.16) 60%,
+      rgba(255,231,102,.10) 72%,
+      rgba(255,231,102,.04) 79%,
+      rgba(255,231,102,0) 84%)!important;
+  box-shadow:
+    0 0 0 9999px rgba(2,6,23,.64),
+    0 0 0 2px rgba(255,246,180,.22),
+    0 0 30px rgba(255,235,142,.26),
+    0 0 74px rgba(255,220,105,.18),
+    inset 0 0 32px rgba(255,255,255,.08)!important;
+  mix-blend-mode:normal!important;
+  backdrop-filter:brightness(1.42) contrast(1.08) saturate(1.06)!important;
+  -webkit-backdrop-filter:brightness(1.42) contrast(1.08) saturate(1.06)!important;
+  animation:spotlightSearchReveal 5.2s cubic-bezier(.35,.02,.18,1) forwards!important;
+}
+.magic-moving-spotlight:before{
+  content:"";
+  position:absolute;
+  inset:4%!important;
+  border-radius:50%;
+  background:radial-gradient(circle at 48% 45%,rgba(255,255,255,.13) 0 14%,rgba(255,250,205,.07) 30%,rgba(255,255,255,0) 62%)!important;
+  filter:none!important;
+  opacity:1!important;
+  pointer-events:none!important;
+}
+.magic-moving-spotlight:after{
+  content:"";
+  position:absolute;
+  inset:-2%!important;
+  width:auto!important;
+  height:auto!important;
+  border-radius:50%;
+  border:1px solid rgba(255,244,170,.26)!important;
+  background:none!important;
+  box-shadow:0 0 18px rgba(255,236,145,.16)!important;
+  pointer-events:none!important;
+}
+@keyframes spotlightSearchReveal{
+  0%,10%{transform:translate3d(8vw,10vh,0) scale(1)}
+  20%,30%{transform:translate3d(58vw,12vh,0) scale(1.01)}
+  42%,52%{transform:translate3d(64vw,49vh,0) scale(.99)}
+  64%,74%{transform:translate3d(16vw,54vh,0) scale(1.01)}
+  86%,94%{transform:translate3d(48vw,34vh,0) scale(1)}
+  100%{transform:translate3d(40vw,26vh,0) scale(1)}
+}
+@media(max-width:700px){
+  .magic-moving-spotlight{
+    width:clamp(190px,42vw,300px)!important;
+    height:clamp(190px,42vw,300px)!important;
+    box-shadow:
+      0 0 0 9999px rgba(2,6,23,.62),
+      0 0 0 2px rgba(255,246,180,.22),
+      0 0 26px rgba(255,235,142,.24),
+      0 0 58px rgba(255,220,105,.15),
+      inset 0 0 26px rgba(255,255,255,.07)!important;
+  }
+}
