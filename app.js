@@ -791,29 +791,60 @@
 
   function decodeLooseHtml(value) {
     const textarea = document.createElement('textarea');
-    textarea.innerHTML = value;
+    textarea.innerHTML = String(value || '');
     return textarea.value;
   }
 
+  function decodeMaybeEncodedUrl(value) {
+    let output = String(value || '').trim();
+    for (let i = 0; i < 3; i++) {
+      const before = output;
+      output = decodeLooseHtml(output).replace(/&amp;/gi, '&').trim();
+      try {
+        const decoded = decodeURIComponent(output);
+        if (/canva\./i.test(decoded)) output = decoded.trim();
+      } catch (error) {}
+      if (output === before) break;
+    }
+    return output;
+  }
+
+  function extractCanvaCandidate(raw) {
+    let value = decodeMaybeEncodedUrl(raw)
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .trim();
+    if (!value) return '';
+
+    // Accept iframe snippets, embed snippets, anchor tags, copied text around a link,
+    // and links escaped by the Canva app/browser.
+    const attrMatch = value.match(/(?:src|href)\s*=\s*["']([^"']*canva\.[^"']+)["']/i);
+    if (attrMatch) return decodeMaybeEncodedUrl(attrMatch[1]);
+
+    const fullUrlMatch = value.match(/https?:\/\/[^\s<>"']*canva\.[^\s<>"']+/i);
+    if (fullUrlMatch) return decodeMaybeEncodedUrl(fullUrlMatch[0]);
+
+    const bareUrlMatch = value.match(/(?:www\.)?canva\.(?:com|site|cn|me|link)\/[^\s<>"']+/i);
+    if (bareUrlMatch) return decodeMaybeEncodedUrl(bareUrlMatch[0]);
+
+    // Sometimes users paste only the tail after the protocol was stripped by another app.
+    const hostless = value.match(/(?:^|\s)((?:www\.)?canva\.(?:com|site|cn|me|link)(?:\/\S*)?)/i);
+    return hostless ? decodeMaybeEncodedUrl(hostless[1]) : value;
+  }
+
   function normalizeCanvaUrl(raw) {
-    let value = decodeLooseHtml(String(raw || '').trim());
+    let value = extractCanvaCandidate(raw);
     if (!value) return null;
 
-    // Accept full Canva iframe/embed snippets, normal share links, links copied with
-    // extra text around them, and links where the browser/app escaped ampersands.
-    const srcMatch = value.match(/src\s*=\s*["']([^"']+)["']/i);
-    if (srcMatch) value = srcMatch[1];
-    else {
-      const urlMatch = value.match(/https?:\/\/[^\s<>"']+|(?:www\.)?canva\.(?:com|site|cn|me)\/[^\s<>"']+/i);
-      if (urlMatch) value = urlMatch[0];
-    }
-
-    value = decodeLooseHtml(value)
+    value = value
       .replace(/&amp;/gi, '&')
       .trim()
+      .replace(/^[<({\["']+/, '')
+      .replace(/[>)}\]"']+$/g, '')
       .replace(/[),.;]+$/g, '');
 
-    if (!/^https?:\/\//i.test(value)) value = `https://${value}`;
+    if (!/^https?:\/\//i.test(value)) value = `https://${value.replace(/^\/\//, '')}`;
 
     let url;
     try { url = new URL(value); } catch (error) { return null; }
@@ -822,14 +853,24 @@
     const allowed = host === 'canva.com' || host.endsWith('.canva.com') ||
       host === 'canva.site' || host.endsWith('.canva.site') ||
       host === 'canva.cn' || host.endsWith('.canva.cn') ||
-      host === 'canva.me' || host.endsWith('.canva.me');
+      host === 'canva.me' || host.endsWith('.canva.me') ||
+      host === 'canva.link' || host.endsWith('.canva.link');
     if (!allowed) return null;
 
-    // Canva's public design/view links usually embed when ?embed is present.
-    // Keep public canva.site pages as-is because they are already designed for viewing.
-    if ((host === 'canva.com' || host.endsWith('.canva.com') || host === 'canva.cn' || host.endsWith('.canva.cn')) && !url.searchParams.has('embed')) {
-      url.searchParams.set('embed', '');
+    // Convert common Canva editor/presentation paths into a public-view-style embed URL.
+    // Private edit links still need Canva sharing set to public/viewable, but the app
+    // should not reject their URL shape before trying to load it.
+    if (host === 'canva.com' || host.endsWith('.canva.com') || host === 'canva.cn' || host.endsWith('.canva.cn')) {
+      url.pathname = url.pathname
+        .replace(/\/edit\/?$/i, '/view')
+        .replace(/\/present\/?$/i, '/view')
+        .replace(/\/watch\/?$/i, '/view');
+      if (/\/design\//i.test(url.pathname) && !/\/(view|embed)\/?$/i.test(url.pathname)) {
+        url.pathname = url.pathname.replace(/\/?$/, '/view');
+      }
+      if (!url.searchParams.has('embed')) url.searchParams.set('embed', '');
     }
+
     return url.toString();
   }
 
