@@ -6503,34 +6503,3 @@ body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-media-onl
 .remote-media-phone-preview-card--hidden {
   display: none !important;
 }
-
-/* Remote QR fallback/link styling - keeps the modal usable even if QRCode CDN is slow. */
-.qr-fallback-link {
-  min-height: 210px;
-  width: 210px;
-  display: grid;
-  place-items: center;
-  gap: 8px;
-  text-align: center;
-  padding: 18px;
-  border-radius: 24px;
-  background: rgba(15, 23, 42, 0.08);
-  color: #0f172a;
-  font-weight: 700;
-}
-.qr-fallback-link span {
-  font-size: 0.86rem;
-  font-weight: 600;
-  opacity: 0.82;
-}
-.qr-fallback-link a {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #7c5cff, #43d9c8);
-  color: #fff;
-  text-decoration: none;
-  box-shadow: 0 12px 24px rgba(67, 217, 200, 0.24);
-}

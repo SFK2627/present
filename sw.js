@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-remote-session-doc-fix-v1';
+const CACHE_NAME = 'presentation-hub-remote-public-session-fix-v1';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,7 @@ const CORE_ASSETS = [
   './icon.svg'
 ];
 
-// remote-session-doc-fix
+// youtube-control-solid-fix
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
   self.skipWaiting();
