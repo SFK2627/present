@@ -6503,3 +6503,98 @@ body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-media-onl
 .remote-media-phone-preview-card--hidden {
   display: none !important;
 }
+
+/* Fresh Remote QR v1 */
+.qr-modal-card {
+  width: min(980px, calc(100vw - 34px));
+  max-height: min(92vh, 860px);
+  overflow: auto;
+}
+.qr-modal-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.qr-modal-head h3 { margin: 0 0 8px; font-size: clamp(1.25rem, 2vw, 1.7rem); }
+.qr-modal-head p { margin: 0; color: var(--muted); line-height: 1.5; }
+.qr-session-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(99,102,241,.16);
+  border: 1px solid rgba(129,140,248,.32);
+  color: #a78bfa;
+  font-weight: 900;
+  letter-spacing: .02em;
+}
+.qr-panel {
+  border-radius: 24px;
+  padding: 14px;
+  border: 1px solid rgba(129,140,248,.26);
+  background: rgba(99,102,241,.08);
+}
+.qr-panel h4 { margin: 0 0 12px; }
+.qr-panel .qr-box {
+  min-height: 288px;
+  display: grid;
+  place-items: center;
+}
+.qr-panel .qr-box canvas,
+.qr-panel .qr-box img {
+  width: min(244px, 70vw) !important;
+  height: min(244px, 70vw) !important;
+  image-rendering: pixelated;
+}
+.qr-loading-text,
+.qr-error-text,
+.qr-fallback-link {
+  display: inline-flex;
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+  min-height: 130px;
+  padding: 18px;
+  color: #334155;
+  font-weight: 900;
+}
+.qr-error-text { color: #b91c1c; }
+.qr-fallback-link { color: #2563eb; text-decoration: underline; }
+.qr-grid input {
+  font-size: .92rem;
+  border-radius: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qr-copy-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(15,23,42,.86);
+  color: white;
+  border: 1px solid rgba(255,255,255,.14);
+}
+.qr-help-text { margin: 14px 0 0; }
+.media-viewer-welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+#mediaViewerRemoteNow {
+  background: linear-gradient(135deg, #6d5dfc, #38bdf8);
+  color: #fff;
+}
+@media (max-width: 760px) {
+  .qr-modal-card { padding: 18px; }
+  .qr-modal-head { flex-direction: column; }
+  .qr-session-badge { min-width: 0; }
+  .qr-grid { grid-template-columns: 1fr; }
+  .qr-panel .qr-box { min-height: 248px; }
+}

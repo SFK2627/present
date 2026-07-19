@@ -110,6 +110,7 @@
           <button id="zoomInBtn">+</button>
           <button id="resetZoomBtn">Reset</button>
           <button id="fullscreenBtn">Fullscreen</button>
+          <button id="qrBtn">Remote QR</button>
           <button id="settingsBtn">Controls</button>
         </div>
 
@@ -231,7 +232,33 @@
       </section>
     </main>
 
-    <!-- Remote QR removed temporarily. A new remote system will be rebuilt later. -->
+    <div id="qrModal" class="modal hidden">
+      <div class="modal-card glass qr-modal-card">
+        <button id="closeQrBtn" class="modal-close" type="button">×</button>
+        <div class="qr-modal-head">
+          <div>
+            <h3>Phone Remote Control</h3>
+            <p>Scan the <strong>Control QR</strong> for buttons on your phone. Viewer QR is preview only.</p>
+          </div>
+          <span id="qrSessionBadge" class="qr-session-badge">New remote</span>
+        </div>
+        <div class="qr-grid qr-grid-control-first">
+          <section class="qr-panel qr-primary">
+            <h4>Control QR / Host remote</h4>
+            <div id="hostQr" class="qr-box"><span class="qr-loading-text">Preparing secure session...</span></div>
+            <input id="hostRemoteLink" type="text" readonly value="Preparing remote link..." />
+            <button id="copyHostRemoteLink" class="qr-copy-btn" type="button">Copy host link</button>
+          </section>
+          <section class="qr-panel qr-secondary">
+            <h4>Viewer QR / Preview only</h4>
+            <div id="viewerQr" class="qr-box"><span class="qr-loading-text">Preparing viewer session...</span></div>
+            <input id="viewerRemoteLink" type="text" readonly value="Preparing viewer link..." />
+            <button id="copyViewerRemoteLink" class="qr-copy-btn" type="button">Copy viewer link</button>
+          </section>
+        </div>
+        <p id="qrHelp" class="help-text qr-help-text">Preparing a fresh live session...</p>
+      </div>
+    </div>
 
     <div id="classroomModal" class="modal hidden">
       <div class="modal-card glass classroom-modal-card">

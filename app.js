@@ -20,6 +20,7 @@
   const DB_VERSION = 1;
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
+  const DEFAULT_REMOTE_BASE_URL = 'https://sfk2627.github.io/present/';
   const MEDIA_CAST_ICE_SERVERS = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -555,20 +556,31 @@
     try {
       if (!firebase.apps.length) firebase.initializeApp(window.PRESENTATION_HUB_FIREBASE_CONFIG);
       state.firebaseDb = firebase.firestore();
-      let user = firebase.auth().currentUser;
-      if (!user) {
-        const cred = await firebase.auth().signInAnonymously();
-        user = cred.user;
+      let user = null;
+      try {
+        user = firebase.auth().currentUser;
+        if (!user) {
+          const cred = await firebase.auth().signInAnonymously();
+          user = cred.user;
+        }
+        state.firebaseAuthReady = !!user;
+      } catch (authError) {
+        // Fresh remote can still work when the session collection has public rules.
+        // If the user's rules require auth, the first session write will show the real permission error.
+        console.warn('Firebase anonymous auth unavailable; trying Firestore session without auth.', authError);
+        state.firebaseAuthReady = false;
       }
-      state.firebaseUser = user;
-      state.firebaseAuthReady = true;
-      state.firebaseReady = true;
-      firebase.auth().onAuthStateChanged(async (nextUser) => {
-        state.firebaseUser = nextUser || null;
-        updateFirebaseStatus();
-        updateClassroomAuthUI();
-        if (nextUser && !nextUser.isAnonymous) await loadClassroomCloud();
-      });
+      state.firebaseUser = user || firebase.auth().currentUser || null;
+      state.firebaseReady = !!state.firebaseDb;
+      try {
+        firebase.auth().onAuthStateChanged(async (nextUser) => {
+          state.firebaseUser = nextUser || null;
+          state.firebaseAuthReady = !!nextUser;
+          updateFirebaseStatus();
+          updateClassroomAuthUI();
+          if (nextUser && !nextUser.isAnonymous) await loadClassroomCloud();
+        });
+      } catch (error) {}
       updateFirebaseStatus();
       return true;
     } catch (error) {
@@ -1346,11 +1358,14 @@
       <p>Open a clean media screen for images, MP3, MP4, YouTube, TikTok, and direct media playback.</p>
       <div class="media-viewer-welcome-actions">
         <button id="mediaViewerFullscreenNow" type="button">Fullscreen Screen</button>
+        <button id="mediaViewerRemoteNow" type="button">Remote QR</button>
       </div>
-      <small>No PDF/PPT is needed. Remote QR is temporarily removed while the new remote system is rebuilt.</small>
+      <small>Open the Remote QR to control this media screen from your phone.</small>
     `;
     const full = welcome.querySelector('#mediaViewerFullscreenNow');
     if (full) full.addEventListener('click', toggleFullscreen);
+    const remote = welcome.querySelector('#mediaViewerRemoteNow');
+    if (remote) remote.addEventListener('click', openQrModal);
     return welcome;
   }
 
@@ -2908,33 +2923,117 @@
     } catch (error) {}
   }
 
-  async function setupRemoteSessionIfPossible() {
-    if (!state.firebaseReady || (!state.activeFile && !state.mediaMode)) return;
-    if (state.unsubscribeSession) state.unsubscribeSession();
-    state.sessionId = state.sessionId || makeSessionId();
+  async function ensureRemoteFirebaseReady() {
+    if (state.firebaseReady && state.firebaseDb) return true;
+    if (!hasFirebaseConfig()) throw new Error('Firebase config is missing. Check firebase-config.js.');
+    const ok = await initFirebaseIfConfigured();
+    if (!ok || !state.firebaseReady || !state.firebaseDb) {
+      throw new Error('Firebase is not ready. Check firebase-config.js, Firestore rules, and Anonymous Auth if your rules require login.');
+    }
+    return true;
+  }
+
+  function getRemoteAppBaseUrl() {
+    try {
+      if (window.location.protocol === 'file:') return DEFAULT_REMOTE_BASE_URL;
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.hash = '';
+      let base = url.toString();
+      if (/\/[^/]+\.(html?|php)$/i.test(url.pathname)) {
+        base = base.replace(/\/[^/]+$/i, '/');
+      } else if (!base.endsWith('/')) {
+        base += '/';
+      }
+      return base;
+    } catch (error) {
+      return DEFAULT_REMOTE_BASE_URL;
+    }
+  }
+
+  function buildRemoteUrl(sessionId, role = 'host') {
+    const base = getRemoteAppBaseUrl();
+    const url = new URL(base);
+    url.searchParams.set('remote', '1');
+    url.searchParams.set('session', sessionId);
+    url.searchParams.set('role', role === 'viewer' ? 'viewer' : 'host');
+    if (!state.activeFile && state.mediaMode) url.searchParams.set('mode', 'media');
+    url.searchParams.set('v', String(Date.now()).slice(-6));
+    return url.toString();
+  }
+
+  function baseRemoteSessionPayload() {
+    const isMedia = !state.activeFile && !!state.mediaMode;
+    return {
+      status: 'live',
+      remoteVersion: 'fresh-remote-v1',
+      fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
+      type: state.activeFile ? state.activeFile.type : 'media',
+      currentPage: state.activeFile ? (state.currentPage || 1) : 0,
+      totalPages: state.activeFile ? (state.totalPages || 1) : 0,
+      mediaMode: isMedia,
+      zoom: Number(state.zoom) || 1,
+      viewportCenterX: Number.isFinite(Number(state.viewportCenterX)) ? Number(state.viewportCenterX) : 0.5,
+      viewportCenterY: Number.isFinite(Number(state.viewportCenterY)) ? Number(state.viewportCenterY) : 0.5,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  async function createFreshRemoteSession() {
+    if (!state.activeFile && !state.mediaMode) throw new Error('Open a PDF/PPT or Media Viewing first.');
+    await ensureRemoteFirebaseReady();
+    if (state.unsubscribeSession) {
+      try { state.unsubscribeSession(); } catch (error) {}
+      state.unsubscribeSession = null;
+    }
+    if (state.remoteCommandPollTimer) {
+      clearInterval(state.remoteCommandPollTimer);
+      state.remoteCommandPollTimer = null;
+    }
+    state.sessionId = makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
     state.lastCommandId = null;
-    if (state.remoteCommandPollTimer) clearInterval(state.remoteCommandPollTimer);
     state.processedRemoteCommands = new Set();
-    // v10.6 cleanup: old builds stored every slide thumbnail inside the live
-    // session document. That made every phone command feel delayed. Remove it
-    // once, then keep thumbnails in a lightweight subcollection instead.
-    try {
-      if (window.firebase && window.firebase.firestore && window.firebase.firestore.FieldValue) {
-        await state.sessionRef.set({ slideThumbs: window.firebase.firestore.FieldValue.delete() }, { merge: true });
-      }
-    } catch (error) {}
+
+    await state.sessionRef.set(baseRemoteSessionPayload(), { merge: true });
     await publishSessionState(true);
+
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
-      const data = snap.data();
-      processRemoteCommand(data && data.command, 'snapshot');
-      processRemoteCommand(data && data.lastMagicCommand, 'snapshot-magic');
-      processMediaCastSignal(data && data.mediaCast);
-    }, (error) => {
-      console.warn('Remote live listener failed; command polling fallback remains active.', error);
-    });
+      const data = snap.data() || {};
+      processRemoteCommand(data.command, 'fresh-snapshot');
+      processRemoteCommand(data.lastMagicCommand, 'fresh-snapshot-magic');
+      processMediaCastSignal(data.mediaCast);
+    }, (error) => console.warn('Fresh remote listener failed:', error));
     startRemoteCommandFallbackPoll();
+    return state.sessionId;
+  }
+
+  async function setupRemoteSessionIfPossible() {
+    if (!state.activeFile && !state.mediaMode) return;
+    try {
+      await ensureRemoteFirebaseReady();
+      if (!state.sessionRef || !state.sessionId) {
+        state.sessionId = makeSessionId();
+        state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+        state.processedRemoteCommands = new Set();
+      }
+      await state.sessionRef.set(baseRemoteSessionPayload(), { merge: true });
+      await publishSessionState(true);
+      if (!state.unsubscribeSession) {
+        state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
+          if (!snap.exists) return;
+          const data = snap.data() || {};
+          processRemoteCommand(data.command, 'snapshot');
+          processRemoteCommand(data.lastMagicCommand, 'snapshot-magic');
+          processMediaCastSignal(data.mediaCast);
+        }, (error) => console.warn('Remote live listener failed:', error));
+      }
+      startRemoteCommandFallbackPoll();
+    } catch (error) {
+      console.warn('Remote session not started yet:', error);
+    }
   }
 
   function processRemoteCommand(command, source = 'unknown') {
@@ -4892,8 +4991,104 @@
     }
   }
 
+  function renderQrInto(node, url) {
+    if (!node) return;
+    node.innerHTML = '';
+    if (window.QRCode) {
+      try {
+        new QRCode(node, {
+          text: url,
+          width: 244,
+          height: 244,
+          correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : undefined,
+        });
+        return;
+      } catch (error) {
+        console.warn('QR rendering failed:', error);
+      }
+    }
+    const fallback = document.createElement('a');
+    fallback.href = url;
+    fallback.textContent = 'Open remote link';
+    fallback.target = '_blank';
+    fallback.rel = 'noopener';
+    fallback.className = 'qr-fallback-link';
+    node.appendChild(fallback);
+  }
+
+  function setQrLoading(message) {
+    if (els.hostQr) els.hostQr.innerHTML = '<span class="qr-loading-text">Preparing host remote...</span>';
+    if (els.viewerQr) els.viewerQr.innerHTML = '<span class="qr-loading-text">Preparing viewer preview...</span>';
+    if (els.hostRemoteLink) els.hostRemoteLink.value = 'Preparing host link...';
+    if (els.viewerRemoteLink) els.viewerRemoteLink.value = 'Preparing viewer link...';
+    if (els.qrHelp) els.qrHelp.textContent = message || 'Preparing a fresh live session...';
+    const badge = $('qrSessionBadge');
+    if (badge) badge.textContent = 'Preparing';
+  }
+
+  function setQrError(message) {
+    const text = message || 'Remote could not start. Check Firebase and try again.';
+    if (els.hostQr) els.hostQr.innerHTML = `<span class="qr-error-text">${escapeHtml(text)}</span>`;
+    if (els.viewerQr) els.viewerQr.innerHTML = `<span class="qr-error-text">${escapeHtml(text)}</span>`;
+    if (els.qrHelp) els.qrHelp.textContent = text;
+    const badge = $('qrSessionBadge');
+    if (badge) badge.textContent = 'Needs check';
+  }
+
+  async function copyTextToClipboard(value) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const temp = document.createElement('textarea');
+        temp.value = value;
+        temp.style.position = 'fixed';
+        temp.style.left = '-9999px';
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand('copy');
+        temp.remove();
+      }
+    } catch (error) {}
+  }
+
   async function openQrModal() {
-    toast('Remote QR is temporarily removed. The new remote system will be rebuilt later.', 'info');
+    if (!state.activeFile && !state.mediaMode) {
+      alert('Open a PDF/PPT or Media Viewing first, then open Remote QR.');
+      return;
+    }
+    showModal(els.qrModal);
+    setQrLoading('Creating a new clean live session...');
+
+    const bindCopyButtons = () => {
+      const hostCopy = $('copyHostRemoteLink');
+      const viewerCopy = $('copyViewerRemoteLink');
+      if (hostCopy && !hostCopy.dataset.boundCopy) {
+        hostCopy.dataset.boundCopy = '1';
+        hostCopy.addEventListener('click', () => copyTextToClipboard(els.hostRemoteLink ? els.hostRemoteLink.value : ''));
+      }
+      if (viewerCopy && !viewerCopy.dataset.boundCopy) {
+        viewerCopy.dataset.boundCopy = '1';
+        viewerCopy.addEventListener('click', () => copyTextToClipboard(els.viewerRemoteLink ? els.viewerRemoteLink.value : ''));
+      }
+    };
+    bindCopyButtons();
+
+    try {
+      const sessionId = await createFreshRemoteSession();
+      const hostUrl = buildRemoteUrl(sessionId, 'host');
+      const viewerUrl = buildRemoteUrl(sessionId, 'viewer');
+      if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
+      if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
+      renderQrInto(els.hostQr, hostUrl);
+      renderQrInto(els.viewerQr, viewerUrl);
+      const badge = $('qrSessionBadge');
+      if (badge) badge.textContent = sessionId;
+      if (els.qrHelp) els.qrHelp.textContent = 'Ready. Scan Control QR for phone buttons. If your phone still shows No Session, close the old phone tab and scan this new QR.';
+    } catch (error) {
+      console.error('Fresh remote QR failed:', error);
+      setQrError(error && error.message ? error.message : 'Remote could not start.');
+    }
   }
 
   function setRemoteMediaOnlyMode(enabled) {
