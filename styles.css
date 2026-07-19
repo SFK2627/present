@@ -5111,7 +5111,7 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
   -webkit-backdrop-filter:none!important;
 }
 .magic-effect-layer.magic-spotlight .magic-moving-spotlight{
-  --spot-size:clamp(118px,18vmin,190px);
+  --spot-size:clamp(160px,24vmin,260px);
   position:fixed!important;
   left:0!important;
   top:0!important;
@@ -5180,5 +5180,133 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
   .magic-micdrop-shadow{top:calc(22vh + min(38vh,270px) + clamp(150px,38vw,230px))!important;}
   .magic-micdrop-ring{top:calc(22vh + min(38vh,270px) + clamp(155px,39vw,240px))!important;}
   .magic-micdrop-impact{top:calc(22vh + min(38vh,270px) + clamp(134px,36vw,210px))!important;}
-  .magic-effect-layer.magic-spotlight .magic-moving-spotlight{--spot-size:clamp(104px,30vmin,152px);}
+  .magic-effect-layer.magic-spotlight .magic-moving-spotlight{--spot-size:clamp(136px,38vmin,198px);}
+}
+
+
+/* v11.34 requested polish: bigger circle spotlight, shorter Be Quiet, simple mic-only drop */
+.magic-effect-layer.magic-micdrop::after{display:none!important;content:none!important;}
+.magic-effect-layer.magic-micdrop{
+  background:transparent!important;
+  overflow:hidden!important;
+}
+.magic-simple-micdrop{
+  position:fixed!important;
+  inset:0!important;
+  z-index:12!important;
+  pointer-events:none!important;
+  display:block!important;
+}
+.magic-simple-micdrop .magic-micdrop-glow{
+  position:absolute!important;
+  left:50%!important;
+  top:58%!important;
+  width:clamp(220px,34vw,520px)!important;
+  height:clamp(120px,18vw,260px)!important;
+  transform:translate(-50%,-50%)!important;
+  border-radius:50%!important;
+  background:radial-gradient(ellipse,rgba(251,191,36,.34),rgba(239,68,68,.16) 45%,transparent 74%)!important;
+  filter:blur(22px)!important;
+  opacity:.88!important;
+  animation:simpleMicGlow 1.82s ease-out both!important;
+}
+.magic-simple-mic{
+  position:absolute!important;
+  left:50%!important;
+  top:-18vh!important;
+  font-size:clamp(8.5rem,22vw,18rem)!important;
+  line-height:1!important;
+  transform:translate(-50%,-50%) rotate(-18deg) scale(.92)!important;
+  filter:drop-shadow(0 28px 26px rgba(0,0,0,.38))!important;
+  animation:simpleMicDropFall 1.72s cubic-bezier(.18,.82,.18,1.08) both!important;
+  will-change:transform,opacity!important;
+}
+.magic-simple-mic-shadow{
+  position:absolute!important;
+  left:50%!important;
+  top:78%!important;
+  width:clamp(160px,24vw,360px)!important;
+  height:clamp(22px,4vw,48px)!important;
+  transform:translateX(-50%) scale(.3)!important;
+  border-radius:50%!important;
+  background:radial-gradient(ellipse,rgba(0,0,0,.46),rgba(0,0,0,.14) 58%,transparent 76%)!important;
+  filter:blur(2px)!important;
+  opacity:0!important;
+  animation:simpleMicShadow 1.72s ease-out both!important;
+}
+.magic-simple-mic-ring{
+  position:absolute!important;
+  left:50%!important;
+  top:77%!important;
+  width:clamp(120px,18vw,300px)!important;
+  height:clamp(40px,6vw,92px)!important;
+  transform:translate(-50%,-50%) scale(.35)!important;
+  border:4px solid rgba(255,255,255,.42)!important;
+  border-radius:50%!important;
+  opacity:0!important;
+  animation:simpleMicRing 1.72s ease-out both!important;
+}
+.magic-simple-mic-impact{
+  position:absolute!important;
+  left:50%!important;
+  top:72%!important;
+  width:clamp(180px,27vw,440px)!important;
+  height:clamp(110px,14vw,220px)!important;
+  transform:translate(-50%,-50%)!important;
+  opacity:1!important;
+}
+.magic-simple-mic-impact i{
+  position:absolute!important;
+  left:50%!important;
+  bottom:30%!important;
+  width:5px!important;
+  height:0!important;
+  border-radius:999px!important;
+  transform-origin:50% 100%!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(251,191,36,.72),transparent)!important;
+  opacity:0!important;
+  animation:simpleMicBurst 1.72s ease-out both!important;
+}
+.magic-simple-mic-impact i:nth-child(1){transform:rotate(-48deg);animation-delay:.96s!important}
+.magic-simple-mic-impact i:nth-child(2){transform:rotate(-24deg);animation-delay:.99s!important}
+.magic-simple-mic-impact i:nth-child(3){transform:rotate(0deg);animation-delay:1.01s!important}
+.magic-simple-mic-impact i:nth-child(4){transform:rotate(24deg);animation-delay:.99s!important}
+.magic-simple-mic-impact i:nth-child(5){transform:rotate(48deg);animation-delay:.96s!important}
+@keyframes simpleMicDropFall{
+  0%{opacity:0;transform:translate(-50%,-50%) translateY(-8vh) rotate(-22deg) scale(.82)}
+  16%{opacity:1}
+  62%{transform:translate(-50%,-50%) translateY(88vh) rotate(18deg) scale(1.06)}
+  74%{transform:translate(-50%,-50%) translateY(78vh) rotate(-10deg) scale(1.02)}
+  88%{transform:translate(-50%,-50%) translateY(83vh) rotate(10deg) scale(1)}
+  100%{opacity:1;transform:translate(-50%,-50%) translateY(80vh) rotate(-8deg) scale(1)}
+}
+@keyframes simpleMicShadow{
+  0%,38%{opacity:0;transform:translateX(-50%) scale(.25)}
+  64%{opacity:.52;transform:translateX(-50%) scale(1.18)}
+  100%{opacity:.38;transform:translateX(-50%) scale(1)}
+}
+@keyframes simpleMicRing{
+  0%,58%{opacity:0;transform:translate(-50%,-50%) scale(.32)}
+  68%{opacity:.9;transform:translate(-50%,-50%) scale(.75)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.8)}
+}
+@keyframes simpleMicBurst{
+  0%,56%{opacity:0;height:0}
+  66%{opacity:1;height:clamp(38px,6vw,82px)}
+  100%{opacity:0;height:0}
+}
+@keyframes simpleMicGlow{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.7)}
+  48%,82%{opacity:.88;transform:translate(-50%,-50%) scale(1)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.16)}
+}
+.magic-effect-layer.magic-spotlight .magic-moving-spotlight{
+  --spot-size:clamp(220px,32vmin,380px)!important;
+}
+@media(max-width:700px){
+  .magic-effect-layer.magic-spotlight .magic-moving-spotlight{--spot-size:clamp(178px,48vmin,280px)!important;}
+  .magic-simple-mic{font-size:clamp(7.5rem,38vw,15rem)!important;}
+  .magic-simple-mic-shadow{top:79%!important;}
+  .magic-simple-mic-ring{top:78%!important;}
+  .magic-simple-mic-impact{top:72%!important;}
 }

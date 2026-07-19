@@ -162,7 +162,7 @@
       case 'confetti':
         return `<canvas class="magic-fx-canvas"></canvas><div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles confetti-full">${magicParticleMarkup('confetti', 120)}</div>${magicCenter('🎉', '', '', 'magic-pop')}`;
       case 'micdrop':
-        return `<div class="magic-micdrop-stage" aria-hidden="true"><div class="magic-micdrop-glow"></div><div class="magic-micdrop-vector-hand"><span class="palm"></span><span class="thumb"></span><span class="finger f1"></span><span class="finger f2"></span><span class="finger f3"></span></div><div class="magic-drop-microphone"><span class="mic-head"></span><span class="mic-grill g1"></span><span class="mic-grill g2"></span><span class="mic-grill g3"></span><span class="mic-band"></span><span class="mic-handle"></span><span class="mic-cord"></span></div><div class="magic-micdrop-shadow"></div><div class="magic-micdrop-impact"><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="magic-micdrop-ring"></div></div>`;
+        return `<div class="magic-stage-flash amber"></div><div class="magic-simple-micdrop" aria-hidden="true"><div class="magic-micdrop-glow"></div><div class="magic-simple-mic">🎤</div><div class="magic-simple-mic-impact"><i></i><i></i><i></i><i></i><i></i></div><div class="magic-simple-mic-ring"></div><div class="magic-simple-mic-shadow"></div></div>`;
       case 'curtain':
         return `<div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div>`;
       case 'bubbles':
@@ -1825,7 +1825,7 @@
     if (effect.id === 'confetti' || effect.id === 'bubbles') startCanvasMagicEffect(layer, effect.id);
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 3300, confetti: 3200, micdrop: 3200, curtain: 3400, bubbles: 8200, blur: 999999, quiet: 6200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 3300, confetti: 3200, micdrop: 3200, curtain: 3400, bubbles: 8200, blur: 999999, quiet: 2200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       clearMagicEffectLayer(layer);
     }, durations[effect.id] || 2200);
