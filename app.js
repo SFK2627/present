@@ -20,6 +20,14 @@
   const DB_VERSION = 1;
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
+  const MEDIA_CAST_ICE_SERVERS = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  };
+  const MEDIA_CAST_CHUNK_SIZE = 64 * 1024;
+  const MEDIA_CAST_MAX_FILE_BYTES = 350 * 1024 * 1024;
 
   const state = {
     files: [],
@@ -99,6 +107,9 @@
     classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, groupRollMode: 'balanced', rolledGroups: [], pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null, revealMode: '', busy: false },
     classroomSyncTimer: null,
     firebaseUser: null,
+    mediaCastReceiver: null,
+    mediaCastReceiverId: '',
+    mediaCastBlobUrl: '',
   };
 
 
@@ -2836,6 +2847,7 @@
       const data = snap.data();
       processRemoteCommand(data && data.command, 'snapshot');
       processRemoteCommand(data && data.lastMagicCommand, 'snapshot-magic');
+      processMediaCastSignal(data && data.mediaCast);
     }, (error) => {
       console.warn('Remote live listener failed; command polling fallback remains active.', error);
     });
@@ -2869,8 +2881,449 @@
         const data = snap.data();
         processRemoteCommand(data && data.command, 'poll');
         processRemoteCommand(data && data.lastMagicCommand, 'poll-magic');
+        processMediaCastSignal(data && data.mediaCast);
       } catch (error) {}
     }, 700);
+  }
+
+
+  function mediaCastSupported() {
+    return typeof RTCPeerConnection !== 'undefined';
+  }
+
+  function getMediaKindFromType(type = '', name = '') {
+    const mime = String(type || '').toLowerCase();
+    const fileName = String(name || '').toLowerCase();
+    if (mime.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(fileName)) return 'image';
+    if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg)$/i.test(fileName)) return 'audio';
+    if (mime.startsWith('video/') || /\.(mp4|webm|mov|m4v)$/i.test(fileName)) return 'video';
+    return 'file';
+  }
+
+  function formatMediaBytes(bytes = 0) {
+    const n = Number(bytes) || 0;
+    if (n < 1024) return `${Math.round(n)} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  }
+
+  function cleanMediaMeta(raw = {}) {
+    const name = String(raw.name || 'Media file').slice(0, 140);
+    const type = String(raw.type || '').slice(0, 120);
+    const size = Math.max(0, Number(raw.size) || 0);
+    return { name, type, size, kind: getMediaKindFromType(type, name) };
+  }
+
+  function waitForIceGatheringComplete(pc, timeout = 5200) {
+    return new Promise((resolve) => {
+      if (!pc || pc.iceGatheringState === 'complete') return resolve();
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        try { pc.removeEventListener('icegatheringstatechange', onChange); } catch (error) {}
+        resolve();
+      };
+      const onChange = () => {
+        if (pc.iceGatheringState === 'complete') finish();
+      };
+      pc.addEventListener('icegatheringstatechange', onChange);
+      setTimeout(finish, timeout);
+    });
+  }
+
+  async function updateMediaCastSignal(patch = {}) {
+    if (!state.sessionRef) return;
+    const dotted = {};
+    Object.keys(patch).forEach((key) => { dotted[`mediaCast.${key}`] = patch[key]; });
+    try {
+      await state.sessionRef.update(dotted);
+    } catch (error) {
+      try { await state.sessionRef.set({ mediaCast: patch }, { merge: true }); } catch (inner) {}
+    }
+  }
+
+  function processMediaCastSignal(signal) {
+    if (isRemoteMode || !signal || !signal.id) return;
+    if (signal.status === 'stop') {
+      if (state.mediaCastReceiverId === signal.id) closeMediaCastOverlay(false);
+      return;
+    }
+    if (!signal.offer || state.mediaCastReceiverId === signal.id) return;
+    if (signal.createdAt && Date.now() - Number(signal.createdAt) > 15 * 60 * 1000) return;
+    startMediaCastReceiver(signal).catch((error) => {
+      console.warn('Media Cast receiver failed:', error);
+      updateMediaCastSignal({ receiverStatus: 'error', receiverMessage: 'Desktop could not receive media.', receiverUpdatedAt: Date.now() });
+    });
+  }
+
+  async function startMediaCastReceiver(signal) {
+    if (!mediaCastSupported() || !state.sessionRef) return;
+    if (state.mediaCastReceiver && state.mediaCastReceiver.pc) {
+      try { state.mediaCastReceiver.pc.close(); } catch (error) {}
+    }
+    state.mediaCastReceiverId = signal.id;
+    const meta = cleanMediaMeta(signal.meta || {});
+    const transfer = { id: signal.id, meta, chunks: [], received: 0, pc: null, startedAt: Date.now() };
+    state.mediaCastReceiver = transfer;
+    showMediaCastReceiving(meta, 0);
+    await updateMediaCastSignal({ receiverStatus: 'connecting', receiverMessage: 'Desktop preparing media cast...', receiverUpdatedAt: Date.now() });
+
+    const pc = new RTCPeerConnection(MEDIA_CAST_ICE_SERVERS);
+    transfer.pc = pc;
+    pc.ondatachannel = (event) => {
+      const channel = event.channel;
+      channel.binaryType = 'arraybuffer';
+      channel.onopen = () => updateMediaCastSignal({ receiverStatus: 'receiving', receiverMessage: 'Receiving media...', receiverUpdatedAt: Date.now() });
+      channel.onerror = () => updateMediaCastSignal({ receiverStatus: 'error', receiverMessage: 'Media channel error.', receiverUpdatedAt: Date.now() });
+      channel.onmessage = async (event) => {
+        await handleMediaCastReceiverMessage(transfer, event.data);
+      };
+    };
+    pc.onconnectionstatechange = () => {
+      const status = pc.connectionState;
+      if (status === 'failed' || status === 'disconnected') {
+        updateMediaCastSignal({ receiverStatus: status, receiverMessage: 'Media cast connection was interrupted.', receiverUpdatedAt: Date.now() });
+      }
+    };
+    await pc.setRemoteDescription(new RTCSessionDescription(signal.offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await waitForIceGatheringComplete(pc);
+    await updateMediaCastSignal({ answer: pc.localDescription.toJSON ? pc.localDescription.toJSON() : { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, receiverStatus: 'ready', receiverMessage: 'Desktop ready. Sending file...', receiverUpdatedAt: Date.now() });
+  }
+
+  async function handleMediaCastReceiverMessage(transfer, data) {
+    if (!transfer || transfer.id !== state.mediaCastReceiverId) return;
+    if (typeof data === 'string') {
+      if (data.startsWith('PH_MEDIA_META:')) {
+        try { transfer.meta = cleanMediaMeta(JSON.parse(data.slice('PH_MEDIA_META:'.length))); } catch (error) {}
+        showMediaCastReceiving(transfer.meta, 0);
+        return;
+      }
+      if (data === 'PH_MEDIA_DONE') {
+        await finishMediaCastReceive(transfer);
+        return;
+      }
+      if (data.startsWith('PH_MEDIA_ABORT')) {
+        showMediaCastStatus('Media cast stopped by phone.', 'warning');
+        await updateMediaCastSignal({ receiverStatus: 'stopped', receiverMessage: 'Media cast stopped.', receiverUpdatedAt: Date.now() });
+      }
+      return;
+    }
+    let chunk = data;
+    if (data instanceof Blob) chunk = await data.arrayBuffer();
+    if (!chunk || !chunk.byteLength) return;
+    transfer.chunks.push(chunk);
+    transfer.received += chunk.byteLength;
+    showMediaCastReceiving(transfer.meta, transfer.received);
+    if (!transfer.lastStatusAt || Date.now() - transfer.lastStatusAt > 700) {
+      transfer.lastStatusAt = Date.now();
+      await updateMediaCastSignal({ receiverStatus: 'receiving', receiverReceived: transfer.received, receiverMessage: `Received ${formatMediaBytes(transfer.received)} of ${formatMediaBytes(transfer.meta.size)}`, receiverUpdatedAt: Date.now() });
+    }
+  }
+
+  async function finishMediaCastReceive(transfer) {
+    const meta = cleanMediaMeta(transfer.meta || {});
+    if (state.mediaCastBlobUrl) {
+      try { URL.revokeObjectURL(state.mediaCastBlobUrl); } catch (error) {}
+    }
+    const blob = new Blob(transfer.chunks, { type: meta.type || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    state.mediaCastBlobUrl = url;
+    showMediaCastPlayer(url, meta);
+    await updateMediaCastSignal({ receiverStatus: 'complete', receiverReceived: blob.size, receiverMessage: 'Media ready on desktop.', receiverUpdatedAt: Date.now() });
+    try { if (transfer.pc) transfer.pc.close(); } catch (error) {}
+  }
+
+  function ensureMediaCastLayer() {
+    let layer = document.getElementById('mediaCastLayer');
+    const host = document.fullscreenElement || document.body;
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'mediaCastLayer';
+      layer.className = 'media-cast-layer hidden';
+    }
+    if (layer.parentElement !== host) host.appendChild(layer);
+    return layer;
+  }
+
+  function showMediaCastReceiving(meta = {}, received = 0) {
+    const layer = ensureMediaCastLayer();
+    const total = Number(meta.size) || 0;
+    const pct = total ? Math.max(0, Math.min(100, Math.round((received / total) * 100))) : 0;
+    layer.className = 'media-cast-layer show receiving';
+    layer.innerHTML = `
+      <div class="media-cast-card receiving-card">
+        <div class="media-cast-spinner"></div>
+        <strong>Receiving media from phone...</strong>
+        <span>${escapeHtml(meta.name || 'Media file')}</span>
+        <div class="media-cast-progress"><i style="width:${pct}%"></i></div>
+        <small>${formatMediaBytes(received)} / ${formatMediaBytes(total)}</small>
+      </div>
+    `;
+  }
+
+  function showMediaCastStatus(message, tone = '') {
+    const layer = ensureMediaCastLayer();
+    layer.className = `media-cast-layer show ${tone}`;
+    layer.innerHTML = `<div class="media-cast-card"><strong>${escapeHtml(message || 'Media Cast')}</strong></div>`;
+  }
+
+  function showMediaCastPlayer(url, meta = {}) {
+    const safe = cleanMediaMeta(meta);
+    const layer = ensureMediaCastLayer();
+    const title = escapeHtml(safe.name || 'Media');
+    let mediaHtml = '';
+    if (safe.kind === 'image') {
+      mediaHtml = `<img class="media-cast-image" src="${url}" alt="${title}">`;
+    } else if (safe.kind === 'video') {
+      mediaHtml = `<video id="mediaCastPlayer" class="media-cast-player" src="${url}" controls playsinline preload="metadata"></video>`;
+    } else if (safe.kind === 'audio') {
+      mediaHtml = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">♪</div><strong>${title}</strong><audio id="mediaCastPlayer" class="media-cast-player" src="${url}" controls preload="metadata"></audio></div>`;
+    } else {
+      mediaHtml = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">FILE</div><strong>${title}</strong><small>This file type cannot be previewed.</small></div>`;
+    }
+    layer.className = `media-cast-layer show media-kind-${safe.kind}`;
+    layer.innerHTML = `
+      <div class="media-cast-frame">
+        <button id="mediaCastClose" type="button" class="media-cast-close">×</button>
+        <div class="media-cast-title">${title}</div>
+        <div class="media-cast-media-wrap">${mediaHtml}</div>
+      </div>
+    `;
+    const close = document.getElementById('mediaCastClose');
+    if (close) close.addEventListener('click', () => closeMediaCastOverlay(true));
+    const player = document.getElementById('mediaCastPlayer');
+    if (player) {
+      player.volume = 0.92;
+      player.addEventListener('play', () => layer.classList.add('is-playing'));
+      player.addEventListener('pause', () => layer.classList.remove('is-playing'));
+    }
+  }
+
+  function closeMediaCastOverlay(publishStop = false) {
+    const layer = document.getElementById('mediaCastLayer');
+    if (layer) {
+      layer.classList.add('hidden');
+      layer.classList.remove('show');
+      layer.innerHTML = '';
+    }
+    if (state.mediaCastBlobUrl) {
+      try { URL.revokeObjectURL(state.mediaCastBlobUrl); } catch (error) {}
+      state.mediaCastBlobUrl = '';
+    }
+    if (state.mediaCastReceiver && state.mediaCastReceiver.pc) {
+      try { state.mediaCastReceiver.pc.close(); } catch (error) {}
+    }
+    state.mediaCastReceiver = null;
+    if (publishStop) updateMediaCastSignal({ receiverStatus: 'closed', receiverMessage: 'Media closed on desktop.', receiverUpdatedAt: Date.now() });
+  }
+
+  function showMediaCastGesturePrompt(player) {
+    const layer = ensureMediaCastLayer();
+    let prompt = document.getElementById('mediaCastGesturePrompt');
+    if (!prompt) {
+      prompt = document.createElement('div');
+      prompt.id = 'mediaCastGesturePrompt';
+      prompt.className = 'media-cast-gesture';
+      prompt.innerHTML = '<strong>Tap desktop once to play sound/video</strong><button type="button">Play now</button>';
+      layer.appendChild(prompt);
+    }
+    const button = prompt.querySelector('button');
+    if (button) button.onclick = () => {
+      try { player.play().then(() => prompt.remove()).catch(() => {}); } catch (error) {}
+    };
+  }
+
+  function controlMediaCast(raw = {}) {
+    const action = typeof raw === 'string' ? raw : String(raw.type || raw.action || '');
+    const layer = document.getElementById('mediaCastLayer');
+    const player = document.getElementById('mediaCastPlayer');
+    if (action === 'stop') { closeMediaCastOverlay(false); return; }
+    if (action === 'hide') { if (layer) layer.classList.add('media-cast-minimized'); return; }
+    if (action === 'show') { if (layer) layer.classList.remove('media-cast-minimized', 'hidden'); return; }
+    if (!player) return;
+    if (action === 'play') {
+      try { player.play().catch(() => showMediaCastGesturePrompt(player)); } catch (error) { showMediaCastGesturePrompt(player); }
+      return;
+    }
+    if (action === 'pause') { try { player.pause(); } catch (error) {} return; }
+    if (action === 'toggle') {
+      try { if (player.paused) player.play().catch(() => showMediaCastGesturePrompt(player)); else player.pause(); } catch (error) {}
+      return;
+    }
+    if (action === 'volume') {
+      const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
+      try { player.volume = value; player.muted = value <= 0; } catch (error) {}
+    }
+  }
+
+  function setRemoteMediaStatus(message, tone = '') {
+    const node = $('remoteMediaStatus');
+    if (!node) return;
+    node.textContent = message || 'Ready to cast media.';
+    node.classList.remove('ok', 'warn', 'error', 'busy');
+    if (tone) node.classList.add(tone);
+  }
+
+  function syncRemoteMediaStatus(signal = {}) {
+    const current = window.__phRemoteMediaCast || null;
+    if (!signal || !signal.id) return;
+    if (current && current.id && signal.id !== current.id) return;
+    const status = signal.receiverStatus || signal.status || '';
+    if (status === 'ready') setRemoteMediaStatus('Desktop ready. Sending media...', 'busy');
+    else if (status === 'receiving') setRemoteMediaStatus(signal.receiverMessage || 'Desktop is receiving media...', 'busy');
+    else if (status === 'complete') setRemoteMediaStatus('Media is now showing on desktop.', 'ok');
+    else if (status === 'error' || status === 'failed' || status === 'disconnected') setRemoteMediaStatus(signal.receiverMessage || 'Media Cast failed. Try same WiFi or a smaller file.', 'error');
+    else if (status === 'connecting') setRemoteMediaStatus('Desktop is preparing receiver...', 'busy');
+  }
+
+  function waitForDataChannelOpen(channel, timeout = 30000) {
+    return new Promise((resolve, reject) => {
+      if (!channel) return reject(new Error('No media data channel.'));
+      if (channel.readyState === 'open') return resolve();
+      const timer = setTimeout(() => reject(new Error('Timed out waiting for media channel.')), timeout);
+      channel.onopen = () => { clearTimeout(timer); resolve(); };
+      channel.onerror = () => { clearTimeout(timer); reject(new Error('Media data channel failed.')); };
+    });
+  }
+
+  function waitForBufferedAmountLow(channel) {
+    return new Promise((resolve) => {
+      if (!channel || channel.bufferedAmount < 2 * 1024 * 1024) return resolve();
+      const prev = channel.onbufferedamountlow;
+      channel.bufferedAmountLowThreshold = 512 * 1024;
+      channel.onbufferedamountlow = (...args) => {
+        channel.onbufferedamountlow = prev || null;
+        resolve(...args);
+      };
+      setTimeout(resolve, 900);
+    });
+  }
+
+  async function sendFileOverDataChannel(channel, file) {
+    const meta = cleanMediaMeta({ name: file.name, type: file.type, size: file.size });
+    channel.send(`PH_MEDIA_META:${JSON.stringify(meta)}`);
+    let offset = 0;
+    const statusEvery = 280;
+    let lastStatus = 0;
+    while (offset < file.size) {
+      if (channel.readyState !== 'open') throw new Error('Media channel closed.');
+      await waitForBufferedAmountLow(channel);
+      const chunk = await file.slice(offset, offset + MEDIA_CAST_CHUNK_SIZE).arrayBuffer();
+      channel.send(chunk);
+      offset += chunk.byteLength;
+      const now = Date.now();
+      if (now - lastStatus > statusEvery || offset >= file.size) {
+        lastStatus = now;
+        const pct = file.size ? Math.round((offset / file.size) * 100) : 100;
+        setRemoteMediaStatus(`Sending ${pct}% • ${formatMediaBytes(offset)} / ${formatMediaBytes(file.size)}`, 'busy');
+      }
+    }
+    channel.send('PH_MEDIA_DONE');
+  }
+
+  async function startRemoteMediaCast(ref, file) {
+    if (!ref || !file) return;
+    if (!mediaCastSupported()) {
+      setRemoteMediaStatus('This browser does not support Media Cast.', 'error');
+      return;
+    }
+    if (!/^(image|audio|video)\//i.test(file.type || '') && !/\.(png|jpe?g|webp|gif|mp3|wav|m4a|aac|ogg|mp4|webm|mov|m4v)$/i.test(file.name || '')) {
+      setRemoteMediaStatus('Please choose a picture, audio, or video file.', 'warn');
+      return;
+    }
+    if (file.size > MEDIA_CAST_MAX_FILE_BYTES) {
+      setRemoteMediaStatus(`File is too large for beta cast (${formatMediaBytes(file.size)}). Try below ${formatMediaBytes(MEDIA_CAST_MAX_FILE_BYTES)}.`, 'warn');
+      return;
+    }
+    if (window.__phRemoteMediaCast && window.__phRemoteMediaCast.pc) {
+      try { window.__phRemoteMediaCast.pc.close(); } catch (error) {}
+      try { if (window.__phRemoteMediaCast.unsubscribe) window.__phRemoteMediaCast.unsubscribe(); } catch (error) {}
+    }
+    const id = `media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const meta = cleanMediaMeta({ name: file.name, type: file.type, size: file.size });
+    setRemoteMediaStatus(`Preparing ${meta.kind} • ${formatMediaBytes(file.size)}`, 'busy');
+    const pc = new RTCPeerConnection(MEDIA_CAST_ICE_SERVERS);
+    const channel = pc.createDataChannel('presentationHubMediaCast', { ordered: true });
+    channel.binaryType = 'arraybuffer';
+    channel.bufferedAmountLowThreshold = 512 * 1024;
+    let answerApplied = false;
+    const unsubscribe = ref.onSnapshot(async (snap) => {
+      try {
+        const data = snap.exists ? snap.data() : {};
+        const signal = data && data.mediaCast;
+        if (!signal || signal.id !== id) return;
+        syncRemoteMediaStatus(signal);
+        if (signal.answer && !answerApplied) {
+          answerApplied = true;
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.answer));
+        }
+      } catch (error) {
+        console.warn('Could not apply Media Cast answer:', error);
+      }
+    });
+    window.__phRemoteMediaCast = { id, pc, channel, unsubscribe };
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitForIceGatheringComplete(pc);
+      await ref.set({ mediaCast: { id, status: 'offer', meta, offer: pc.localDescription.toJSON ? pc.localDescription.toJSON() : { type: pc.localDescription.type, sdp: pc.localDescription.sdp }, createdAt: Date.now(), receiverStatus: 'waiting', receiverMessage: 'Waiting for desktop receiver...' } }, { merge: true });
+      setRemoteMediaStatus('Connecting to desktop...', 'busy');
+      await waitForDataChannelOpen(channel, 36000);
+      await sendFileOverDataChannel(channel, file);
+      await wait(450);
+      setRemoteMediaStatus('Media sent. It should appear on desktop now.', 'ok');
+      try { channel.close(); } catch (error) {}
+      try { pc.close(); } catch (error) {}
+      try { unsubscribe(); } catch (error) {}
+    } catch (error) {
+      console.warn('Media Cast send failed:', error);
+      setRemoteMediaStatus('Media Cast failed. Try same WiFi, smaller file, or reconnect QR.', 'error');
+      try { await ref.set({ mediaCast: { id, status: 'error', receiverStatus: 'error', receiverMessage: 'Phone could not send media.' } }, { merge: true }); } catch (inner) {}
+      try { unsubscribe(); } catch (inner) {}
+      try { pc.close(); } catch (inner) {}
+    }
+  }
+
+  function attachRemoteMediaCastControls(ref, isHost) {
+    const fileInput = $('remoteMediaFile');
+    const sendBtn = $('remoteMediaSend');
+    const fileName = $('remoteMediaFileName');
+    if (!fileInput || !sendBtn) return;
+    let selectedFile = null;
+    fileInput.addEventListener('change', () => {
+      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+      if (fileName) fileName.textContent = selectedFile ? `${selectedFile.name} • ${formatMediaBytes(selectedFile.size)}` : 'No media selected';
+      sendBtn.disabled = !selectedFile || !isHost;
+      if (selectedFile) setRemoteMediaStatus('Ready to cast. Tap Cast to Screen.', 'ok');
+    });
+    sendBtn.addEventListener('click', () => {
+      if (!isHost || !selectedFile) return;
+      startRemoteMediaCast(ref, selectedFile);
+    });
+    const command = (type, value) => {
+      if (!isHost) return;
+      sendRemoteCommand(ref, 'mediaCastControl', { type, value });
+      if (type === 'stop') {
+        try { ref.set({ mediaCast: { id: window.__phRemoteMediaCast ? window.__phRemoteMediaCast.id : `media-${Date.now()}`, status: 'stop', receiverStatus: 'stopped', receiverMessage: 'Media stopped from phone.', stoppedAt: Date.now() } }, { merge: true }); } catch (error) {}
+      }
+    };
+    const bind = (id, type) => { const node = $(id); if (node) node.addEventListener('click', () => command(type)); };
+    bind('remoteMediaPlay', 'play');
+    bind('remoteMediaPause', 'pause');
+    bind('remoteMediaShow', 'show');
+    bind('remoteMediaHide', 'hide');
+    bind('remoteMediaStop', 'stop');
+    const volume = $('remoteMediaVolume');
+    if (volume) volume.addEventListener('input', () => {
+      const value = Math.max(0, Math.min(1, Number(volume.value) / 100));
+      command('volume', value);
+      const label = $('remoteMediaVolumeLabel');
+      if (label) label.textContent = `${Math.round(value * 100)}%`;
+    });
   }
 
   function makeSessionId() {
@@ -3127,6 +3580,9 @@
         break;
       case 'testMagicEffect':
         triggerMagicEffect(command.value || 'confetti');
+        break;
+      case 'mediaCastControl':
+        controlMediaCast(command.value || {});
         break;
       case 'classroomSetSection':
         state.classroom.activeSectionId = String(command.value || '');
@@ -3393,6 +3849,28 @@
           <button class="remote-main-action remote-prev-action" data-command="prev" data-host-only="true">← Prev</button>
           <button class="remote-main-action remote-next-action" data-command="next" data-host-only="true">Next →</button>
           <button class="remote-small-action" data-command="last" data-host-only="true">Last</button>
+        </section>
+
+        <section class="remote-section remote-premium-section remote-media-cast-section" data-host-only="true">
+          <div class="remote-section-title"><span>Media Cast Beta</span><small>Pictures, audio, or MP4 from this phone</small></div>
+          <div class="remote-media-cast-card">
+            <label class="remote-media-picker">Choose media
+              <input id="remoteMediaFile" type="file" accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.m4v,.mp3,.wav,.m4a,.aac,.ogg,.png,.jpg,.jpeg,.webp,.gif" data-host-only="true">
+            </label>
+            <div id="remoteMediaFileName" class="remote-media-file-name">No media selected</div>
+            <button id="remoteMediaSend" type="button" class="remote-media-send" disabled data-host-only="true">Cast to Screen</button>
+            <div class="remote-media-controls">
+              <button id="remoteMediaPlay" type="button" data-host-only="true">Play</button>
+              <button id="remoteMediaPause" type="button" data-host-only="true">Pause</button>
+              <button id="remoteMediaShow" type="button" data-host-only="true">Show</button>
+              <button id="remoteMediaHide" type="button" data-host-only="true">Hide</button>
+              <button id="remoteMediaStop" type="button" data-host-only="true">Stop</button>
+            </div>
+            <label class="remote-media-volume">Volume <span id="remoteMediaVolumeLabel">90%</span>
+              <input id="remoteMediaVolume" type="range" min="0" max="100" step="1" value="90" data-host-only="true">
+            </label>
+            <div id="remoteMediaStatus" class="remote-media-status">No permanent upload. File is sent only for this live session.</div>
+          </div>
         </section>
 
         <section class="remote-section remote-premium-section remote-magic-section" data-host-only="true">
@@ -3698,6 +4176,7 @@
         if ($('remoteMagicVolumeLabel')) $('remoteMagicVolumeLabel').textContent = `${data.magicEffectVolume ?? 200}%`;
         if ($('remoteMagicSound')) $('remoteMagicSound').checked = data.magicEffectSound !== false;
         if ($('remoteMagicIntensity')) $('remoteMagicIntensity').value = data.magicEffectIntensity || 'grand';
+        syncRemoteMediaStatus(data && data.mediaCast);
         $('remoteAutoLabel').textContent = data.autoPlaying
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
@@ -3787,6 +4266,8 @@
           sendRemoteCommand(ref, 'testMagicEffect', 'confetti');
         });
       }
+
+      attachRemoteMediaCastControls(ref, isHost);
 
       const allSlidesBtn = $('remoteAllSlidesBtn');
       const slidesPanel = $('remoteSlidesPanel');
@@ -4478,7 +4959,7 @@
 
   function sendRemoteCommand(ref, action, value) {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const command = { id, action, value: value ?? null, issuedAt: Date.now(), v: 11 };
+    const command = { id, action, value: value ?? null, issuedAt: Date.now(), v: 12 };
     const mirror = action === 'magicEffect' || action === 'testMagicEffect'
       ? { lastMagicCommand: command, lastMagicCommandAt: Date.now() }
       : {};
