@@ -34,12 +34,19 @@
           <h2>Open, present, auto-play, and control slides from your phone.</h2>
           <p>Upload PDF or PPTX files. PowerPoint files are automatically converted into a PDF-style viewer when possible.</p>
         </div>
-        <label class="upload-zone" id="uploadZone">
-          <input id="fileInput" type="file" multiple accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
-          <span class="upload-icon">⬆</span>
-          <strong>Upload presentations</strong>
-          <small>Drop or select PDF/PPTX files</small>
-        </label>
+        <div class="hero-action-stack">
+          <label class="upload-zone" id="uploadZone">
+            <input id="fileInput" type="file" multiple accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+            <span class="upload-icon">⬆</span>
+            <strong>Upload presentations</strong>
+            <small>Drop or select PDF/PPTX files</small>
+          </label>
+          <button id="mediaViewerBtn" type="button" class="media-viewer-home-btn">
+            <span>🎬</span>
+            <strong>Media Viewing</strong>
+            <small>Open screen for images, MP3, MP4, YouTube, or TikTok remote casting</small>
+          </button>
+        </div>
       </section>
 
       <section class="toolbar-card glass">
@@ -167,29 +174,9 @@
                   <option value="slide-left">Slide left</option>
                   <option value="slide-right">Slide right</option>
                   <option value="slide-up">Slide up</option>
-                  <option value="slide-down">Slide down</option>
                   <option value="zoom-in">Zoom in</option>
                   <option value="zoom-out">Zoom out</option>
                   <option value="soft-blur">Soft blur</option>
-                  <option value="bounce-pop">Bounce pop</option>
-                  <option value="happy-pop">Happy pop</option>
-                  <option value="elastic-pop">Elastic pop</option>
-                  <option value="sparkle-zoom">Sparkle zoom</option>
-                  <option value="page-flip">Page flip</option>
-                  <option value="paper-turn">Paper turn</option>
-                  <option value="circle-reveal">Circle reveal</option>
-                  <option value="corner-reveal">Corner reveal</option>
-                  <option value="bright-wipe">Bright wipe</option>
-                  <option value="ribbon-wipe">Ribbon wipe</option>
-                  <option value="split-open">Split open</option>
-                  <option value="drop-in">Drop in</option>
-                  <option value="float-up">Float up</option>
-                  <option value="diagonal-rise">Diagonal rise</option>
-                  <option value="diagonal-fall">Diagonal fall</option>
-                  <option value="smooth-swing">Smooth swing</option>
-                  <option value="push-left">Push left</option>
-                  <option value="push-right">Push right</option>
-                  <option value="carousel">Carousel</option>
                   <option value="none">None</option>
                 </select>
               </label>

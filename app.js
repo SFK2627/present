@@ -110,6 +110,8 @@
     mediaCastReceiver: null,
     mediaCastReceiverId: '',
     mediaCastBlobUrl: '',
+    mediaMode: false,
+    mediaLinkVolume: 0.9,
   };
 
 
@@ -327,7 +329,7 @@
     [
       'app', 'remoteApp', 'homeView', 'viewerView', 'fileInput', 'uploadZone', 'searchInput', 'sortSelect',
       'cardsGrid', 'emptyState', 'libraryCount', 'clearLibraryBtn', 'themeToggle', 'firebaseStatus',
-      'createFolderBtn', 'folderList',
+      'mediaViewerBtn', 'createFolderBtn', 'folderList',
       'thumbnailSidebar', 'viewerStage', 'viewerToolbar', 'controlPanel', 'settingsBtn', 'backHomeBtn',
       'prevBtn', 'nextBtn', 'jumpInput', 'pageTotalLabel', 'zoomOutBtn', 'zoomInBtn', 'resetZoomBtn',
       'zoomLabel', 'fullscreenBtn', 'qrBtn', 'viewerCanvasWrap', 'pdfCanvas', 'pptxSlide', 'inkCanvas',
@@ -360,6 +362,7 @@
     if (els.createFolderBtn) els.createFolderBtn.addEventListener('click', createFolder);
     if (els.themeToggle) els.themeToggle.addEventListener('click', toggleTheme);
     if (els.firebaseStatus) els.firebaseStatus.addEventListener('click', () => showModal(els.setupModal));
+    if (els.mediaViewerBtn) els.mediaViewerBtn.addEventListener('click', openMediaViewer);
     if (els.closeSetupBtn) els.closeSetupBtn.addEventListener('click', () => hideModal(els.setupModal));
 
     if (els.backHomeBtn) els.backHomeBtn.addEventListener('click', closeViewer);
@@ -1198,6 +1201,11 @@
     if (!file) return;
     stopAutoPlay();
     stopTimerInterval();
+    closeMediaCastOverlay(false);
+    state.mediaMode = false;
+    els.viewerView.classList.remove('media-viewer-mode');
+    const mediaWelcome = document.getElementById('mediaViewerWelcome');
+    if (mediaWelcome) mediaWelcome.remove();
     state.activeFile = file;
     state.currentPage = 1;
     state.totalPages = file.pageCount || 1;
@@ -1281,9 +1289,13 @@
 
   function closeViewer() {
     if (document.fullscreenElement === els.viewerView) document.exitFullscreen().catch(() => {});
-    els.viewerView.classList.remove('presentation-fullscreen');
+    els.viewerView.classList.remove('presentation-fullscreen', 'media-viewer-mode');
     stopAutoPlay();
     stopTimerInterval();
+    closeMediaCastOverlay(false);
+    state.mediaMode = false;
+    const mediaWelcome = document.getElementById('mediaViewerWelcome');
+    if (mediaWelcome) mediaWelcome.remove();
     if (state.unsubscribeSession) state.unsubscribeSession();
     state.unsubscribeSession = null;
     state.sessionRef = null;
@@ -1308,6 +1320,72 @@
     els.viewerView.classList.add('hidden');
     els.homeView.classList.remove('hidden');
     renderLibrary();
+  }
+
+
+  function ensureMediaViewerWelcome() {
+    if (!els.viewerCanvasWrap) return null;
+    let welcome = document.getElementById('mediaViewerWelcome');
+    if (!welcome) {
+      welcome = document.createElement('div');
+      welcome.id = 'mediaViewerWelcome';
+      welcome.className = 'media-viewer-welcome glass';
+      els.viewerCanvasWrap.appendChild(welcome);
+    }
+    welcome.innerHTML = `
+      <div class="media-viewer-welcome-icon">🎬</div>
+      <h2>Media Viewing Mode</h2>
+      <p>Use the phone host remote to cast pictures, MP3, MP4, or paste online links like YouTube, TikTok, and direct media URLs.</p>
+      <div class="media-viewer-welcome-actions">
+        <button id="mediaViewerQrNow" type="button">Open Remote QR</button>
+        <button id="mediaViewerFullscreenNow" type="button">Fullscreen Screen</button>
+      </div>
+      <small>No PDF/PPT is needed. Media is shown only during this live session.</small>
+    `;
+    const qr = welcome.querySelector('#mediaViewerQrNow');
+    if (qr) qr.addEventListener('click', openQrModal);
+    const full = welcome.querySelector('#mediaViewerFullscreenNow');
+    if (full) full.addEventListener('click', toggleFullscreen);
+    return welcome;
+  }
+
+  async function openMediaViewer() {
+    stopAutoPlay();
+    stopTimerInterval();
+    state.mediaMode = true;
+    state.activeFile = null;
+    state.activePdf = null;
+    state.activePptxSlides = [];
+    state.pptxVisualReady = false;
+    state.currentPage = 0;
+    state.totalPages = 0;
+    state.zoom = 1;
+    state.viewportCenterX = 0.5;
+    state.viewportCenterY = 0.5;
+    state.inkStrokes = [];
+    state.remoteSlideThumbs = {};
+    state.remoteSlideThumbsCount = 0;
+    if (state.pptxBlobUrl) {
+      try { URL.revokeObjectURL(state.pptxBlobUrl); } catch (error) {}
+      state.pptxBlobUrl = '';
+    }
+    resetPdfLayers();
+    els.homeView.classList.add('hidden');
+    els.viewerView.classList.remove('hidden');
+    els.viewerView.classList.add('media-viewer-mode');
+    if (els.thumbnailSidebar) els.thumbnailSidebar.innerHTML = '';
+    if (els.pdfCanvas) els.pdfCanvas.classList.add('hidden');
+    if (els.pptxSlide) els.pptxSlide.classList.add('hidden');
+    if (els.inkCanvas) els.inkCanvas.classList.add('hidden');
+    if (els.jumpInput) { els.jumpInput.value = ''; els.jumpInput.disabled = true; els.jumpInput.placeholder = 'Media'; }
+    if (els.pageTotalLabel) els.pageTotalLabel.textContent = '/ Media';
+    if (els.prevBtn) els.prevBtn.disabled = true;
+    if (els.nextBtn) els.nextBtn.disabled = true;
+    updateZoomLabel();
+    ensureMediaViewerWelcome();
+    revealToolbarTemporarily();
+    if (!state.firebaseReady && hasFirebaseConfig()) await initFirebaseIfConfigured();
+    await setupRemoteSessionIfPossible();
   }
 
   async function preparePptxVisualRenderer(blob) {
@@ -2826,7 +2904,7 @@
   }
 
   async function setupRemoteSessionIfPossible() {
-    if (!state.firebaseReady || !state.activeFile) return;
+    if (!state.firebaseReady || (!state.activeFile && !state.mediaMode)) return;
     if (state.unsubscribeSession) state.unsubscribeSession();
     state.sessionId = state.sessionId || makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
@@ -3137,13 +3215,138 @@
     };
   }
 
+
+  function normalizeOnlineMediaUrl(value = '') {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    try {
+      const url = new URL(raw);
+      if (!/^https?:$/i.test(url.protocol)) return null;
+      return url;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function extractYouTubeId(url) {
+    if (!url) return '';
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    if (host === 'youtu.be') return (url.pathname.split('/').filter(Boolean)[0] || '').slice(0, 24);
+    if (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) {
+      if (url.searchParams.get('v')) return url.searchParams.get('v').slice(0, 24);
+      const parts = url.pathname.split('/').filter(Boolean);
+      const embedIndex = parts.findIndex((part) => ['embed', 'shorts', 'live'].includes(part));
+      if (embedIndex >= 0 && parts[embedIndex + 1]) return parts[embedIndex + 1].slice(0, 24);
+    }
+    return '';
+  }
+
+  function extractTikTokVideoId(url) {
+    if (!url) return '';
+    const parts = url.pathname.split('/').filter(Boolean);
+    const videoIndex = parts.indexOf('video');
+    if (videoIndex >= 0 && parts[videoIndex + 1]) return parts[videoIndex + 1].replace(/[^0-9]/g, '').slice(0, 32);
+    return '';
+  }
+
+  function detectOnlineMediaKind(url) {
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    const path = url.pathname.toLowerCase();
+    if (host === 'youtu.be' || host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) return 'youtube';
+    if (host.endsWith('tiktok.com') || host === 'vm.tiktok.com' || host === 'vt.tiktok.com') return 'tiktok';
+    if (/\.(png|jpe?g|webp|gif|bmp|svg)(\?.*)?$/i.test(`${url.pathname}${url.search}`)) return 'image';
+    if (/\.(mp3|wav|m4a|aac|ogg)(\?.*)?$/i.test(`${url.pathname}${url.search}`)) return 'audio';
+    if (/\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(`${url.pathname}${url.search}`)) return 'video';
+    return 'web';
+  }
+
+  function postYouTubeCommand(func, args = []) {
+    const frame = document.getElementById('mediaCastLinkFrame');
+    if (!frame || !frame.contentWindow || frame.dataset.provider !== 'youtube') return;
+    try {
+      frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), '*');
+    } catch (error) {}
+  }
+
+  function showOnlineMediaCast(payload = {}) {
+    const parsed = normalizeOnlineMediaUrl(payload.url || payload.link || '');
+    if (!parsed) { showMediaCastStatus('Invalid media link.', 'warning'); return; }
+    const kind = detectOnlineMediaKind(parsed);
+    const rawVolume = Number(payload.volume);
+    const volume = Math.max(0, Math.min(1, Number.isFinite(rawVolume) ? rawVolume : (state.mediaLinkVolume || 0.9)));
+    state.mediaLinkVolume = volume;
+    const layer = ensureMediaCastLayer();
+    const rawUrl = parsed.toString();
+    const safeUrl = escapeHtml(rawUrl);
+    const safeTitle = escapeHtml(kind === 'youtube' ? 'YouTube Link' : kind === 'tiktok' ? 'TikTok Link' : 'Online Media Link');
+    let content = '';
+
+    if (kind === 'youtube') {
+      const id = extractYouTubeId(parsed);
+      if (!id) { showMediaCastStatus('Could not read the YouTube video ID.', 'warning'); return; }
+      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&autoplay=1&playsinline=1&rel=0&modestbranding=1`;
+      content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="youtube" src="${escapeHtml(embed)}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
+    } else if (kind === 'tiktok') {
+      const id = extractTikTokVideoId(parsed);
+      const embed = id ? `https://www.tiktok.com/embed/v2/${encodeURIComponent(id)}` : rawUrl;
+      content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame tiktok" data-provider="tiktok" src="${escapeHtml(embed)}" title="TikTok video" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+    } else if (kind === 'image') {
+      content = `<img class="media-cast-image" src="${safeUrl}" alt="Online image">`;
+    } else if (kind === 'video') {
+      content = `<video id="mediaCastPlayer" class="media-cast-player" src="${safeUrl}" controls playsinline autoplay preload="auto"></video>`;
+    } else if (kind === 'audio') {
+      content = `<div class="media-cast-audio-card"><div class="media-cast-audio-icon">♪</div><strong>Online Audio</strong><audio id="mediaCastPlayer" class="media-cast-player" src="${safeUrl}" controls autoplay preload="auto"></audio></div>`;
+    } else {
+      content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="web" src="${safeUrl}" title="Online media page" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+    }
+
+    layer.className = `media-cast-layer show media-kind-${kind} media-link-mode`;
+    layer.innerHTML = `
+      <div class="media-cast-frame media-cast-link-frame-wrap">
+        <button id="mediaCastClose" type="button" class="media-cast-close">×</button>
+        <div class="media-cast-title">${safeTitle}</div>
+        <div class="media-cast-media-wrap">${content}</div>
+        <div class="media-cast-link-note">${kind === 'tiktok' ? 'TikTok autoplay/volume depends on the embedded player permission.' : 'Remote controls are synced to this desktop screen.'}</div>
+      </div>
+    `;
+    const close = document.getElementById('mediaCastClose');
+    if (close) close.addEventListener('click', () => closeMediaCastOverlay(true));
+    const player = document.getElementById('mediaCastPlayer');
+    if (player) {
+      try { player.volume = volume; player.muted = volume <= 0; } catch (error) {}
+      if (payload.autoplay !== false) {
+        try { player.play().catch(() => showMediaCastGesturePrompt(player)); } catch (error) { showMediaCastGesturePrompt(player); }
+      }
+    }
+    if (kind === 'youtube') {
+      window.setTimeout(() => {
+        postYouTubeCommand('setVolume', [Math.round(volume * 100)]);
+        if (payload.autoplay !== false) postYouTubeCommand('playVideo');
+      }, 1400);
+    }
+  }
+
   function controlMediaCast(raw = {}) {
     const action = typeof raw === 'string' ? raw : String(raw.type || raw.action || '');
     const layer = document.getElementById('mediaCastLayer');
     const player = document.getElementById('mediaCastPlayer');
+    const frame = document.getElementById('mediaCastLinkFrame');
+    const provider = frame ? String(frame.dataset.provider || '') : '';
     if (action === 'stop') { closeMediaCastOverlay(false); return; }
     if (action === 'hide') { if (layer) layer.classList.add('media-cast-minimized'); return; }
     if (action === 'show') { if (layer) layer.classList.remove('media-cast-minimized', 'hidden'); return; }
+    if (provider === 'youtube') {
+      if (action === 'play') { postYouTubeCommand('playVideo'); return; }
+      if (action === 'pause') { postYouTubeCommand('pauseVideo'); return; }
+      if (action === 'toggle') { postYouTubeCommand('playVideo'); return; }
+      if (action === 'volume') {
+        const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
+        state.mediaLinkVolume = value;
+        postYouTubeCommand('setVolume', [Math.round(value * 100)]);
+        if (value <= 0) postYouTubeCommand('mute'); else postYouTubeCommand('unMute');
+        return;
+      }
+    }
     if (!player) return;
     if (action === 'play') {
       try { player.play().catch(() => showMediaCastGesturePrompt(player)); } catch (error) { showMediaCastGesturePrompt(player); }
@@ -3156,6 +3359,7 @@
     }
     if (action === 'volume') {
       const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
+      state.mediaLinkVolume = value;
       try { player.volume = value; player.muted = value <= 0; } catch (error) {}
     }
   }
@@ -3304,6 +3508,22 @@
       if (!isHost || !selectedFile) return;
       startRemoteMediaCast(ref, selectedFile);
     });
+    const linkInput = $('remoteMediaLink');
+    const linkBtn = $('remoteMediaLinkCast');
+    if (linkBtn && linkInput) {
+      linkBtn.addEventListener('click', () => {
+        if (!isHost) return;
+        const url = String(linkInput.value || '').trim();
+        if (!url) { setRemoteMediaStatus('Paste a YouTube, TikTok, or media link first.', 'warn'); return; }
+        let parsed = null;
+        try { parsed = new URL(url); } catch (error) {}
+        if (!parsed || !/^https?:$/i.test(parsed.protocol)) { setRemoteMediaStatus('Use a valid http/https media link.', 'warn'); return; }
+        const volumeNode = $('remoteMediaVolume');
+        const volumeValue = volumeNode ? Math.max(0, Math.min(1, Number(volumeNode.value) / 100)) : 0.9;
+        sendRemoteCommand(ref, 'mediaLinkCast', { url, volume: volumeValue, autoplay: true });
+        setRemoteMediaStatus('Link sent. Desktop should open and play it now.', 'busy');
+      });
+    }
     const command = (type, value) => {
       if (!isHost) return;
       sendRemoteCommand(ref, 'mediaCastControl', { type, value });
@@ -3331,17 +3551,18 @@
   }
 
   async function publishSessionState(force = false) {
-    if (!state.sessionRef || !state.activeFile || (state.publishLock && !force)) return;
+    if (!state.sessionRef || (!state.activeFile && !state.mediaMode) || (state.publishLock && !force)) return;
     state.publishLock = true;
     setTimeout(() => { state.publishLock = false; }, force ? 0 : 120);
 
     // Keep the hot remote-control path light: write slide/control state first,
     // then upload the heavier thumbnail preview in a short deferred task.
     const payload = {
-      fileName: state.activeFile.name,
-      type: state.activeFile.type,
-      currentPage: state.currentPage,
-      totalPages: state.totalPages,
+      fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
+      type: state.activeFile ? state.activeFile.type : 'media',
+      currentPage: state.activeFile ? state.currentPage : 0,
+      totalPages: state.activeFile ? state.totalPages : 0,
+      mediaMode: !state.activeFile && !!state.mediaMode,
       zoom: state.zoom,
       viewportCenterX: state.viewportCenterX,
       viewportCenterY: state.viewportCenterY,
@@ -3374,7 +3595,7 @@
 
     try {
       await state.sessionRef.set(payload, { merge: true });
-      scheduleRemotePreviewPublish(force ? 60 : 220);
+      if (state.activeFile) scheduleRemotePreviewPublish(force ? 60 : 220);
     } catch (error) {
       console.warn('Could not publish session:', error);
     }
@@ -3584,6 +3805,9 @@
       case 'mediaCastControl':
         controlMediaCast(command.value || {});
         break;
+      case 'mediaLinkCast':
+        showOnlineMediaCast(command.value || {});
+        break;
       case 'classroomSetSection':
         state.classroom.activeSectionId = String(command.value || '');
         state.classroom.pickedIds = [];
@@ -3771,12 +3995,12 @@
   }
 
   async function openQrModal() {
-    if (!state.activeFile) return;
+    if (!state.activeFile && !state.mediaMode) return;
     if (!state.firebaseReady) {
       els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
     } else {
       await setupRemoteSessionIfPossible();
-      els.qrHelp.textContent = `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
+      els.qrHelp.textContent = state.mediaMode && !state.activeFile ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.` : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
     }
 
     const session = state.sessionId || 'NO-FIREBASE';
@@ -3859,6 +4083,12 @@
             </label>
             <div id="remoteMediaFileName" class="remote-media-file-name">No media selected</div>
             <button id="remoteMediaSend" type="button" class="remote-media-send" disabled data-host-only="true">Cast to Screen</button>
+            <div class="remote-media-link-card">
+              <label>Online media link
+                <input id="remoteMediaLink" type="url" inputmode="url" placeholder="Paste YouTube, TikTok, MP4, MP3, or image link" data-host-only="true">
+              </label>
+              <button id="remoteMediaLinkCast" type="button" class="remote-media-link-send" data-host-only="true">Play Link on Screen</button>
+            </div>
             <div class="remote-media-controls">
               <button id="remoteMediaPlay" type="button" data-host-only="true">Play</button>
               <button id="remoteMediaPause" type="button" data-host-only="true">Pause</button>
@@ -4145,12 +4375,13 @@
         window.__phRemoteCurrentPage = Number(data.currentPage) || 1;
         window.__phRemoteInkStrokes = Array.isArray(data.inkStrokes) ? data.inkStrokes : [];
         $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
-        $('remoteSlideLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
-        $('remoteFullLabel').textContent = `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
-        $('remoteFileLabel').textContent = data.fileName || 'Active presentation';
+        const isMediaSession = data.mediaMode || data.type === 'media';
+        $('remoteSlideLabel').textContent = isMediaSession ? 'Media Viewing Mode' : `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteFullLabel').textContent = isMediaSession ? 'Media Preview' : `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
+        $('remoteFileLabel').textContent = isMediaSession ? 'Cast local files or paste online links from this phone.' : (data.fileName || 'Active presentation');
         if (data.thumb) latestThumb = data.thumb;
         const preview = $('remotePreview');
-        preview.innerHTML = latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>';
+        preview.innerHTML = isMediaSession ? '<span>Media screen ready. Use Media Cast below.</span>' : (latestThumb ? `<img src="${latestThumb}" alt="Current slide preview">` : '<span>No preview yet</span>');
         const fullImg = $('remoteFullImg');
         if (fullImg && latestThumb && fullImg.src !== latestThumb) fullImg.src = latestThumb;
         if (!window.__presentationHubRemoteGestureActive) {
