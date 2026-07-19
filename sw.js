@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v129-media-only-autoplay';
+const CACHE_NAME = 'presentation-hub-v130-media-advanced-controls';
 const CORE_ASSETS = [
   './',
   './index.html',

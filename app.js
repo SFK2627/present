@@ -26,7 +26,7 @@
       { urls: 'stun:stun1.l.google.com:19302' }
     ]
   };
-  const MEDIA_CAST_CHUNK_SIZE = 128 * 1024;
+  const MEDIA_CAST_CHUNK_SIZE = 256 * 1024;
   const MEDIA_CAST_MAX_FILE_BYTES = 350 * 1024 * 1024;
 
   const state = {
@@ -112,6 +112,10 @@
     mediaCastBlobUrl: '',
     mediaMode: false,
     mediaLinkVolume: 0.9,
+    mediaPlayback: {},
+    mediaPlaybackPublishTimer: null,
+    youtubeStatusTimer: null,
+    youtubeMessageListenerReady: false,
   };
 
 
@@ -3194,11 +3198,16 @@
       player.volume = startVolume;
       player.addEventListener('play', () => layer.classList.add('is-playing'));
       player.addEventListener('pause', () => layer.classList.remove('is-playing'));
+      attachDesktopMediaPlayerSync(player, { kind: safe.kind, provider: 'direct', name: safe.name || 'Media' });
       tryAutoplayDirectMedia(player, startVolume);
+    } else {
+      updateMediaPlaybackStatus({ provider: 'file', kind: safe.kind, title: safe.name || 'Media', canSeek: false, playing: false, paused: true }, true);
     }
   }
 
   function closeMediaCastOverlay(publishStop = false) {
+    clearInterval(state.youtubeStatusTimer);
+    removeMediaFullscreenPrompt();
     const layer = document.getElementById('mediaCastLayer');
     if (layer) {
       layer.classList.add('hidden');
@@ -3213,6 +3222,7 @@
       try { state.mediaCastReceiver.pc.close(); } catch (error) {}
     }
     state.mediaCastReceiver = null;
+    updateMediaPlaybackStatus({ provider: '', kind: '', title: 'No active media', currentTime: 0, duration: null, playing: false, paused: true, ended: false, canSeek: false }, true);
     if (publishStop) updateMediaCastSignal({ receiverStatus: 'closed', receiverMessage: 'Media closed on desktop.', receiverUpdatedAt: Date.now() });
   }
 
@@ -3232,6 +3242,247 @@
     };
   }
 
+  function formatMediaTime(seconds) {
+    const n = Math.max(0, Number(seconds) || 0);
+    const total = Math.floor(n);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  function parseMediaTimeInput(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    if (/^\d+(?:\.\d+)?$/.test(raw)) return Math.max(0, Number(raw));
+    const parts = raw.split(':').map((part) => Number(part.trim()));
+    if (!parts.length || parts.some((part) => !Number.isFinite(part) || part < 0)) return null;
+    if (parts.length === 2) return Math.max(0, (parts[0] * 60) + parts[1]);
+    if (parts.length === 3) return Math.max(0, (parts[0] * 3600) + (parts[1] * 60) + parts[2]);
+    return null;
+  }
+
+  function updateMediaPlaybackStatus(patch = {}, immediate = false) {
+    state.mediaPlayback = { ...(state.mediaPlayback || {}), ...patch, updatedAt: Date.now() };
+    if (!state.sessionRef) return;
+    const publish = () => {
+      try { state.sessionRef.set({ mediaPlayback: state.mediaPlayback }, { merge: true }); } catch (error) {}
+    };
+    if (immediate) {
+      clearTimeout(state.mediaPlaybackPublishTimer);
+      publish();
+      return;
+    }
+    clearTimeout(state.mediaPlaybackPublishTimer);
+    state.mediaPlaybackPublishTimer = setTimeout(publish, 220);
+  }
+
+  function readDirectPlayerPlayback(player, extra = {}) {
+    if (!player) return extra;
+    let duration = null;
+    let currentTime = 0;
+    try { duration = Number.isFinite(player.duration) ? player.duration : null; } catch (error) {}
+    try { currentTime = Number(player.currentTime) || 0; } catch (error) {}
+    let volume = state.mediaLinkVolume || 0.9;
+    let muted = false;
+    try { volume = Number(player.volume) || 0; muted = !!player.muted; } catch (error) {}
+    return {
+      ...extra,
+      provider: extra.provider || 'direct',
+      currentTime,
+      duration,
+      volume,
+      muted,
+      playing: !player.paused && !player.ended,
+      paused: !!player.paused,
+      ended: !!player.ended,
+      canSeek: !!duration,
+    };
+  }
+
+  function attachDesktopMediaPlayerSync(player, extra = {}) {
+    if (!player || player.dataset.mediaPlaybackSync === '1') return;
+    player.dataset.mediaPlaybackSync = '1';
+    const publish = (immediate = false) => updateMediaPlaybackStatus(readDirectPlayerPlayback(player, extra), immediate);
+    ['loadedmetadata', 'durationchange', 'play', 'pause', 'seeked', 'volumechange', 'ended'].forEach((eventName) => {
+      player.addEventListener(eventName, () => publish(true));
+    });
+    let last = 0;
+    player.addEventListener('timeupdate', () => {
+      const now = Date.now();
+      if (now - last > 650) { last = now; publish(false); }
+    });
+    publish(true);
+  }
+
+  function sendYouTubeCommand(func, args = [], repeats = true) {
+    const run = () => postYouTubeCommand(func, args);
+    run();
+    if (repeats) [180, 520, 1100].forEach((delay) => window.setTimeout(run, delay));
+  }
+
+  function handleYouTubeMediaMessage(event) {
+    let data = event && event.data;
+    if (!data) return;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (error) { return; }
+    }
+    if (!data || (data.event !== 'infoDelivery' && data.event !== 'onStateChange')) return;
+    const frame = document.getElementById('mediaCastLinkFrame');
+    if (!frame || frame.dataset.provider !== 'youtube') return;
+    const info = data.info || {};
+    const patch = { provider: 'youtube', kind: 'youtube', canSeek: true };
+    if (typeof data.info === 'number') {
+      patch.playerState = data.info;
+      patch.playing = data.info === 1;
+      patch.paused = data.info === 2 || data.info === 0;
+    }
+    if (Number.isFinite(Number(info.currentTime))) patch.currentTime = Number(info.currentTime);
+    if (Number.isFinite(Number(info.duration))) patch.duration = Number(info.duration);
+    if (Number.isFinite(Number(info.volume))) patch.volume = Math.max(0, Math.min(1, Number(info.volume) / 100));
+    if (typeof info.muted === 'boolean') patch.muted = info.muted;
+    if (Number.isFinite(Number(info.playerState))) {
+      patch.playerState = Number(info.playerState);
+      patch.playing = Number(info.playerState) === 1;
+      patch.paused = Number(info.playerState) === 2 || Number(info.playerState) === 0;
+    }
+    if (Object.keys(patch).length > 3) updateMediaPlaybackStatus(patch, false);
+  }
+
+  function startYouTubeStatusSync() {
+    if (!state.youtubeMessageListenerReady) {
+      window.addEventListener('message', handleYouTubeMediaMessage);
+      state.youtubeMessageListenerReady = true;
+    }
+    clearInterval(state.youtubeStatusTimer);
+    const frame = document.getElementById('mediaCastLinkFrame');
+    const ask = () => {
+      const freshFrame = document.getElementById('mediaCastLinkFrame');
+      if (!freshFrame || freshFrame.dataset.provider !== 'youtube') { clearInterval(state.youtubeStatusTimer); return; }
+      try { freshFrame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'mediaCastLinkFrame' }), '*'); } catch (error) {}
+      postYouTubeCommand('getCurrentTime', []);
+      postYouTubeCommand('getDuration', []);
+    };
+    if (frame) {
+      [80, 300, 900].forEach((delay) => window.setTimeout(ask, delay));
+      state.youtubeStatusTimer = setInterval(ask, 1000);
+    }
+  }
+
+
+  function activeMediaFullscreenTarget() {
+    const player = document.getElementById('mediaCastPlayer');
+    const frame = document.getElementById('mediaCastLinkFrame');
+    const wrap = document.querySelector('#mediaCastLayer .media-cast-media-wrap');
+    const panel = document.querySelector('#mediaCastLayer .media-cast-frame');
+    return player || frame || wrap || panel || document.getElementById('mediaCastLayer');
+  }
+
+  function removeMediaFullscreenPrompt() {
+    const old = document.getElementById('mediaFullscreenPrompt');
+    if (old) old.remove();
+  }
+
+  function showMediaFullscreenPrompt(target) {
+    removeMediaFullscreenPrompt();
+    const layer = ensureMediaCastLayer();
+    const prompt = document.createElement('div');
+    prompt.id = 'mediaFullscreenPrompt';
+    prompt.className = 'fullscreen-request-prompt media-fullscreen-request';
+    prompt.innerHTML = `
+      <div class="fullscreen-request-card">
+        <strong>Media fullscreen requested</strong>
+        <span>Tap once on this desktop to allow the video/media player to enter fullscreen.</span>
+        <div class="fullscreen-request-actions">
+          <button id="mediaFullscreenEnter" type="button">Enter Media Fullscreen</button>
+          <button id="mediaFullscreenDismiss" type="button">Dismiss</button>
+        </div>
+      </div>
+    `;
+    (document.fullscreenElement || layer || document.body).appendChild(prompt);
+    const enter = prompt.querySelector('#mediaFullscreenEnter');
+    const dismiss = prompt.querySelector('#mediaFullscreenDismiss');
+    if (enter) enter.addEventListener('click', async () => {
+      try {
+        const fresh = activeMediaFullscreenTarget() || target;
+        if (fresh && fresh.requestFullscreen) await fresh.requestFullscreen();
+      } catch (error) {}
+      removeMediaFullscreenPrompt();
+    });
+    if (dismiss) dismiss.addEventListener('click', removeMediaFullscreenPrompt);
+  }
+
+  async function requestMediaFullscreen() {
+    const target = activeMediaFullscreenTarget();
+    if (!target) return;
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen(); } catch (error) {}
+      return;
+    }
+    try {
+      if (target.requestFullscreen) await target.requestFullscreen();
+      else showMediaFullscreenPrompt(target);
+    } catch (error) {
+      // Remote Firebase commands are not treated as user gestures by browsers.
+      // Show a desktop-side one-tap prompt so the media/video player can still fullscreen.
+      showMediaFullscreenPrompt(target);
+    }
+  }
+
+  function setDirectPlayerMuted(player, muted) {
+    if (!player) return;
+    try {
+      player.muted = !!muted;
+      if (!muted && (!player.volume || player.volume <= 0.01)) player.volume = Math.max(state.mediaLinkVolume || 0.8, 0.35);
+      updateMediaPlaybackStatus(readDirectPlayerPlayback(player), true);
+    } catch (error) {}
+  }
+
+  function seekDirectPlayer(player, seconds) {
+    if (!player) return;
+    const target = Math.max(0, Number(seconds) || 0);
+    try {
+      if (Number.isFinite(player.duration)) player.currentTime = Math.min(target, player.duration);
+      else player.currentTime = target;
+      updateMediaPlaybackStatus(readDirectPlayerPlayback(player), true);
+    } catch (error) {}
+  }
+
+  function updateRemoteMediaPlaybackUI(playback = {}) {
+    const title = $('remoteMediaNowTitle');
+    const stateNode = $('remoteMediaNowState');
+    const currentNode = $('remoteMediaCurrentTime');
+    const durationNode = $('remoteMediaDuration');
+    const seek = $('remoteMediaSeek');
+    const seekInput = $('remoteMediaTimeInput');
+    const muteBtn = $('remoteMediaMute');
+    const volume = $('remoteMediaVolume');
+    const volumeLabel = $('remoteMediaVolumeLabel');
+    const hasMedia = playback && (playback.provider || playback.kind || Number.isFinite(Number(playback.duration)) || Number.isFinite(Number(playback.currentTime)));
+    if (title) title.textContent = hasMedia ? (playback.title || playback.name || playback.kind || playback.provider || 'Desktop media') : 'No active media yet';
+    if (stateNode) {
+      const provider = playback.provider ? String(playback.provider).toUpperCase() : 'READY';
+      const status = playback.playing ? 'Playing' : playback.ended ? 'Ended' : playback.paused ? 'Paused' : (hasMedia ? 'Loaded' : 'Waiting');
+      stateNode.textContent = `${status} • ${provider}`;
+    }
+    const current = Math.max(0, Number(playback.currentTime) || 0);
+    const duration = Number.isFinite(Number(playback.duration)) && Number(playback.duration) > 0 ? Number(playback.duration) : 0;
+    if (currentNode) currentNode.textContent = formatMediaTime(current);
+    if (durationNode) durationNode.textContent = duration ? formatMediaTime(duration) : '--:--';
+    if (seek && document.activeElement !== seek) {
+      seek.disabled = !duration || playback.canSeek === false;
+      seek.max = duration ? '1000' : '1000';
+      seek.value = duration ? String(Math.round((current / duration) * 1000)) : '0';
+    }
+    if (seekInput && document.activeElement !== seekInput) seekInput.value = current ? formatMediaTime(current) : '';
+    if (muteBtn) muteBtn.textContent = playback.muted ? '🔊 Unmute' : '🔇 Mute';
+    if (volume && Number.isFinite(Number(playback.volume)) && document.activeElement !== volume) {
+      const pct = Math.round(Math.max(0, Math.min(1, Number(playback.volume))) * 100);
+      volume.value = String(pct);
+      if (volumeLabel) volumeLabel.textContent = `${pct}%`;
+    }
+  }
 
   function normalizeOnlineMediaUrl(value = '') {
     const raw = String(value || '').trim();
@@ -3378,9 +3629,13 @@
     const player = document.getElementById('mediaCastPlayer');
     if (player) {
       try { player.volume = volume; player.muted = volume <= 0; } catch (error) {}
+      attachDesktopMediaPlayerSync(player, { kind, provider: 'direct', title: safeTitle.replace(/<[^>]*>/g, '') });
       if (payload.autoplay !== false) tryAutoplayDirectMedia(player, volume);
+    } else {
+      updateMediaPlaybackStatus({ provider: kind, kind, title: safeTitle.replace(/<[^>]*>/g, ''), currentTime: 0, duration: null, volume, muted: volume <= 0, canSeek: kind === 'youtube', playing: payload.autoplay !== false }, true);
     }
     if (kind === 'youtube') {
+      startYouTubeStatusSync();
       syncYouTubeMediaControls(volume, payload.autoplay !== false);
     }
   }
@@ -3391,34 +3646,66 @@
     const player = document.getElementById('mediaCastPlayer');
     const frame = document.getElementById('mediaCastLinkFrame');
     const provider = frame ? String(frame.dataset.provider || '') : '';
-    if (action === 'stop') { closeMediaCastOverlay(false); return; }
+    if (action === 'stop') { closeMediaCastOverlay(false); updateMediaPlaybackStatus({ provider: '', kind: '', playing: false, paused: true, currentTime: 0, duration: null }, true); return; }
     if (action === 'hide') { if (layer) layer.classList.add('media-cast-minimized'); return; }
     if (action === 'show') { if (layer) layer.classList.remove('media-cast-minimized', 'hidden'); return; }
+    if (action === 'fullscreen') { requestMediaFullscreen(); return; }
     if (provider === 'youtube') {
-      if (action === 'play') { syncYouTubeMediaControls(state.mediaLinkVolume || 0.9, true); return; }
-      if (action === 'pause') { postYouTubeCommand('pauseVideo'); return; }
-      if (action === 'toggle') { syncYouTubeMediaControls(state.mediaLinkVolume || 0.9, true); return; }
+      const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
+      if (action === 'play') { sendYouTubeCommand('playVideo', []); return; }
+      if (action === 'pause') { sendYouTubeCommand('pauseVideo', []); return; }
+      if (action === 'toggle') { sendYouTubeCommand('playVideo', []); return; }
       if (action === 'volume') {
-        const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
         state.mediaLinkVolume = value;
-        syncYouTubeMediaControls(value, false);
+        sendYouTubeCommand('setVolume', [Math.round(value * 100)], false);
+        if (value <= 0) sendYouTubeCommand('mute', [], false);
+        else sendYouTubeCommand('unMute', [], false);
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', volume: value, muted: value <= 0 }, true);
         return;
       }
+      if (action === 'mute') { sendYouTubeCommand('mute', [], false); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: true }, true); return; }
+      if (action === 'unmute') { sendYouTubeCommand('unMute', [], false); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: false }, true); return; }
+      if (action === 'seek') {
+        const seconds = Math.max(0, Number(raw.seconds ?? raw.value) || 0);
+        sendYouTubeCommand('seekTo', [seconds, true]);
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
+        return;
+      }
+      if (action === 'skip') {
+        const delta = Number(raw.value) || 0;
+        const current = Number(state.mediaPlayback && state.mediaPlayback.currentTime) || 0;
+        const seconds = Math.max(0, current + delta);
+        sendYouTubeCommand('seekTo', [seconds, true]);
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
+        return;
+      }
+      // TikTok and generic web iframes do not expose reliable seek/volume APIs.
+      return;
     }
     if (!player) return;
     if (action === 'play') {
       tryAutoplayDirectMedia(player, state.mediaLinkVolume || 0.9);
       return;
     }
-    if (action === 'pause') { try { player.pause(); } catch (error) {} return; }
+    if (action === 'pause') { try { player.pause(); updateMediaPlaybackStatus(readDirectPlayerPlayback(player), true); } catch (error) {} return; }
     if (action === 'toggle') {
-      try { if (player.paused) player.play().catch(() => showMediaCastGesturePrompt(player)); else player.pause(); } catch (error) {}
+      try { if (player.paused) player.play().catch(() => showMediaCastGesturePrompt(player)); else player.pause(); updateMediaPlaybackStatus(readDirectPlayerPlayback(player), true); } catch (error) {}
       return;
     }
     if (action === 'volume') {
       const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
       state.mediaLinkVolume = value;
-      try { player.volume = value; player.muted = value <= 0; } catch (error) {}
+      try { player.volume = value; player.muted = value <= 0; updateMediaPlaybackStatus(readDirectPlayerPlayback(player), true); } catch (error) {}
+      return;
+    }
+    if (action === 'mute') { setDirectPlayerMuted(player, true); return; }
+    if (action === 'unmute') { setDirectPlayerMuted(player, false); return; }
+    if (action === 'seek') { seekDirectPlayer(player, raw.seconds ?? raw.value); return; }
+    if (action === 'skip') {
+      const delta = Number(raw.value) || 0;
+      let current = 0;
+      try { current = Number(player.currentTime) || 0; } catch (error) {}
+      seekDirectPlayer(player, current + delta);
     }
   }
 
@@ -3555,21 +3842,89 @@
     const sendBtn = $('remoteMediaSend');
     const fileName = $('remoteMediaFileName');
     const fileDetails = document.querySelector('.remote-media-file-details');
-    if (fileDetails) fileDetails.addEventListener('toggle', () => { fileDetails.dataset.userTouched = '1'; });
-    if (!fileInput || !sendBtn) return;
-    let selectedFile = null;
-    fileInput.addEventListener('change', () => {
-      selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-      if (fileName) fileName.textContent = selectedFile ? `${selectedFile.name} • ${formatMediaBytes(selectedFile.size)}` : 'No media selected';
-      sendBtn.disabled = !selectedFile || !isHost;
-      if (selectedFile) setRemoteMediaStatus('Ready to cast. Tap Cast to Screen.', 'ok');
-    });
-    sendBtn.addEventListener('click', () => {
-      if (!isHost || !selectedFile) return;
-      startRemoteMediaCast(ref, selectedFile);
-    });
     const linkInput = $('remoteMediaLink');
     const linkBtn = $('remoteMediaLinkCast');
+    const phoneWatch = $('remoteMediaWatchPhone');
+    const phoneMuted = $('remoteMediaPhoneMuted');
+    const phonePreview = $('remoteMediaPhonePreview');
+    if (fileDetails) fileDetails.addEventListener('toggle', () => { fileDetails.dataset.userTouched = '1'; });
+    let selectedFile = null;
+    let previewObjectUrl = '';
+
+    const clearPhonePreviewUrl = () => {
+      if (previewObjectUrl) {
+        try { URL.revokeObjectURL(previewObjectUrl); } catch (error) {}
+        previewObjectUrl = '';
+      }
+    };
+
+    const setPhonePreviewHtml = (html) => {
+      if (!phonePreview) return;
+      phonePreview.classList.toggle('hidden', !html);
+      phonePreview.innerHTML = html || '<span>Phone preview off</span>';
+    };
+
+    const makePhonePreviewForUrl = (rawUrl) => {
+      let parsed = null;
+      try { parsed = new URL(String(rawUrl || '').trim()); } catch (error) {}
+      if (!parsed || !/^https?:$/i.test(parsed.protocol)) return '';
+      const kind = detectOnlineMediaKind(parsed);
+      const safeUrl = escapeHtml(parsed.toString());
+      const mutedAttr = phoneMuted && phoneMuted.checked ? ' muted' : '';
+      if (kind === 'youtube') {
+        const id = extractYouTubeId(parsed);
+        if (!id) return '<span>Paste a valid YouTube link.</span>';
+        const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?playsinline=1&controls=1&rel=0&modestbranding=1&mute=${phoneMuted && phoneMuted.checked ? 1 : 0}`;
+        return `<iframe class="remote-media-phone-frame" src="${escapeHtml(embed)}" title="Phone YouTube preview" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+      }
+      if (kind === 'tiktok') {
+        const id = extractTikTokVideoId(parsed);
+        const embed = id ? `https://www.tiktok.com/embed/v2/${encodeURIComponent(id)}` : parsed.toString();
+        return `<iframe class="remote-media-phone-frame tiktok" src="${escapeHtml(embed)}" title="Phone TikTok preview" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+      }
+      if (kind === 'image') return `<img src="${safeUrl}" alt="Phone preview">`;
+      if (kind === 'video') return `<video src="${safeUrl}" controls playsinline preload="metadata"${mutedAttr}></video>`;
+      if (kind === 'audio') return `<audio src="${safeUrl}" controls preload="metadata"${mutedAttr}></audio>`;
+      return `<iframe class="remote-media-phone-frame" src="${safeUrl}" title="Phone link preview" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+    };
+
+    const updatePhonePreview = () => {
+      if (!phonePreview) return;
+      const shouldWatch = !!(phoneWatch && phoneWatch.checked);
+      if (!shouldWatch) { setPhonePreviewHtml(''); return; }
+      clearPhonePreviewUrl();
+      if (selectedFile) {
+        previewObjectUrl = URL.createObjectURL(selectedFile);
+        const kind = cleanMediaMeta({ name: selectedFile.name, type: selectedFile.type }).kind;
+        const src = escapeHtml(previewObjectUrl);
+        const mutedAttr = phoneMuted && phoneMuted.checked ? ' muted' : '';
+        if (kind === 'image') setPhonePreviewHtml(`<img src="${src}" alt="Selected media preview">`);
+        else if (kind === 'video') setPhonePreviewHtml(`<video src="${src}" controls playsinline preload="metadata"${mutedAttr}></video>`);
+        else if (kind === 'audio') setPhonePreviewHtml(`<audio src="${src}" controls preload="metadata"${mutedAttr}></audio>`);
+        else setPhonePreviewHtml('<span>Selected file cannot be previewed on phone.</span>');
+        return;
+      }
+      if (linkInput && String(linkInput.value || '').trim()) {
+        setPhonePreviewHtml(makePhonePreviewForUrl(linkInput.value));
+        return;
+      }
+      setPhonePreviewHtml('<span>Choose a file or paste a link first.</span>');
+    };
+
+    if (fileInput && sendBtn) {
+      fileInput.addEventListener('change', () => {
+        selectedFile = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+        if (fileName) fileName.textContent = selectedFile ? `${selectedFile.name} • ${formatMediaBytes(selectedFile.size)}` : 'No media selected';
+        sendBtn.disabled = !selectedFile || !isHost;
+        if (selectedFile) setRemoteMediaStatus('Ready to cast. Tap Cast to Screen.', 'ok');
+        updatePhonePreview();
+      });
+      sendBtn.addEventListener('click', () => {
+        if (!isHost || !selectedFile) return;
+        startRemoteMediaCast(ref, selectedFile);
+      });
+    }
+
     const castMediaLink = () => {
       if (!isHost || !linkInput) return;
       const url = String(linkInput.value || '').trim();
@@ -3577,10 +3932,12 @@
       let parsed = null;
       try { parsed = new URL(url); } catch (error) {}
       if (!parsed || !/^https?:$/i.test(parsed.protocol)) { setRemoteMediaStatus('Use a valid http/https media link.', 'warn'); return; }
+      selectedFile = null;
       const volumeNode = $('remoteMediaVolume');
       const volumeValue = volumeNode ? Math.max(0, Math.min(1, Number(volumeNode.value) / 100)) : 0.9;
       sendRemoteCommand(ref, 'mediaLinkCast', { url, volume: volumeValue, autoplay: true });
       setRemoteMediaStatus('Link sent. Desktop should open and play it now.', 'busy');
+      updatePhonePreview();
     };
     if (linkBtn && linkInput) {
       linkBtn.addEventListener('click', castMediaLink);
@@ -3590,13 +3947,21 @@
           castMediaLink();
         }
       });
+      linkInput.addEventListener('input', () => {
+        if (phoneWatch && phoneWatch.checked) updatePhonePreview();
+      });
       linkInput.addEventListener('paste', () => {
         window.setTimeout(() => {
           const url = String(linkInput.value || '').trim();
           if (/^https?:\/\//i.test(url)) setRemoteMediaStatus('Link pasted. Tap “Play Link on Desktop”.', 'ok');
+          updatePhonePreview();
         }, 80);
       });
     }
+
+    if (phoneWatch) phoneWatch.addEventListener('change', updatePhonePreview);
+    if (phoneMuted) phoneMuted.addEventListener('change', updatePhonePreview);
+
     const command = (type, value) => {
       if (!isHost) return;
       sendRemoteCommand(ref, 'mediaCastControl', { type, value });
@@ -3610,12 +3975,53 @@
     bind('remoteMediaShow', 'show');
     bind('remoteMediaHide', 'hide');
     bind('remoteMediaStop', 'stop');
+    bind('remoteMediaFullscreen', 'fullscreen');
+    const back10 = $('remoteMediaBack10');
+    if (back10) back10.addEventListener('click', () => command('skip', -10));
+    const forward10 = $('remoteMediaForward10');
+    if (forward10) forward10.addEventListener('click', () => command('skip', 10));
+    const muteBtn = $('remoteMediaMute');
+    if (muteBtn) muteBtn.addEventListener('click', () => {
+      const playback = window.__phRemoteMediaPlayback || {};
+      command(playback.muted ? 'unmute' : 'mute');
+    });
     const volume = $('remoteMediaVolume');
     if (volume) volume.addEventListener('input', () => {
       const value = Math.max(0, Math.min(1, Number(volume.value) / 100));
       command('volume', value);
       const label = $('remoteMediaVolumeLabel');
       if (label) label.textContent = `${Math.round(value * 100)}%`;
+    });
+    const seek = $('remoteMediaSeek');
+    if (seek) {
+      seek.addEventListener('input', () => {
+        const playback = window.__phRemoteMediaPlayback || {};
+        const duration = Number(playback.duration) || 0;
+        const seconds = duration ? (Number(seek.value) / 1000) * duration : 0;
+        if ($('remoteMediaCurrentTime')) $('remoteMediaCurrentTime').textContent = formatMediaTime(seconds);
+      });
+      seek.addEventListener('change', () => {
+        const playback = window.__phRemoteMediaPlayback || {};
+        const duration = Number(playback.duration) || 0;
+        if (!duration) return;
+        command('seek', (Number(seek.value) / 1000) * duration);
+      });
+    }
+    const goTime = $('remoteMediaGoTime');
+    const timeInput = $('remoteMediaTimeInput');
+    const sendGoTime = () => {
+      if (!timeInput) return;
+      const seconds = parseMediaTimeInput(timeInput.value);
+      if (seconds == null) { setRemoteMediaStatus('Type a time like 1:25 or 85 seconds.', 'warn'); return; }
+      command('seek', seconds);
+      setRemoteMediaStatus(`Jumping to ${formatMediaTime(seconds)} on desktop.`, 'busy');
+    };
+    if (goTime) goTime.addEventListener('click', sendGoTime);
+    if (timeInput) timeInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        sendGoTime();
+      }
     });
   }
 
@@ -4212,9 +4618,27 @@
               <button id="remoteMediaLinkCast" type="button" class="remote-media-link-send primary" data-host-only="true">▶ Play Link on Desktop</button>
             </div>
 
+            <div class="remote-media-now-card">
+              <strong id="remoteMediaNowTitle">No active media yet</strong>
+              <small id="remoteMediaNowState">Waiting for desktop media</small>
+              <div class="remote-media-time-row">
+                <span id="remoteMediaCurrentTime">0:00</span>
+                <input id="remoteMediaSeek" type="range" min="0" max="1000" step="1" value="0" disabled data-host-only="true">
+                <span id="remoteMediaDuration">--:--</span>
+              </div>
+              <div class="remote-media-jump-row">
+                <input id="remoteMediaTimeInput" type="text" inputmode="numeric" placeholder="Go to 1:25 or 85 sec" data-host-only="true">
+                <button id="remoteMediaGoTime" type="button" data-host-only="true">Go</button>
+              </div>
+            </div>
+
             <div class="remote-media-controls remote-media-main-controls">
               <button id="remoteMediaPlay" type="button" data-host-only="true">▶ Play</button>
               <button id="remoteMediaPause" type="button" data-host-only="true">⏸ Pause</button>
+              <button id="remoteMediaBack10" type="button" data-host-only="true">↩ 10s</button>
+              <button id="remoteMediaForward10" type="button" data-host-only="true">10s ↪</button>
+              <button id="remoteMediaMute" type="button" data-host-only="true">🔇 Mute</button>
+              <button id="remoteMediaFullscreen" type="button" data-host-only="true">⛶ Fullscreen</button>
               <button id="remoteMediaShow" type="button" data-host-only="true">👁 Show</button>
               <button id="remoteMediaHide" type="button" data-host-only="true">🙈 Hide</button>
               <button id="remoteMediaStop" type="button" data-host-only="true">■ Stop</button>
@@ -4222,6 +4646,12 @@
             <label class="remote-media-volume">Desktop volume <span id="remoteMediaVolumeLabel">90%</span>
               <input id="remoteMediaVolume" type="range" min="0" max="100" step="1" value="90" data-host-only="true">
             </label>
+
+            <div class="remote-media-phone-preview-card">
+              <label><input id="remoteMediaWatchPhone" type="checkbox"> Watch/preview on this phone</label>
+              <label><input id="remoteMediaPhoneMuted" type="checkbox" checked> Phone preview muted</label>
+              <div id="remoteMediaPhonePreview" class="remote-media-phone-preview hidden"><span>Phone preview off</span></div>
+            </div>
 
             <details class="remote-media-file-details" open>
               <summary>📱 Cast file from this phone</summary>
@@ -4543,6 +4973,8 @@
         if ($('remoteMagicSound')) $('remoteMagicSound').checked = data.magicEffectSound !== false;
         if ($('remoteMagicIntensity')) $('remoteMagicIntensity').value = data.magicEffectIntensity || 'grand';
         syncRemoteMediaStatus(data && data.mediaCast);
+        window.__phRemoteMediaPlayback = data && data.mediaPlayback ? data.mediaPlayback : {};
+        updateRemoteMediaPlaybackUI(window.__phRemoteMediaPlayback);
         $('remoteAutoLabel').textContent = data.autoPlaying
           ? `Auto Play: ${data.autoElapsed || 0}s / ${data.autoDuration || data.currentTiming || data.globalTiming || 10}s`
           : (data.autoPaused ? `Auto Play paused at ${data.autoElapsed || 0}s` : 'Auto Play idle');
