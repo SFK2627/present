@@ -402,6 +402,12 @@
     if (els.fullscreenBtn) els.fullscreenBtn.addEventListener('click', toggleFullscreen);
     if (els.qrBtn) els.qrBtn.addEventListener('click', openQrModal);
     if (els.closeQrBtn) els.closeQrBtn.addEventListener('click', () => hideModal(els.qrModal));
+    document.addEventListener('click', (event) => {
+      const trigger = event.target && event.target.closest ? event.target.closest('#qrBtn, #mediaViewerQrNow') : null;
+      if (!trigger) return;
+      event.preventDefault();
+      openQrModal();
+    });
     if (els.settingsBtn) els.settingsBtn.addEventListener('click', () => els.controlPanel.classList.toggle('hidden'));
 
     // Browsers only allow presentation sounds after a user gesture. Prime audio early so
@@ -5475,28 +5481,134 @@
     }
   }
 
-  async function openQrModal() {
-    if (!state.activeFile && !state.mediaMode) return;
-    if (!state.firebaseReady) {
-      els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
-    } else {
-      await setupRemoteSessionIfPossible();
-      els.qrHelp.textContent = state.mediaMode && !state.activeFile ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.` : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  let qrLibraryLoadPromise = null;
+  async function ensureQrCodeLibrary() {
+    if (typeof window.QRCode === 'function') return true;
+    if (qrLibraryLoadPromise) return qrLibraryLoadPromise;
+    qrLibraryLoadPromise = new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve(typeof window.QRCode === 'function');
+      };
+
+      const existing = Array.from(document.scripts || []).find((script) => /qrcode/i.test(script.src || ''));
+      if (existing) existing.addEventListener('load', finish, { once: true });
+
+      setTimeout(() => {
+        if (typeof window.QRCode === 'function') return finish();
+        const fallback = document.createElement('script');
+        fallback.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+        fallback.async = true;
+        fallback.onload = finish;
+        fallback.onerror = finish;
+        document.head.appendChild(fallback);
+        setTimeout(finish, 2600);
+      }, 160);
+    });
+    return qrLibraryLoadPromise;
+  }
+
+  function renderQrFallback(container, text) {
+    if (!container) return;
+    container.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'qr-fallback-card';
+    const img = document.createElement('img');
+    img.className = 'qr-fallback-img';
+    img.width = 210;
+    img.height = 210;
+    img.alt = 'Remote QR code';
+    img.src = `https://api.qrserver.com/v1/create-qr-code/?size=210x210&margin=8&data=${encodeURIComponent(text)}`;
+    const link = document.createElement('a');
+    link.href = text;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = 'Open remote link';
+    const note = document.createElement('small');
+    note.textContent = 'If QR does not load, copy or open the link below.';
+    img.onerror = () => {
+      img.remove();
+      note.textContent = 'QR generator did not load. Use the remote link below.';
+    };
+    wrap.appendChild(img);
+    wrap.appendChild(note);
+    wrap.appendChild(link);
+    container.appendChild(wrap);
+  }
+
+  async function renderRemoteQr(container, text) {
+    if (!container) return;
+    container.innerHTML = '<div class="qr-loading">Generating QR...</div>';
+    const hasQrLib = await ensureQrCodeLibrary();
+    container.innerHTML = '';
+    if (hasQrLib && typeof window.QRCode === 'function') {
+      try {
+        new QRCode(container, { text, width: 210, height: 210 });
+        return;
+      } catch (error) {
+        console.warn('QRCode library failed; using image fallback.', error);
+      }
     }
+    renderQrFallback(container, text);
+  }
 
-    const session = state.sessionId || 'NO-FIREBASE';
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
-    const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
-    const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
+  async function openQrModal() {
+    if (state.qrModalOpening) return;
+    state.qrModalOpening = true;
+    try {
+      if (!state.activeFile && !state.mediaMode) return;
+      if (!els.qrModal || !els.hostQr || !els.viewerQr) return;
 
-    els.hostRemoteLink.value = hostUrl;
-    els.viewerRemoteLink.value = viewerUrl;
-    els.hostQr.innerHTML = '';
-    els.viewerQr.innerHTML = '';
-    new QRCode(els.hostQr, { text: hostUrl, width: 210, height: 210 });
-    new QRCode(els.viewerQr, { text: viewerUrl, width: 210, height: 210 });
-    showModal(els.qrModal);
+      showModal(els.qrModal);
+      if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-loading">Preparing control QR...</div>';
+      if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-loading">Preparing viewer QR...</div>';
+      if (els.hostRemoteLink) els.hostRemoteLink.value = 'Preparing remote link...';
+      if (els.viewerRemoteLink) els.viewerRemoteLink.value = 'Preparing viewer link...';
+      if (els.qrHelp) els.qrHelp.textContent = 'Preparing phone remote QR...';
+
+      let sessionReady = false;
+      if (state.firebaseReady) {
+        try {
+          await Promise.race([
+            setupRemoteSessionIfPossible().then(() => { sessionReady = !!state.sessionId; }),
+            sleep(2600).then(() => { sessionReady = !!state.sessionId; })
+          ]);
+        } catch (error) {
+          console.warn('Remote session setup failed before QR render:', error);
+        }
+      }
+
+      if (!state.firebaseReady) {
+        if (els.qrHelp) els.qrHelp.textContent = 'Phone remote across devices needs Firebase config. You can still present locally. Click Remote setup on the home screen to see where to add your Firebase keys.';
+      } else if (!sessionReady && !state.sessionId) {
+        if (els.qrHelp) els.qrHelp.textContent = 'Remote session is still preparing. QR is shown with the current session link; if the phone does not connect, close and open Remote QR again.';
+      } else if (els.qrHelp) {
+        els.qrHelp.textContent = state.mediaMode && !state.activeFile
+          ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
+          : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
+      }
+
+      const session = state.sessionId || 'NO-FIREBASE';
+      const baseUrl = window.location.href.split('?')[0].split('#')[0];
+      const mediaModeParam = state.mediaMode && !state.activeFile ? '&mode=media' : '';
+      const hostUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=host&screen=controls${mediaModeParam}`;
+      const viewerUrl = `${baseUrl}?remote=1&session=${encodeURIComponent(session)}&role=viewer&screen=preview${mediaModeParam}`;
+
+      if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
+      if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
+      await Promise.all([
+        renderRemoteQr(els.hostQr, hostUrl),
+        renderRemoteQr(els.viewerQr, viewerUrl)
+      ]);
+    } finally {
+      setTimeout(() => { state.qrModalOpening = false; }, 350);
+    }
   }
 
   function setRemoteMediaOnlyMode(enabled) {

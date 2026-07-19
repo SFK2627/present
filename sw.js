@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v20260719-gdrive-client-prefs';
+const CACHE_NAME = 'presentation-hub-v20260719-qr-modal-fix';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,7 @@ const CORE_ASSETS = [
   './icon.svg'
 ];
 
-// gdrive-client-prefs
+// qr-modal-fix
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
   self.skipWaiting();
