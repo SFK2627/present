@@ -93,7 +93,7 @@
     magicEffectVolume: 200,
     magicEffectSound: true,
     magicEffectIntensity: 'grand',
-    classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null, revealMode: '', busy: false },
+    classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, groupRollMode: 'balanced', rolledGroups: [], pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null, revealMode: '', busy: false },
     classroomSyncTimer: null,
     firebaseUser: null,
   };
@@ -217,6 +217,15 @@
   }
 
   function cacheElements() {
+    const existingBalancedInput = $('balancedGroupsInput');
+    const existingBalancedLabel = existingBalancedInput && existingBalancedInput.closest('label');
+    if (existingBalancedLabel && !$('groupRollModeSelect')) {
+      existingBalancedLabel.style.display = 'none';
+      const modeLabel = document.createElement('label');
+      modeLabel.className = 'classroom-group-mode-label';
+      modeLabel.innerHTML = `Group rolls<select id="groupRollModeSelect"><option value="balanced">Balanced</option><option value="no-repeat">No repeat</option><option value="free">Free repeat</option></select>`;
+      existingBalancedLabel.insertAdjacentElement('afterend', modeLabel);
+    }
     [
       'app', 'remoteApp', 'homeView', 'viewerView', 'fileInput', 'uploadZone', 'searchInput', 'sortSelect',
       'cardsGrid', 'emptyState', 'libraryCount', 'clearLibraryBtn', 'themeToggle', 'firebaseStatus',
@@ -229,7 +238,7 @@
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
-      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'classListFileInput', 'importClassListBtn', 'classImportStatus', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'pickNameBtn', 'rollGroupBtn', 'resetPicksBtn', 'presentClassroomBtn', 'classroomResult', 'classroomRoster'
+      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'classListFileInput', 'importClassListBtn', 'classImportStatus', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'groupRollModeSelect', 'pickNameBtn', 'rollGroupBtn', 'resetPicksBtn', 'presentClassroomBtn', 'classroomResult', 'classroomRoster'
     ].forEach((id) => { els[id] = $(id); });
   }
 
@@ -371,13 +380,29 @@
     if (els.presentClassroomBtn) els.presentClassroomBtn.addEventListener('click', openClassroomPresentationMode);
     if (els.classroomAuthBtn) els.classroomAuthBtn.addEventListener('click', signInClassroomAccount);
     if (els.addSectionBtn) els.addSectionBtn.addEventListener('click', addClassroomSection);
-    if (els.sectionSelect) els.sectionSelect.addEventListener('change', () => { state.classroom.activeSectionId = els.sectionSelect.value; state.classroom.pickedIds = []; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); });
+    if (els.sectionSelect) els.sectionSelect.addEventListener('change', () => { state.classroom.activeSectionId = els.sectionSelect.value; state.classroom.pickedIds = []; state.classroom.rolledGroups = []; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); });
     if (els.saveNamesBtn) els.saveNamesBtn.addEventListener('click', saveClassroomNames);
     if (els.importClassListBtn) els.importClassListBtn.addEventListener('click', () => els.classListFileInput && els.classListFileInput.click());
     if (els.classListFileInput) els.classListFileInput.addEventListener('change', importClassListFile);
-    if (els.groupCountInput) els.groupCountInput.addEventListener('change', () => { state.classroom.groupCount = Math.max(2, Math.min(20, Number(els.groupCountInput.value) || 6)); scheduleClassroomSave(); publishSessionState(true); });
-    if (els.removePickedInput) els.removePickedInput.addEventListener('change', () => { state.classroom.removePicked = els.removePickedInput.checked; scheduleClassroomSave(); });
-    if (els.balancedGroupsInput) els.balancedGroupsInput.addEventListener('change', () => { state.classroom.balanced = els.balancedGroupsInput.checked; scheduleClassroomSave(); });
+    if (els.groupCountInput) els.groupCountInput.addEventListener('change', () => {
+      state.classroom.groupCount = Math.max(2, Math.min(20, Number(els.groupCountInput.value) || 6));
+      state.classroom.rolledGroups = [];
+      scheduleClassroomSave(); publishSessionState(true);
+    });
+    if (els.removePickedInput) els.removePickedInput.addEventListener('change', () => { state.classroom.removePicked = els.removePickedInput.checked; scheduleClassroomSave(); publishSessionState(true); });
+    if (els.groupRollModeSelect) els.groupRollModeSelect.addEventListener('change', () => {
+      const mode = ['balanced', 'no-repeat', 'free'].includes(els.groupRollModeSelect.value) ? els.groupRollModeSelect.value : 'balanced';
+      state.classroom.groupRollMode = mode;
+      state.classroom.balanced = mode === 'balanced';
+      state.classroom.rolledGroups = [];
+      scheduleClassroomSave(); publishSessionState(true);
+    });
+    if (els.balancedGroupsInput) els.balancedGroupsInput.addEventListener('change', () => {
+      state.classroom.groupRollMode = els.balancedGroupsInput.checked ? 'balanced' : 'free';
+      state.classroom.balanced = els.balancedGroupsInput.checked;
+      state.classroom.rolledGroups = [];
+      scheduleClassroomSave(); publishSessionState(true);
+    });
     if (els.pickNameBtn) els.pickNameBtn.addEventListener('click', pickRandomStudent);
     if (els.rollGroupBtn) els.rollGroupBtn.addEventListener('click', rollGroupDice);
     if (els.resetPicksBtn) els.resetPicksBtn.addEventListener('click', resetClassroomRound);
@@ -2945,16 +2970,21 @@
       case 'classroomSetSection':
         state.classroom.activeSectionId = String(command.value || '');
         state.classroom.pickedIds = [];
+        state.classroom.rolledGroups = [];
         renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
         break;
       case 'classroomSetRepeatMode':
         state.classroom.removePicked = String(command.value || '') !== 'allow-repeat';
         renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
         break;
-      case 'classroomSetGroupMode':
-        state.classroom.balanced = String(command.value || '') !== 'free';
+      case 'classroomSetGroupMode': {
+        const mode = ['balanced', 'no-repeat', 'free'].includes(String(command.value || '')) ? String(command.value) : 'balanced';
+        state.classroom.groupRollMode = mode;
+        state.classroom.balanced = mode === 'balanced';
+        state.classroom.rolledGroups = [];
         renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
         break;
+      }
       case 'classroomPick': pickRandomStudent(); break;
       case 'classroomRoll': rollGroupDice(); break;
       case 'classroomReset': resetClassroomRound(); break;
@@ -3244,6 +3274,7 @@
             <label>Group rolls
               <select id="remoteGroupMode" data-host-only="true">
                 <option value="balanced">Balanced</option>
+                <option value="no-repeat">No repeat</option>
                 <option value="free">Free repeat</option>
               </select>
             </label>
@@ -3438,7 +3469,7 @@
           $('remoteClassSection').innerHTML = (cs.sections || []).map((s) => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)} (${s.count})</option>`).join('') || '<option value="">No saved section</option>';
           $('remoteClassSection').value = cs.activeSectionId || '';
           if ($('remoteNameRepeat')) $('remoteNameRepeat').value = cs.removePicked === false ? 'allow-repeat' : 'no-repeat';
-          if ($('remoteGroupMode')) $('remoteGroupMode').value = cs.balanced === false ? 'free' : 'balanced';
+          if ($('remoteGroupMode')) $('remoteGroupMode').value = ['balanced', 'no-repeat', 'free'].includes(cs.groupRollMode) ? cs.groupRollMode : (cs.balanced === false ? 'free' : 'balanced');
           const bits = [];
           if (cs.revealMode === 'name' && cs.lastStudent) bits.push(cs.lastStudent);
           if (cs.revealMode === 'group' && cs.lastGroup) bits.push(`Group ${cs.lastGroup}`);
@@ -4166,7 +4197,14 @@
   function loadClassroomLocal() {
     try {
       const saved = JSON.parse(localStorage.getItem('presentationHubClassroom') || 'null');
-      if (saved && Array.isArray(saved.sections)) state.classroom = { ...state.classroom, ...saved };
+      if (saved && Array.isArray(saved.sections)) {
+        state.classroom = { ...state.classroom, ...saved };
+        state.classroom.groupRollMode = ['balanced', 'no-repeat', 'free'].includes(state.classroom.groupRollMode)
+          ? state.classroom.groupRollMode
+          : (state.classroom.balanced === false ? 'free' : 'balanced');
+        state.classroom.balanced = state.classroom.groupRollMode === 'balanced';
+        state.classroom.rolledGroups = Array.isArray(state.classroom.rolledGroups) ? state.classroom.rolledGroups : [];
+      }
     } catch (_) {}
   }
 
@@ -4188,6 +4226,11 @@
       const snap = await state.firebaseDb.collection('presentationHubUsers').doc(user.uid).collection('data').doc('classroom').get();
       if (snap.exists) state.classroom = { ...state.classroom, ...snap.data() };
       else await saveClassroomCloud();
+      state.classroom.groupRollMode = ['balanced', 'no-repeat', 'free'].includes(state.classroom.groupRollMode)
+        ? state.classroom.groupRollMode
+        : (state.classroom.balanced === false ? 'free' : 'balanced');
+      state.classroom.balanced = state.classroom.groupRollMode === 'balanced';
+      state.classroom.rolledGroups = Array.isArray(state.classroom.rolledGroups) ? state.classroom.rolledGroups : [];
       saveClassroomLocal(); renderClassroomTools(); publishSessionState(true);
     } catch (e) { console.warn('Classroom cloud load failed', e); }
   }
@@ -4377,7 +4420,12 @@
     els.studentNamesInput.value = sec ? sec.students.map(s => cleanStudentName(s.name)).join('\n') : '';
     els.groupCountInput.value = state.classroom.groupCount;
     els.removePickedInput.checked = state.classroom.removePicked;
-    els.balancedGroupsInput.checked = state.classroom.balanced;
+    state.classroom.groupRollMode = ['balanced', 'no-repeat', 'free'].includes(state.classroom.groupRollMode)
+      ? state.classroom.groupRollMode
+      : (state.classroom.balanced === false ? 'free' : 'balanced');
+    state.classroom.balanced = state.classroom.groupRollMode === 'balanced';
+    if (els.groupRollModeSelect) els.groupRollModeSelect.value = state.classroom.groupRollMode;
+    if (els.balancedGroupsInput) els.balancedGroupsInput.checked = state.classroom.balanced;
     els.classroomResult.innerHTML = state.classroom.revealMode === 'name' && state.classroom.lastStudent ? `<strong>${escapeHtml(state.classroom.lastStudent.name)}</strong>` : state.classroom.revealMode === 'group' && state.classroom.lastGroup ? `<span>GROUP ${state.classroom.lastGroup}</span>` : '<span>Ready to pick</span>';
     [els.pickNameBtn, els.rollGroupBtn, els.resetPicksBtn].filter(Boolean).forEach(btn => { btn.disabled = !!state.classroom.busy; });
     renderClassroomPresentation();
@@ -4391,6 +4439,7 @@
       groupCount: state.classroom.groupCount,
       removePicked: !!state.classroom.removePicked,
       balanced: !!state.classroom.balanced,
+      groupRollMode: ['balanced', 'no-repeat', 'free'].includes(state.classroom.groupRollMode) ? state.classroom.groupRollMode : (state.classroom.balanced ? 'balanced' : 'free'),
       revealMode: state.classroom.revealMode || '',
       lastStudent: state.classroom.lastStudent && state.classroom.lastStudent.name,
       lastGroup: state.classroom.lastGroup,
@@ -4461,16 +4510,32 @@
     state.classroom.busy = false;
     renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return chosen;
   }
-  function chooseBalancedGroup() {
-    const n = state.classroom.groupCount; if (!state.classroom.balanced) return 1 + Math.floor(Math.random()*n);
-    const counts = Array(n).fill(0); Object.values(state.classroom.assignments).forEach(g => { if (g>=1 && g<=n) counts[g-1]++; });
-    const min = Math.min(...counts); const choices = counts.map((c,i)=>c===min?i+1:null).filter(Boolean);
-    return choices[Math.floor(Math.random()*choices.length)];
+  function chooseGroupRoll() {
+    const n = Math.max(2, Number(state.classroom.groupCount) || 6);
+    const mode = ['balanced', 'no-repeat', 'free'].includes(state.classroom.groupRollMode)
+      ? state.classroom.groupRollMode
+      : (state.classroom.balanced ? 'balanced' : 'free');
+    if (mode === 'no-repeat') {
+      let used = Array.isArray(state.classroom.rolledGroups)
+        ? Array.from(new Set(state.classroom.rolledGroups.map(Number).filter(g => g >= 1 && g <= n)))
+        : [];
+      if (used.length >= n) used = [];
+      const choices = Array.from({ length: n }, (_, index) => index + 1).filter(group => !used.includes(group));
+      const group = choices[Math.floor(Math.random() * choices.length)] || 1;
+      state.classroom.rolledGroups = [...used, group];
+      return group;
+    }
+    if (mode === 'free') return 1 + Math.floor(Math.random() * n);
+    const counts = Array(n).fill(0);
+    Object.values(state.classroom.assignments).forEach(g => { if (g >= 1 && g <= n) counts[g - 1]++; });
+    const min = Math.min(...counts);
+    const choices = counts.map((count, index) => count === min ? index + 1 : null).filter(Boolean);
+    return choices[Math.floor(Math.random() * choices.length)];
   }
   async function rollGroupDice() {
     if (state.classroom.busy) return;
     const student = state.classroom.lastStudent || null;
-    const group = chooseBalancedGroup();
+    const group = chooseGroupRoll();
     state.classroom.busy = true;
     state.classroom.revealMode = 'group';
     state.classroom.lastGroup = null;
@@ -4481,7 +4546,7 @@
     state.classroom.busy = false;
     renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return group;
   }
-  function resetClassroomRound() { if (state.classroom.busy) return; state.classroom.pickedIds=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; state.classroom.revealMode=''; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
+  function resetClassroomRound() { if (state.classroom.busy) return; state.classroom.pickedIds=[]; state.classroom.rolledGroups=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; state.classroom.revealMode=''; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
   function getClassroomPresentationLayer() {
     let layer = document.getElementById('classroomPresentationLayer');
     if (layer) return layer;

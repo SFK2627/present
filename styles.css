@@ -4058,3 +4058,15 @@ body > .magic-effect-layer { position: fixed !important; }
       inset 0 0 26px rgba(255,255,255,.07)!important;
   }
 }
+
+/* v11.16 group roll modes */
+.classroom-group-mode-label{
+  display:grid!important;
+  gap:6px!important;
+  min-width:170px;
+  align-items:stretch!important;
+}
+.classroom-group-mode-label select{
+  min-height:40px;
+  border-radius:10px;
+}
