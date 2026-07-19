@@ -118,6 +118,8 @@
     youtubeMessageListenerReady: false,
     mediaControlLockUntil: 0,
     mediaExpectedPlayback: {},
+    youtubeAutoplayTimers: [],
+    mediaUnmuteVolume: 0.9,
   };
 
 
@@ -3336,10 +3338,20 @@
     publish(true);
   }
 
+  function stopYouTubeAutoplayRetry() {
+    const timers = Array.isArray(state.youtubeAutoplayTimers) ? state.youtubeAutoplayTimers : [];
+    timers.forEach((timer) => { try { clearTimeout(timer); } catch (error) {} });
+    state.youtubeAutoplayTimers = [];
+  }
+
   function sendYouTubeCommand(func, args = [], repeats = true) {
     const run = () => postYouTubeCommand(func, args);
     run();
-    if (repeats) [120, 350, 750, 1300, 2200].forEach((delay) => window.setTimeout(run, delay));
+    // Keep controls responsive: play/pause/volume can retry a little while the
+    // iframe is waking up, but seek must not repeat many times because it causes
+    // the YouTube player to lag and jump back.
+    const delays = repeats === 'light' ? [90, 260] : repeats ? [110, 320, 700] : [];
+    delays.forEach((delay) => window.setTimeout(run, delay));
   }
 
   function handleYouTubeMediaMessage(event) {
@@ -3402,7 +3414,7 @@
     };
     if (frame) {
       [80, 300, 900].forEach((delay) => window.setTimeout(ask, delay));
-      state.youtubeStatusTimer = setInterval(ask, 1000);
+      state.youtubeStatusTimer = setInterval(ask, 1500);
     }
   }
 
@@ -3782,7 +3794,12 @@
     const frame = document.getElementById('mediaCastLinkFrame');
     if (!frame || !frame.contentWindow || frame.dataset.provider !== 'youtube') return false;
     try {
-      frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), '*');
+      const target = frame.contentWindow;
+      // Classboard-style YouTube control: wake/listen before and after the command.
+      // Some YouTube iframes ignore play/pause/mute until this handshake is sent.
+      target.postMessage(JSON.stringify({ event: 'listening', id: 'mediaCastLinkFrame' }), '*');
+      target.postMessage(JSON.stringify({ event: 'command', func, args: Array.isArray(args) ? args : [] }), '*');
+      target.postMessage(JSON.stringify({ event: 'listening', id: 'mediaCastLinkFrame' }), '*');
       return true;
     } catch (error) {
       return false;
@@ -3790,26 +3807,26 @@
   }
 
   function syncYouTubeMediaControls(volume = state.mediaLinkVolume || 0.9, autoplay = true) {
+    stopYouTubeAutoplayRetry();
     const pct = Math.max(0, Math.min(100, Math.round((Number(volume) || 0) * 100)));
-    const wantSound = pct > 0;
+    state.mediaUnmuteVolume = Math.max(0.15, Number(volume) || state.mediaUnmuteVolume || 0.9);
+    const timers = [];
+    const schedule = (fn, delay) => timers.push(window.setTimeout(fn, delay));
     const runMutedStart = () => {
-      // YouTube/Chrome are far more reliable when autoplay starts muted first.
-      // After the player is moving, the remote volume/unmute command is applied.
-      postYouTubeCommand('mute');
+      postYouTubeCommand('mute', []);
       postYouTubeCommand('setVolume', [pct]);
-      if (autoplay) postYouTubeCommand('playVideo');
+      if (autoplay) postYouTubeCommand('playVideo', []);
     };
     const runSoundSync = () => {
       postYouTubeCommand('setVolume', [pct]);
-      if (wantSound) postYouTubeCommand('unMute');
-      else postYouTubeCommand('mute');
-      if (autoplay) postYouTubeCommand('playVideo');
+      if (pct > 0) postYouTubeCommand('unMute', []);
+      else postYouTubeCommand('mute', []);
     };
-    // The iframe can accept commands only after it initializes. Retry several
-    // times so the phone remote controls become real commands, not one-shot
-    // buttons that are missed while YouTube is still loading.
-    [80, 240, 520, 980, 1500].forEach((delay) => window.setTimeout(runMutedStart, delay));
-    [1800, 2600, 3800].forEach((delay) => window.setTimeout(runSoundSync, delay));
+    // Start quickly, but do not keep forcing play for several seconds. That old
+    // retry loop was cancelling the user's Pause command.
+    [80, 240, 520].forEach((delay) => schedule(runMutedStart, delay));
+    [900, 1400].forEach((delay) => schedule(runSoundSync, delay));
+    state.youtubeAutoplayTimers = timers;
   }
 
   function tryAutoplayDirectMedia(player, volume = state.mediaLinkVolume || 0.9) {
@@ -3860,7 +3877,7 @@
       if (!id) { showMediaCastStatus('Could not read the YouTube video ID.', 'warning'); return; }
       const origin = encodeURIComponent(window.location.origin || '');
       const startSeconds = Math.max(0, Math.floor(Number(payload.currentTime || payload.start || 0) || 0));
-      const embed = `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&mute=1${startSeconds ? `&start=${startSeconds}` : ''}`;
+      const embed = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?enablejsapi=1&origin=${origin}&autoplay=1&playsinline=1&rel=0&modestbranding=1&controls=1&iv_load_policy=3&mute=1${startSeconds ? `&start=${startSeconds}` : ''}`;
       content = `<iframe id="mediaCastLinkFrame" class="media-cast-link-frame" data-provider="youtube" data-media-url="${safeUrl}" data-youtube-id="${escapeHtml(id)}" src="${escapeHtml(embed)}" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
     } else if (kind === 'tiktok') {
       const id = extractTikTokVideoId(parsed);
@@ -3935,38 +3952,76 @@
       return;
     }
     if (provider === 'youtube') {
-      const value = Math.max(0, Math.min(1, Number(raw.value) || 0));
-      if (action === 'play') { setMediaControlLock({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, 1600); sendYouTubeCommand('playVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, true); clearMediaControlLockSoon(1700); return; }
-      if (action === 'pause') { const current = Number(state.mediaPlayback && state.mediaPlayback.currentTime) || 0; setMediaControlLock({ provider: 'youtube', kind: 'youtube', playing: false, paused: true, currentTime: current }, 1600); sendYouTubeCommand('pauseVideo', []); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: false, paused: true, currentTime: current }, true); clearMediaControlLockSoon(1700); return; }
-      if (action === 'toggle') { sendYouTubeCommand('playVideo', []); return; }
-      if (action === 'volume') {
-        state.mediaLinkVolume = value;
-        setMediaControlLock({ provider: 'youtube', kind: 'youtube', volume: value, muted: value <= 0 }, 900);
-        sendYouTubeCommand('setVolume', [Math.round(value * 100)], true);
-        if (value <= 0) sendYouTubeCommand('mute', [], true);
-        else sendYouTubeCommand('unMute', [], true);
-        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', volume: value, muted: value <= 0 }, true);
-        clearMediaControlLockSoon(950);
+      stopYouTubeAutoplayRetry();
+      const numericValue = Number(raw.value);
+      const value = Math.max(0, Math.min(1, Number.isFinite(numericValue) ? numericValue : (state.mediaLinkVolume || 0.9)));
+      const current = Number(state.mediaPlayback && state.mediaPlayback.currentTime) || 0;
+      if (action === 'play') {
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, 1200);
+        sendYouTubeCommand('playVideo', [], 'light');
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: true, paused: false }, true);
+        clearMediaControlLockSoon(1250);
         return;
       }
-      if (action === 'mute') { setMediaControlLock({ provider: 'youtube', kind: 'youtube', muted: true }, 900); sendYouTubeCommand('mute', [], true); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: true }, true); clearMediaControlLockSoon(950); return; }
-      if (action === 'unmute') { setMediaControlLock({ provider: 'youtube', kind: 'youtube', muted: false }, 900); sendYouTubeCommand('unMute', [], true); updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', muted: false }, true); clearMediaControlLockSoon(950); return; }
+      if (action === 'pause') {
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', playing: false, paused: true, currentTime: current }, 1200);
+        sendYouTubeCommand('pauseVideo', [], 'light');
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', playing: false, paused: true, currentTime: current }, true);
+        clearMediaControlLockSoon(1250);
+        return;
+      }
+      if (action === 'toggle') {
+        const isPlaying = !!(state.mediaPlayback && state.mediaPlayback.playing);
+        controlMediaCast({ type: isPlaying ? 'pause' : 'play', commandId: `${Date.now()}-toggle` });
+        return;
+      }
+      if (action === 'volume') {
+        state.mediaLinkVolume = value;
+        if (value > 0.01) state.mediaUnmuteVolume = value;
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', volume: value, muted: value <= 0.01 }, 700);
+        sendYouTubeCommand('setVolume', [Math.round(value * 100)], 'light');
+        if (value <= 0.01) sendYouTubeCommand('mute', [], 'light');
+        else sendYouTubeCommand('unMute', [], 'light');
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', volume: value, muted: value <= 0.01 }, true);
+        clearMediaControlLockSoon(760);
+        return;
+      }
+      if (action === 'mute') {
+        const keepVolume = Math.max(0.15, Number(state.mediaLinkVolume || state.mediaUnmuteVolume || 0.9));
+        state.mediaUnmuteVolume = keepVolume;
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', volume: 0, muted: true }, 700);
+        // Some embeds ignore mute(), so also force setVolume(0).
+        sendYouTubeCommand('setVolume', [0], 'light');
+        sendYouTubeCommand('mute', [], 'light');
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', volume: 0, muted: true }, true);
+        clearMediaControlLockSoon(760);
+        return;
+      }
+      if (action === 'unmute') {
+        const restore = Math.max(0.15, Math.min(1, Number(state.mediaUnmuteVolume || state.mediaLinkVolume || 0.9)));
+        state.mediaLinkVolume = restore;
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', volume: restore, muted: false }, 700);
+        sendYouTubeCommand('setVolume', [Math.round(restore * 100)], 'light');
+        sendYouTubeCommand('unMute', [], 'light');
+        updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', volume: restore, muted: false }, true);
+        clearMediaControlLockSoon(760);
+        return;
+      }
       if (action === 'seek') {
         const seconds = Math.max(0, Number(raw.seconds ?? raw.value) || 0);
-        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 2400);
-        sendYouTubeCommand('seekTo', [seconds, true], true);
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 900);
+        sendYouTubeCommand('seekTo', [seconds, true], false);
         updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
-        clearMediaControlLockSoon(2500);
+        clearMediaControlLockSoon(950);
         return;
       }
       if (action === 'skip') {
         const delta = Number(raw.value) || 0;
-        const current = Number(state.mediaPlayback && state.mediaPlayback.currentTime) || 0;
         const seconds = Math.max(0, current + delta);
-        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 2400);
-        sendYouTubeCommand('seekTo', [seconds, true], true);
+        setMediaControlLock({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, 900);
+        sendYouTubeCommand('seekTo', [seconds, true], false);
         updateMediaPlaybackStatus({ provider: 'youtube', kind: 'youtube', currentTime: seconds, canSeek: true }, true);
-        clearMediaControlLockSoon(2500);
+        clearMediaControlLockSoon(950);
         return;
       }
       // TikTok and generic web iframes do not expose reliable seek/volume APIs.
