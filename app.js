@@ -107,7 +107,7 @@
     { id: 'micdrop', label: 'Mic Drop', emoji: '🎤', shortcut: 'M', hint: 'Strong ending moment' },
     { id: 'curtain', label: 'Curtain Reveal', emoji: '🎭', shortcut: 'U', hint: 'Reveal with curtains' },
     { id: 'bubbles', label: 'Bubbles', emoji: '🫧', shortcut: 'O', hint: 'Light floating effect' },
-    { id: 'quiet', label: 'Quiet / Shoosh', emoji: '🤫', shortcut: 'Q', hint: 'Calm class reminder' },
+    { id: 'quiet', label: 'Be Quiet', emoji: '🤫', shortcut: 'Q', hint: 'Calm class reminder' },
     { id: 'applause', label: 'Applause', emoji: '👏', shortcut: 'P', hint: 'Clap for students' },
     { id: 'spotlight', label: 'Spotlight', emoji: '🔦', shortcut: 'S', hint: 'Focus attention' },
     { id: 'correct', label: 'Correct Stamp', emoji: '✅', shortcut: 'A', hint: 'Correct answer' },
@@ -1708,7 +1708,7 @@
       case 'bubbles':
         return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas>`;
       case 'quiet':
-        return `<div class="magic-vignette"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-emoji">🤫</div><span class="magic-shush-wave one"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span></div>`;
+        return `<div class="magic-quiet-backdrop"></div><div class="magic-quiet-halo halo-one"></div><div class="magic-quiet-halo halo-two"></div><div class="magic-center magic-plain magic-quiet-hero"><div class="magic-quiet-aura"></div><div class="magic-emoji">🤫</div><span class="magic-shush-wave one"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span></div>`;
       case 'applause':
         return `<div class="magic-particles applause-full">${makeParticles(120, 'magic-symbol', ['👏','👏','👏','👏','✨'])}</div><div class="magic-center magic-plain magic-applause-hero"><div class="magic-emoji">👏</div></div>`;
       case 'spotlight':
@@ -1742,7 +1742,7 @@
     if (effect.id === 'confetti' || effect.id === 'bubbles') startCanvasMagicEffect(layer, effect.id);
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 2600, confetti: 3200, micdrop: 2200, curtain: 3400, bubbles: 6400, quiet: 2200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 2600, confetti: 3200, micdrop: 2200, curtain: 3400, bubbles: 6400, quiet: 6200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
       layer.classList.remove('show');
       layer.classList.add('hidden');
@@ -1975,13 +1975,13 @@
         if ('speechSynthesis' in window) {
           try {
             window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance('Shooooshhh...');
+            const utter = new SpeechSynthesisUtterance('Be Quiet');
             const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
             const preferred = voices.find(v => /en|us|uk|ph/i.test((v.lang || '') + ' ' + (v.name || ''))) || voices[0];
             if (preferred) utter.voice = preferred;
-            utter.rate = 0.54;
-            utter.pitch = 0.52;
-            utter.volume = Math.min(1, 0.82 * volume);
+            utter.rate = 0.72;
+            utter.pitch = 0.8;
+            utter.volume = Math.min(1, 0.95 * volume);
             window.speechSynthesis.speak(utter);
           } catch (error) {}
         }
@@ -4609,61 +4609,63 @@
     const status = card.querySelector('p');
     const safePool = Array.from(new Set((allNames.length ? allNames : [finalName]).map(cleanStudentName).filter(Boolean)));
     if (!safePool.includes(finalName)) safePool.push(finalName);
-    const stepCount = Math.max(12, Math.min(18, safePool.length + 6));
-    const sequence = [];
-    let previous = '';
-    for (let i = 0; i < stepCount - 1; i++) {
-      const candidate = pickRoulettePoolName(safePool, [previous, finalName]);
-      sequence.push(candidate);
-      previous = candidate;
-    }
-    sequence.push(finalName);
-    let current = sequence[0] || finalName;
-    for (let i = 0; i < sequence.length - 1; i++) {
-      const next = sequence[i + 1] || finalName;
-      const progress = i / Math.max(1, sequence.length - 2);
-      const delay = 110 + Math.round(progress * progress * 210);
+
+    // Fast at the start, then progressively slower until it settles.
+    // The cubic easing creates a clear roulette-style deceleration instead of
+    // running at one speed and suddenly stopping.
+    const totalSteps = 36;
+    let current = pickRoulettePoolName(safePool, [finalName]) || finalName;
+    for (let i = 0; i < totalSteps; i++) {
+      const isLastStep = i === totalSteps - 1;
+      const next = isLastStep ? finalName : pickRoulettePoolName(safePool, [current, finalName]);
+      const progress = i / Math.max(1, totalSteps - 1);
+      const eased = progress * progress * progress;
+      const delay = Math.round(42 + eased * 500);
       const strip = renderRouletteMovingStrip(track, safePool, current, next);
       fitClassroomNames(track);
       playClassroomTone('tick', i);
-      strip.style.setProperty('--roulette-duration', `${Math.max(120, Math.round(delay * 0.8))}ms`);
+      strip.style.setProperty('--roulette-duration', `${Math.max(38, Math.round(delay * 0.82))}ms`);
       void strip.offsetHeight;
       strip.classList.add('spinning');
       await wait(delay);
       current = next;
     }
+
     renderRouletteFinalStrip(track, safePool, finalName);
     fitClassroomNames(track);
     status.textContent = 'Selected!';
     playClassroomTone('select');
     startClassroomRevealConfetti(layer, false);
-    await wait(5000);
+    await wait(3000);
     layer.classList.remove('show');
     renderClassroomPresentation();
   }
   async function showRollingGroupDice(finalGroup) {
     const layer = getClassroomRevealLayer('group');
     const card = layer.querySelector('.classroom-reveal-card');
-    card.innerHTML = `<div class="classroom-reveal-badge">GROUP DICE</div><div class="rolling-dice-scene"><div class="rolling-die"><span>?</span></div></div><h3 class="rolling-group-label">ROLLING...</h3>`;
+    card.innerHTML = `<div class="classroom-reveal-badge">GROUP DICE</div><div class="rolling-dice-scene"><div class="rolling-die rolling-die-cube"><div class="die-face die-front"><span>?</span></div><div class="die-face die-back"><span>?</span></div><div class="die-face die-right"><span>?</span></div><div class="die-face die-left"><span>?</span></div><div class="die-face die-top"><span>?</span></div><div class="die-face die-bottom"><span>?</span></div></div><div class="dice-floor-shadow"></div></div><h3 class="rolling-group-label">ROLLING...</h3>`;
     const die = card.querySelector('.rolling-die');
-    const face = die.querySelector('span');
+    const faces = Array.from(die.querySelectorAll('.die-face span'));
     const max = Math.max(2, Number(state.classroom.groupCount) || 6);
     const started = performance.now();
     let tick = 0;
     while (performance.now() - started < 1900) {
-      face.textContent = String(1 + Math.floor(Math.random()*max));
-      die.style.setProperty('--rx', `${360 + tick*71}deg`);
-      die.style.setProperty('--ry', `${540 + tick*53}deg`);
+      const value = String(1 + Math.floor(Math.random()*max));
+      faces.forEach((face, index) => { face.textContent = index === 0 ? value : String(1 + ((Number(value) + index - 1) % max)); });
+      die.style.setProperty('--rx', `${540 + tick*97}deg`);
+      die.style.setProperty('--ry', `${720 + tick*83}deg`);
+      die.style.setProperty('--rz', `${90 + tick*37}deg`);
+      die.style.setProperty('--jump', `${-18 - (tick % 3) * 9}px`);
       playClassroomTone('dice', tick);
       tick++;
-      await wait(Math.min(170, 55 + tick*7));
+      await wait(Math.min(150, 48 + tick*6));
     }
-    face.textContent = String(finalGroup);
+    faces.forEach((face, index) => { face.textContent = index === 0 ? String(finalGroup) : String(1 + ((Number(finalGroup) + index - 1) % max)); });
     playClassroomTone('land');
     die.classList.add('landed');
     card.querySelector('.rolling-group-label').textContent = `GROUP ${finalGroup}`;
     startClassroomRevealConfetti(layer, true);
-    await wait(2100);
+    await wait(3000);
     layer.classList.remove('show');
     renderClassroomPresentation();
   }

@@ -3786,3 +3786,132 @@ body > .magic-effect-layer { position: fixed !important; }
 }
 @keyframes spotlightPulse{0%,100%{opacity:.62;transform:scale(.96)}50%{opacity:1;transform:scale(1.05)}}
 .magic-bubbles-canvas{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;z-index:8!important;pointer-events:none!important}
+
+
+/* v11.9 SHSS / Be Quiet full-screen effect */
+.magic-effect-layer.magic-quiet{
+  position:fixed!important;
+  inset:0!important;
+  width:100vw!important;
+  height:100vh!important;
+  overflow:hidden!important;
+  isolation:isolate!important;
+  background:rgba(0,0,0,.94)!important;
+  backdrop-filter:blur(2px) brightness(.24)!important;
+}
+.magic-effect-layer.magic-quiet::before{
+  content:""!important;
+  position:absolute!important;
+  inset:0!important;
+  z-index:0!important;
+  background:linear-gradient(180deg,rgba(0,0,0,.94),rgba(2,6,23,.97))!important;
+  opacity:1!important;
+}
+.magic-quiet-backdrop{
+  position:absolute;
+  inset:0;
+  z-index:1;
+  background:
+    radial-gradient(circle at 50% 48%,rgba(99,102,241,.12),transparent 34%),
+    linear-gradient(180deg,rgba(2,6,23,.94),rgba(0,0,0,.98));
+  animation:quietBackdropIn .8s ease both;
+}
+.magic-quiet-halo{
+  position:absolute;
+  left:50%;
+  top:50%;
+  z-index:2;
+  width:min(74vw,760px);
+  aspect-ratio:1;
+  border-radius:50%;
+  transform:translate(-50%,-50%);
+  border:1px solid rgba(196,181,253,.18);
+  box-shadow:0 0 80px rgba(99,102,241,.12),inset 0 0 60px rgba(255,255,255,.03);
+  animation:quietHalo 3.4s ease-in-out infinite;
+}
+.magic-quiet-halo.halo-two{
+  width:min(52vw,520px);
+  animation-delay:.7s;
+  opacity:.7;
+}
+.magic-quiet-hero{
+  position:relative!important;
+  z-index:4!important;
+  width:min(92vw,900px)!important;
+  min-height:min(72vh,680px)!important;
+  display:grid!important;
+  place-items:center!important;
+}
+.magic-quiet-hero .magic-quiet-aura{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:min(60vw,620px);
+  aspect-ratio:1;
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(139,92,246,.24),rgba(59,130,246,.1) 36%,rgba(0,0,0,0) 70%);
+  filter:blur(16px);
+  animation:quietAura 2.4s ease-in-out infinite;
+}
+.magic-effect-layer.magic-quiet .magic-quiet-hero .magic-emoji{
+  position:relative!important;
+  z-index:3!important;
+  font-size:clamp(11rem,34vw,25rem)!important;
+  line-height:.9!important;
+  transform-origin:center!important;
+  filter:drop-shadow(0 28px 46px rgba(0,0,0,.72)) drop-shadow(0 0 36px rgba(167,139,250,.38))!important;
+  animation:quietEmojiEntrance 1s cubic-bezier(.16,1,.3,1) both,quietEmojiFloat 2.2s 1s ease-in-out infinite alternate!important;
+}
+.magic-effect-layer.magic-quiet .magic-shush-wave{
+  z-index:2!important;
+  width:min(62vw,620px)!important;
+  height:min(62vw,620px)!important;
+  max-width:none!important;
+  max-height:none!important;
+  border:2px solid rgba(255,255,255,.22)!important;
+  box-shadow:0 0 34px rgba(167,139,250,.16)!important;
+  animation:quietWave 2.4s ease-out infinite!important;
+}
+.magic-effect-layer.magic-quiet .magic-shush-wave.two{animation-delay:.8s!important}
+.magic-effect-layer.magic-quiet .magic-shush-wave.three{animation-delay:1.6s!important}
+@keyframes quietBackdropIn{from{opacity:0}to{opacity:1}}
+@keyframes quietHalo{0%,100%{transform:translate(-50%,-50%) scale(.94);opacity:.3}50%{transform:translate(-50%,-50%) scale(1.05);opacity:.72}}
+@keyframes quietAura{0%,100%{transform:translate(-50%,-50%) scale(.9);opacity:.55}50%{transform:translate(-50%,-50%) scale(1.08);opacity:1}}
+@keyframes quietEmojiEntrance{0%{opacity:0;transform:scale(.35) rotate(-10deg);filter:blur(18px)}62%{opacity:1;transform:scale(1.08) rotate(3deg);filter:blur(0)}100%{transform:scale(1) rotate(0)}}
+@keyframes quietEmojiFloat{0%{transform:translateY(0) scale(1)}100%{transform:translateY(-16px) scale(1.025)}}
+@keyframes quietWave{0%{transform:translate(-50%,-50%) scale(.28);opacity:.72}72%{opacity:.12}100%{transform:translate(-50%,-50%) scale(1.12);opacity:0}}
+@media(max-width:700px){
+  .magic-effect-layer.magic-quiet .magic-quiet-hero .magic-emoji{font-size:clamp(9rem,48vw,17rem)!important}
+  .magic-quiet-hero{min-height:70vh!important}
+}
+
+
+/* v11.10 compact spotlight and more physical dice roll */
+.magic-moving-spotlight{
+  width:clamp(135px,17vw,250px)!important;
+  height:clamp(135px,17vw,250px)!important;
+  background:radial-gradient(circle at 46% 43%,rgba(255,255,255,.68) 0 7%,rgba(255,252,222,.42) 14%,rgba(255,240,155,.23) 32%,rgba(255,226,112,.10) 50%,rgba(255,255,255,.025) 65%,transparent 76%)!important;
+  box-shadow:0 0 0 1px rgba(255,255,255,.10),0 0 28px rgba(255,247,197,.24),0 0 68px rgba(255,217,106,.24),inset 0 0 34px rgba(255,255,255,.14)!important;
+  animation:spotlightSearchCompact 5.1s cubic-bezier(.35,.02,.18,1) forwards!important;
+}
+.magic-moving-spotlight:before{inset:-30%!important;filter:blur(18px)!important;opacity:.75!important}
+.magic-moving-spotlight:after{width:15%!important;height:15%!important}
+@keyframes spotlightSearchCompact{
+  0%,10%{transform:translate3d(8vw,12vh,0) scale(.98)}
+  20%,31%{transform:translate3d(63vw,10vh,0) scale(1.02)}
+  42%,53%{transform:translate3d(70vw,55vh,0) scale(.97)}
+  64%,75%{transform:translate3d(14vw,58vh,0) scale(1.03)}
+  86%,94%{transform:translate3d(47vw,34vh,0) scale(1)}
+  100%{transform:translate3d(42vw,28vh,0) scale(1)}
+}
+.rolling-dice-scene{position:relative;min-height:clamp(240px,36vw,360px)!important;perspective:1100px!important}
+.rolling-die-cube{--size:clamp(130px,20vw,220px);--rx:720deg;--ry:900deg;--rz:180deg;--jump:-18px;width:var(--size)!important;height:var(--size)!important;background:none!important;border-radius:0!important;box-shadow:none!important;transform-style:preserve-3d!important;transform:translateY(var(--jump)) rotateX(var(--rx)) rotateY(var(--ry)) rotateZ(var(--rz))!important;transition:transform .13s linear!important;position:relative!important}
+.rolling-die-cube:before,.rolling-die-cube:after{display:none!important}
+.die-face{position:absolute;inset:0;border-radius:28px;display:grid;place-items:center;background:linear-gradient(145deg,#fff,#e0ecff 62%,#bfd8ff);border:2px solid rgba(30,64,175,.16);box-shadow:inset 0 -16px 28px rgba(37,99,235,.14),inset 0 8px 18px rgba(255,255,255,.95);backface-visibility:hidden}
+.die-face span{font-size:clamp(4rem,10vw,7.5rem)!important;font-weight:1000;color:#172554;text-shadow:0 7px 0 rgba(30,64,175,.11);transform:none!important}
+.die-front{transform:translateZ(calc(var(--size)/2))}.die-back{transform:rotateY(180deg) translateZ(calc(var(--size)/2))}.die-right{transform:rotateY(90deg) translateZ(calc(var(--size)/2))}.die-left{transform:rotateY(-90deg) translateZ(calc(var(--size)/2))}.die-top{transform:rotateX(90deg) translateZ(calc(var(--size)/2))}.die-bottom{transform:rotateX(-90deg) translateZ(calc(var(--size)/2))}
+.rolling-die-cube.landed{transform:translateY(0) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(1.04)!important;transition:transform .95s cubic-bezier(.12,.85,.18,1.12)!important;animation:dicePhysicalSettle .85s .95s both!important}
+.dice-floor-shadow{position:absolute;left:50%;bottom:9%;width:clamp(120px,20vw,230px);height:30px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(ellipse,rgba(0,0,0,.45),rgba(0,0,0,0) 72%);filter:blur(8px);animation:diceShadowPulse .55s ease-in-out infinite alternate}
+@keyframes dicePhysicalSettle{0%{transform:translateY(0) scale(1.04)}35%{transform:translateY(-18px) scale(.98)}68%{transform:translateY(5px) scale(1.02)}100%{transform:translateY(0) scale(1.04)}}
+@keyframes diceShadowPulse{from{transform:translateX(-50%) scale(.72);opacity:.45}to{transform:translateX(-50%) scale(1.08);opacity:.8}}
