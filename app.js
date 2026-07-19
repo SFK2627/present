@@ -3457,7 +3457,7 @@
     } catch (error) {}
   }
 
-  async function ensureFirebaseReadyForRemote(timeout = 8000) {
+  async function ensureFirebaseReadyForRemote(timeout = 3600) {
     if (state.firebaseReady && state.firebaseDb) return true;
     if (!hasFirebaseConfig()) {
       updateFirebaseStatus('Remote setup needed');
@@ -3472,10 +3472,12 @@
       if (ok && state.firebaseReady && state.firebaseDb) return true;
     } catch (error) {}
     try {
-      state.firebaseInitPromise = initFirebaseIfConfigured();
+      // A short second chance is enough for the QR path. Do not block the QR
+      // modal for 8-12 seconds; that made it look broken after adding Drive.
+      state.firebaseInitPromise = state.firebaseInitPromise || initFirebaseIfConfigured();
       const retryOk = await Promise.race([
         state.firebaseInitPromise.then(Boolean).catch(() => false),
-        sleep(3200).then(() => false)
+        sleep(1400).then(() => false)
       ]);
       return !!(retryOk && state.firebaseReady && state.firebaseDb);
     } catch (error) {
@@ -3483,14 +3485,8 @@
     }
   }
 
-  async function ensureRemoteSessionReady() {
-    const ready = await ensureFirebaseReadyForRemote();
-    if (!ready) return false;
-    if (!state.activeFile && !state.mediaMode) return false;
-    if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
-    state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
-
-    const basePayload = {
+  function buildRemoteSessionPayload() {
+    return {
       sessionAlive: true,
       hostReady: true,
       hostUpdatedAt: Date.now(),
@@ -3502,13 +3498,34 @@
       mediaMode: !state.activeFile && !!state.mediaMode,
       updatedAt: Date.now(),
     };
+  }
+
+  async function ensureRemoteSessionReady(options = {}) {
+    const fast = !!options.fast;
+    const ready = await ensureFirebaseReadyForRemote(fast ? 2400 : 4200);
+    if (!ready) return false;
+    if (!state.activeFile && !state.mediaMode) return false;
+    if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
+    state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
+
+    const basePayload = buildRemoteSessionPayload();
 
     try {
+      if (fast) {
+        // Important: show the QR immediately. Firestore writes can be slow on
+        // school WiFi/mobile data, but the phone remote already waits for the
+        // live session document. Waiting here caused the QR to stay on
+        // "Preparing..." for too long.
+        state.sessionRef.set(basePayload, { merge: true }).catch((error) => {
+          console.warn('Remote session warm-up failed:', error);
+        });
+        setupRemoteSessionIfPossible().catch((error) => {
+          console.warn('Remote background setup failed:', error);
+        });
+        return true;
+      }
       await state.sessionRef.set(basePayload, { merge: true });
       await publishSessionState(true);
-      const snap = await state.sessionRef.get();
-      if (snap.exists) return true;
-      await state.sessionRef.set(basePayload, { merge: true });
       return true;
     } catch (error) {
       console.warn('Could not create remote session:', error);
@@ -5634,13 +5651,13 @@
       if (els.viewerRemoteLink) els.viewerRemoteLink.value = 'Preparing viewer link...';
       if (els.qrHelp) els.qrHelp.textContent = 'Preparing phone remote QR...';
 
-      const sessionReady = await ensureRemoteSessionReady();
+      const sessionReady = await ensureRemoteSessionReady({ fast: true });
       if (!sessionReady || !state.sessionId || !state.sessionRef) {
-        if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-error">Remote session was not created. Check Firebase config, then close and open Remote QR again.</div>';
-        if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-error">No live session yet.</div>';
+        if (els.hostQr) els.hostQr.innerHTML = '<div class="qr-error">Remote session was not started. Check internet/Firebase config, then tap Remote QR again.</div>';
+        if (els.viewerQr) els.viewerQr.innerHTML = '<div class="qr-error">Remote not ready yet.</div>';
         if (els.hostRemoteLink) els.hostRemoteLink.value = '';
         if (els.viewerRemoteLink) els.viewerRemoteLink.value = '';
-        if (els.qrHelp) els.qrHelp.textContent = 'Remote QR needs a live Firebase session. Wait until the top bar says Remote ready, then open Remote QR again.';
+        if (els.qrHelp) els.qrHelp.textContent = 'Remote QR could not start quickly. Keep the file open, wait for Remote ready, then tap Remote QR again.';
         return;
       }
 
