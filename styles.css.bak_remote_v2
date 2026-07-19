@@ -6598,17 +6598,3 @@ body.presentation-hub-remote-mode:not(.remote-fullscreen-open) .remote-media-onl
   .qr-grid { grid-template-columns: 1fr; }
   .qr-panel .qr-box { min-height: 248px; }
 }
-
-/* Fresh remote v2: faster QR modal + cleaner classroom randomizer layout */
-.qr-session-badge{min-width:92px;text-align:center}
-.qr-copy-btn{margin-top:8px;width:100%;min-height:38px;border-radius:14px;border:1px solid rgba(124,58,237,.28);background:rgba(124,58,237,.10);font-weight:800;color:inherit}
-.classroom-modal-card{width:min(1120px,96vw)!important;max-height:92vh!important;overflow:auto!important;overflow-x:hidden!important}
-.classroom-grid{grid-template-columns:minmax(280px,.9fr) minmax(360px,1.1fr)!important;align-items:start}
-.classroom-editor,.classroom-controls{min-width:0;overflow:hidden}
-.classroom-options-clean{display:grid!important;grid-template-columns:minmax(96px,.7fr) minmax(150px,1fr) minmax(150px,1fr);gap:10px!important;align-items:end!important}
-.classroom-options-clean label{display:grid!important;gap:6px!important;font-weight:800;color:var(--muted)}
-.classroom-options-clean input,.classroom-options-clean select{width:100%;min-height:44px;border-radius:13px;border:1px solid var(--border);background:rgba(15,23,42,.72);color:inherit;padding:0 12px;font-weight:800}
-.classroom-actions{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important;overflow:hidden}
-.classroom-actions button{min-width:0;white-space:normal;line-height:1.15;min-height:48px}
-.classroom-result{min-width:0;overflow:hidden}.classroom-result strong{display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 12px}
-@media(max-width:900px){.classroom-grid{grid-template-columns:1fr!important}.classroom-options-clean{grid-template-columns:1fr!important}.classroom-actions{grid-template-columns:1fr!important}}

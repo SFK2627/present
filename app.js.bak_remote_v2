@@ -94,8 +94,6 @@
     unsubscribeSession: null,
     lastCommandId: null,
     remoteCommandPollTimer: null,
-    remoteSessionStarting: null,
-    remoteSessionStartingId: '',
     processedRemoteCommands: new Set(),
     publishLock: false,
     inkStrokes: [],
@@ -309,9 +307,8 @@
     const firebaseInitPromise = initFirebaseIfConfigured();
 
     if (isRemoteMode) {
-      // Render the phone remote immediately. Firebase connects in the background
-      // so the phone does not sit on a blank/loading screen on slow networks.
-      renderRemoteApp(firebaseInitPromise);
+      await firebaseInitPromise;
+      renderRemoteApp();
       return;
     }
 
@@ -350,7 +347,7 @@
       'autoStartBtn', 'autoPauseBtn', 'autoResumeBtn', 'autoStopBtn', 'timerOverlay', 'timerModeSelect',
       'countdownMinutesInput', 'timerPositionSelect', 'timerOpacityInput', 'timerSizeInput', 'timerSizeLabel', 'timerShowBtn', 'timerHideBtn',
       'timerResetBtn', 'qrModal', 'closeQrBtn', 'hostQr', 'viewerQr', 'hostRemoteLink', 'viewerRemoteLink',
-      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'classListFileInput', 'importClassListBtn', 'classImportStatus', 'saveNamesBtn', 'groupCountInput', 'pickNameModeSelect', 'removePickedInput', 'balancedGroupsInput', 'groupRollModeSelect', 'pickNameBtn', 'rollGroupBtn', 'resetPicksBtn', 'presentClassroomBtn', 'classroomResult', 'classroomRoster'
+      'qrHelp', 'setupModal', 'closeSetupBtn', 'classroomBtn', 'classroomModal', 'closeClassroomBtn', 'classroomAuthBtn', 'classroomAuthStatus', 'sectionSelect', 'newSectionName', 'addSectionBtn', 'studentNamesInput', 'classListFileInput', 'importClassListBtn', 'classImportStatus', 'saveNamesBtn', 'groupCountInput', 'removePickedInput', 'balancedGroupsInput', 'groupRollModeSelect', 'pickNameBtn', 'rollGroupBtn', 'resetPicksBtn', 'presentClassroomBtn', 'classroomResult', 'classroomRoster'
     ].forEach((id) => { els[id] = $(id); });
   }
 
@@ -498,10 +495,6 @@
     if (els.groupCountInput) els.groupCountInput.addEventListener('change', () => {
       state.classroom.groupCount = Math.max(2, Math.min(20, Number(els.groupCountInput.value) || 6));
       state.classroom.rolledGroups = [];
-      scheduleClassroomSave(); publishSessionState(true);
-    });
-    if (els.pickNameModeSelect) els.pickNameModeSelect.addEventListener('change', () => {
-      state.classroom.removePicked = els.pickNameModeSelect.value !== 'allow-repeat';
       scheduleClassroomSave(); publishSessionState(true);
     });
     if (els.removePickedInput) els.removePickedInput.addEventListener('change', () => { state.classroom.removePicked = els.removePickedInput.checked; scheduleClassroomSave(); publishSessionState(true); });
@@ -2987,7 +2980,7 @@
     };
   }
 
-  async function createFreshRemoteSession(preferredSessionId) {
+  async function createFreshRemoteSession() {
     if (!state.activeFile && !state.mediaMode) throw new Error('Open a PDF/PPT or Media Viewing first.');
     await ensureRemoteFirebaseReady();
     if (state.unsubscribeSession) {
@@ -2998,14 +2991,13 @@
       clearInterval(state.remoteCommandPollTimer);
       state.remoteCommandPollTimer = null;
     }
-    state.sessionId = preferredSessionId || state.sessionId || makeSessionId();
+    state.sessionId = makeSessionId();
     state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
     state.lastCommandId = null;
     state.processedRemoteCommands = new Set();
 
-    // First write a tiny session document. This is faster and gives the phone
-    // something to connect to before thumbnails/full state are published.
     await state.sessionRef.set(baseRemoteSessionPayload(), { merge: true });
+    await publishSessionState(true);
 
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
@@ -3015,37 +3007,7 @@
       processMediaCastSignal(data.mediaCast);
     }, (error) => console.warn('Fresh remote listener failed:', error));
     startRemoteCommandFallbackPoll();
-
-    // Publish heavier state after the live session exists. Do not block QR.
-    setTimeout(() => publishSessionState(true), 30);
     return state.sessionId;
-  }
-
-  function startFreshRemoteSessionInBackground(sessionId) {
-    if (state.remoteSessionStarting && state.remoteSessionStartingId === sessionId) return state.remoteSessionStarting;
-    state.remoteSessionStartingId = sessionId;
-    state.remoteSessionStarting = createFreshRemoteSession(sessionId)
-      .then((readyId) => {
-        const badge = $('qrSessionBadge');
-        if (badge && readyId === state.sessionId) badge.textContent = 'Ready';
-        if (els.qrHelp && readyId === state.sessionId) {
-          els.qrHelp.textContent = 'Ready. Scan Control QR for phone buttons.';
-        }
-        return readyId;
-      })
-      .catch((error) => {
-        console.error('Fresh remote session failed:', error);
-        if (els.qrHelp) {
-          els.qrHelp.textContent = (error && error.message)
-            ? `Remote session error: ${error.message}`
-            : 'Remote session error. Check Firebase config/rules and try again.';
-        }
-        const badge = $('qrSessionBadge');
-        if (badge) badge.textContent = 'Needs check';
-        throw error;
-      })
-      .finally(() => { state.remoteSessionStarting = null; state.remoteSessionStartingId = ''; });
-    return state.remoteSessionStarting;
   }
 
   async function setupRemoteSessionIfPossible() {
@@ -5096,20 +5058,7 @@
       return;
     }
     showModal(els.qrModal);
-
-    // Fast path: create the phone links and QR immediately. The live Firebase
-    // session starts in the background using the exact same session id.
-    const sessionId = makeSessionId();
-    state.sessionId = sessionId;
-    const hostUrl = buildRemoteUrl(sessionId, 'host');
-    const viewerUrl = buildRemoteUrl(sessionId, 'viewer');
-    if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
-    if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
-    renderQrInto(els.hostQr, hostUrl);
-    renderQrInto(els.viewerQr, viewerUrl);
-    const badge = $('qrSessionBadge');
-    if (badge) badge.textContent = 'Connecting';
-    if (els.qrHelp) els.qrHelp.textContent = 'QR is ready. Starting live desktop session now...';
+    setQrLoading('Creating a new clean live session...');
 
     const bindCopyButtons = () => {
       const hostCopy = $('copyHostRemoteLink');
@@ -5125,7 +5074,21 @@
     };
     bindCopyButtons();
 
-    startFreshRemoteSessionInBackground(sessionId).catch(() => {});
+    try {
+      const sessionId = await createFreshRemoteSession();
+      const hostUrl = buildRemoteUrl(sessionId, 'host');
+      const viewerUrl = buildRemoteUrl(sessionId, 'viewer');
+      if (els.hostRemoteLink) els.hostRemoteLink.value = hostUrl;
+      if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
+      renderQrInto(els.hostQr, hostUrl);
+      renderQrInto(els.viewerQr, viewerUrl);
+      const badge = $('qrSessionBadge');
+      if (badge) badge.textContent = sessionId;
+      if (els.qrHelp) els.qrHelp.textContent = 'Ready. Scan Control QR for phone buttons. If your phone still shows No Session, close the old phone tab and scan this new QR.';
+    } catch (error) {
+      console.error('Fresh remote QR failed:', error);
+      setQrError(error && error.message ? error.message : 'Remote could not start.');
+    }
   }
 
   function setRemoteMediaOnlyMode(enabled) {
@@ -5258,7 +5221,7 @@
     });
   }
 
-  function renderRemoteApp(firebaseInitPromise) {
+  function renderRemoteApp() {
     document.documentElement.classList.add('presentation-hub-remote-mode');
     document.body.classList.add('presentation-hub-remote-mode');
     document.body.classList.remove('remote-fullscreen-open');
@@ -5618,7 +5581,7 @@
       return;
     }
 
-    Promise.resolve(firebaseInitPromise || (state.firebaseReady ? true : initFirebaseIfConfigured())).then(() => {
+    initFirebaseIfConfigured().then(() => {
       if (!state.firebaseReady || !sessionId) {
         $('remoteFileLabel').textContent = 'Could not connect to Firebase or missing session.';
         $('remoteStatusPill').textContent = 'Offline';
@@ -5627,8 +5590,8 @@
       const ref = state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
       ref.onSnapshot((snap) => {
         if (!snap.exists) {
-          $('remoteFileLabel').textContent = 'Waiting for the desktop live session. Keep this page open.';
-          $('remoteStatusPill').textContent = 'Waiting';
+          $('remoteFileLabel').textContent = 'Session not found. Open QR from the desktop viewer first.';
+          $('remoteStatusPill').textContent = 'No session';
           return;
         }
         const data = snap.data();
@@ -6737,8 +6700,7 @@
     const sec = activeClassSection();
     els.studentNamesInput.value = sec ? sec.students.map(s => cleanStudentName(s.name)).join('\n') : '';
     els.groupCountInput.value = state.classroom.groupCount;
-    if (els.pickNameModeSelect) els.pickNameModeSelect.value = state.classroom.removePicked ? 'no-repeat' : 'allow-repeat';
-    if (els.removePickedInput) els.removePickedInput.checked = state.classroom.removePicked;
+    els.removePickedInput.checked = state.classroom.removePicked;
     state.classroom.groupRollMode = ['balanced', 'no-repeat', 'free'].includes(state.classroom.groupRollMode)
       ? state.classroom.groupRollMode
       : (state.classroom.balanced === false ? 'free' : 'balanced');

@@ -272,24 +272,9 @@
             <button id="saveNamesBtn">Save Names</button>
           </section>
           <section class="classroom-controls">
-            <div class="classroom-options classroom-options-clean">
-              <label>Groups<input id="groupCountInput" type="number" min="2" max="20" value="6"></label>
-              <label>Pick Name mode
-                <select id="pickNameModeSelect">
-                  <option value="no-repeat">No repeat</option>
-                  <option value="allow-repeat">Allow repeat</option>
-                </select>
-              </label>
-              <label>Roll Group mode
-                <select id="groupRollModeSelect">
-                  <option value="balanced">Balanced</option>
-                  <option value="no-repeat">No repeat</option>
-                  <option value="free">Free repeat</option>
-                </select>
-              </label>
-            </div>
+            <div class="classroom-options"><label>Groups<input id="groupCountInput" type="number" min="2" max="20" value="6"></label><label><input id="removePickedInput" type="checkbox" checked> Remove after pick</label><label><input id="balancedGroupsInput" type="checkbox" checked> Balance groups</label></div>
             <div id="classroomResult" class="classroom-result"><span>Ready to pick</span></div>
-            <div class="classroom-actions"><button id="pickNameBtn">Pick Name</button><button id="rollGroupBtn">Roll Group</button><button id="resetPicksBtn">Reset</button></div>
+            <div class="classroom-actions"><button id="pickNameBtn">Pick Name</button><button id="rollGroupBtn">Roll Group</button><button id="pickRollBtn" class="primary">Pick + Roll</button><button id="resetPicksBtn">Reset</button></div>
             <div id="classroomRoster" class="classroom-roster"></div>
           </section>
         </div>
