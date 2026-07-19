@@ -2953,16 +2953,6 @@
     } catch (error) {}
   }
 
-  function promiseWithTimeout(promise, ms, label) {
-    let timer = null;
-    const timeout = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(label || 'Request timed out')), ms);
-    });
-    return Promise.race([promise, timeout]).finally(() => {
-      if (timer) clearTimeout(timer);
-    });
-  }
-
   async function ensureRemoteFirebaseReady() {
     if (state.firebaseReady && state.firebaseDb) return true;
     if (!hasFirebaseConfig()) throw new Error('Firebase config is missing. Check firebase-config.js.');
@@ -2971,60 +2961,6 @@
       throw new Error('Firebase Firestore is not ready. Check firebase-config.js and internet connection.');
     }
     return true;
-  }
-
-  async function ensureRemoteAccessReady() {
-    await ensureRemoteFirebaseReady();
-
-    // Support BOTH common rule styles:
-    // 1) public temporary presentationHubSessions rules, and
-    // 2) request.auth != null rules with Anonymous Auth enabled.
-    // We try Anonymous Auth first when available, but we do not make public-rule
-    // projects fail just because auth is unavailable.
-    try {
-      if (window.firebase && firebase.auth) {
-        let user = firebase.auth().currentUser;
-        if (!user) {
-          const cred = await promiseWithTimeout(
-            firebase.auth().signInAnonymously(),
-            6500,
-            'Anonymous Firebase sign-in timed out. Enable Anonymous Auth or make presentationHubSessions public.'
-          );
-          user = cred && cred.user ? cred.user : firebase.auth().currentUser;
-        }
-        state.firebaseUser = user || null;
-        state.firebaseAuthReady = !!user;
-        updateFirebaseStatus();
-      }
-    } catch (authError) {
-      state.firebaseAuthReady = false;
-      state.firebaseUser = null;
-      console.warn('Remote anonymous auth not ready; trying Firestore session with current rules:', authError);
-    }
-    return true;
-  }
-
-  async function verifyRemoteSessionDocument(ref) {
-    try {
-      const snap = await promiseWithTimeout(
-        ref.get({ source: 'server' }),
-        8000,
-        'Firestore session verification timed out'
-      );
-      if (!snap.exists) throw new Error('Firestore session was not created on the server');
-      return true;
-    } catch (serverError) {
-      // Some old compat/browser combinations may reject source:'server'. Try a
-      // normal get before giving up, but still use a timeout so the QR modal
-      // never stays on Connecting forever.
-      const snap = await promiseWithTimeout(
-        ref.get(),
-        8000,
-        'Firestore session readback timed out'
-      );
-      if (!snap.exists) throw serverError;
-      return true;
-    }
   }
 
   function getRemoteAppBaseUrl() {
@@ -3076,7 +3012,7 @@
 
   async function createFreshRemoteSession(preferredSessionId) {
     if (!state.activeFile && !state.mediaMode) throw new Error('Open a PDF/PPT or Media Viewing first.');
-    await ensureRemoteAccessReady();
+    await ensureRemoteFirebaseReady();
     if (state.unsubscribeSession) {
       try { state.unsubscribeSession(); } catch (error) {}
       state.unsubscribeSession = null;
@@ -3092,12 +3028,7 @@
 
     // First write a tiny session document. This is faster and gives the phone
     // something to connect to before thumbnails/full state are published.
-    await promiseWithTimeout(
-      state.sessionRef.set(baseRemoteSessionPayload(), { merge: true }),
-      9000,
-      'Firestore session create timed out'
-    );
-    await verifyRemoteSessionDocument(state.sessionRef);
+    await state.sessionRef.set(baseRemoteSessionPayload(), { merge: true });
 
     state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
       if (!snap.exists) return;
@@ -3129,8 +3060,8 @@
         console.error('Fresh remote session failed:', error);
         const message = error && error.message ? error.message : String(error || 'Unknown error');
         const publicRuleHint = /permission|insufficient|denied/i.test(message)
-          ? ' Firestore blocked the remote session. Either enable Firebase Anonymous Auth with request.auth rules, or allow public read/write for presentationHubSessions.'
-          : (/Anonymous Firebase sign-in/i.test(message) ? ' Enable Firebase Authentication > Sign-in method > Anonymous, or use public temporary session rules.' : '');
+          ? ' Firestore blocked the remote session. Set presentationHubSessions rules to public temporary rooms, then try again.'
+          : '';
         if (els.qrHelp) {
           els.qrHelp.textContent = `Remote session error: ${message}.${publicRuleHint}`;
         }
@@ -3145,17 +3076,13 @@
   async function setupRemoteSessionIfPossible() {
     if (!state.activeFile && !state.mediaMode) return;
     try {
-      await ensureRemoteAccessReady();
+      await ensureRemoteFirebaseReady();
       if (!state.sessionRef || !state.sessionId) {
         state.sessionId = makeSessionId();
         state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
         state.processedRemoteCommands = new Set();
       }
-      await promiseWithTimeout(
-        state.sessionRef.set(baseRemoteSessionPayload(), { merge: true }),
-        9000,
-        'Firestore session update timed out'
-      );
+      await state.sessionRef.set(baseRemoteSessionPayload(), { merge: true });
       await publishSessionState(true);
       if (!state.unsubscribeSession) {
         state.unsubscribeSession = state.sessionRef.onSnapshot((snap) => {
@@ -5716,7 +5643,7 @@
       return;
     }
 
-    Promise.resolve(ensureRemoteAccessReady()).then(() => {
+    Promise.resolve(state.firebaseReady && state.firebaseDb ? true : initRemoteFirestoreOnly()).then(() => {
       if (!state.firebaseReady || !state.firebaseDb || !sessionId) {
         $('remoteFileLabel').textContent = 'Could not connect to Firebase or missing session.';
         $('remoteStatusPill').textContent = 'Offline';
