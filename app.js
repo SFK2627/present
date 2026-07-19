@@ -103,6 +103,9 @@
     remoteSessionHeartbeatTimer: null,
     remoteSessionHeartbeatBusy: false,
     remoteSessionLastWriteAt: 0,
+    remoteSessionStartupRunning: false,
+    remoteSessionStartupTimer: null,
+    firebaseAuthListenerAttached: false,
     processedRemoteCommands: new Set(),
     publishLock: false,
     inkStrokes: [],
@@ -1093,27 +1096,50 @@
       updateFirebaseStatus();
       return false;
     }
+
     try {
       if (!firebase.apps.length) firebase.initializeApp(window.PRESENTATION_HUB_FIREBASE_CONFIG);
       state.firebaseDb = firebase.firestore();
-      let user = firebase.auth().currentUser;
-      if (!user) {
-        const cred = await Promise.race([
-          firebase.auth().signInAnonymously(),
-          sleep(5200).then(() => { throw new Error('Firebase anonymous sign-in timed out.'); })
-        ]);
-        user = cred.user;
-      }
-      state.firebaseUser = user;
-      state.firebaseAuthReady = true;
+      // Remote QR/session must not wait forever for Auth. Firestore is the realtime
+      // transport; anonymous auth is useful for rules, but it should run in the
+      // background so the QR modal and remote listener never get stuck on "Preparing".
       state.firebaseReady = true;
-      firebase.auth().onAuthStateChanged(async (nextUser) => {
-        state.firebaseUser = nextUser || null;
-        updateFirebaseStatus();
-        updateClassroomAuthUI();
-        if (nextUser && !nextUser.isAnonymous) await loadClassroomCloud();
-      });
-      updateFirebaseStatus();
+      updateFirebaseStatus('Remote ready');
+
+      if (!state.firebaseAuthListenerAttached && firebase.auth) {
+        state.firebaseAuthListenerAttached = true;
+        firebase.auth().onAuthStateChanged(async (nextUser) => {
+          state.firebaseUser = nextUser || null;
+          state.firebaseAuthReady = !!nextUser;
+          updateFirebaseStatus();
+          updateClassroomAuthUI();
+          if (nextUser && !nextUser.isAnonymous) await loadClassroomCloud();
+        });
+      }
+
+      try {
+        const auth = firebase.auth && firebase.auth();
+        const current = auth && auth.currentUser;
+        if (current) {
+          state.firebaseUser = current;
+          state.firebaseAuthReady = true;
+        } else if (auth && auth.signInAnonymously) {
+          Promise.race([
+            auth.signInAnonymously(),
+            sleep(2800).then(() => null)
+          ]).then((cred) => {
+            if (cred && cred.user) {
+              state.firebaseUser = cred.user;
+              state.firebaseAuthReady = true;
+              updateFirebaseStatus();
+            }
+          }).catch((error) => {
+            console.warn('Firebase anonymous auth did not finish. Remote will still try Firestore.', error);
+          });
+        }
+      } catch (authError) {
+        console.warn('Firebase auth background start failed. Remote will still try Firestore.', authError);
+      }
       return true;
     } catch (error) {
       console.warn('Firebase setup failed:', error);
@@ -3464,7 +3490,7 @@
     } catch (error) {}
   }
 
-  async function ensureFirebaseReadyForRemote(timeout = 1800) {
+  async function ensureFirebaseReadyForRemote(timeout = 1600) {
     if (state.firebaseReady && state.firebaseDb) return true;
     if (!hasFirebaseConfig()) {
       updateFirebaseStatus('Remote setup needed');
@@ -3475,31 +3501,27 @@
       return false;
     }
 
+    // Never let a stale Firebase promise trap the Remote QR flow.
     const runInit = async () => {
       try {
         state.firebaseInitPromise = initFirebaseIfConfigured();
-        return await Promise.race([
-          state.firebaseInitPromise.then(Boolean).catch(() => false),
+        await Promise.race([
+          state.firebaseInitPromise.catch(() => false),
           sleep(timeout).then(() => false)
         ]);
-      } catch (error) {
-        return false;
-      }
+      } catch (error) {}
+      return !!(state.firebaseReady && state.firebaseDb);
     };
 
-    // If an older initialization promise got stuck, do not let it block QR forever.
-    let ok = false;
     if (state.firebaseInitPromise) {
-      ok = await Promise.race([
-        state.firebaseInitPromise.then(Boolean).catch(() => false),
-        sleep(Math.max(650, Math.min(timeout, 1400))).then(() => false)
+      await Promise.race([
+        state.firebaseInitPromise.catch(() => false),
+        sleep(Math.min(timeout, 900)).then(() => false)
       ]).catch(() => false);
-      if (ok && state.firebaseReady && state.firebaseDb) return true;
+      if (state.firebaseReady && state.firebaseDb) return true;
       state.firebaseInitPromise = null;
     }
-
-    ok = await runInit();
-    return !!(ok && state.firebaseReady && state.firebaseDb);
+    return await runInit();
   }
 
   function buildRemoteSessionPayload() {
@@ -3507,16 +3529,17 @@
       sessionAlive: true,
       hostReady: true,
       hostUpdatedAt: Date.now(),
+      hostHeartbeatAt: Date.now(),
       createdAt: Date.now(),
       fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
       type: state.activeFile ? state.activeFile.type : 'media',
       currentPage: state.activeFile ? state.currentPage : 0,
       totalPages: state.activeFile ? state.totalPages : 0,
       mediaMode: !state.activeFile && !!state.mediaMode,
+      remoteProtocol: 'stable-direct-session-v12',
       updatedAt: Date.now(),
     };
   }
-
 
   function stopRemoteSessionHeartbeat() {
     if (state.remoteSessionHeartbeatTimer) clearInterval(state.remoteSessionHeartbeatTimer);
@@ -3530,21 +3553,18 @@
     state.remoteSessionHeartbeatBusy = true;
     const now = Date.now();
     try {
-      const payload = {
-        ...buildRemoteSessionPayload(),
+      await state.sessionRef.set({
         sessionAlive: true,
         hostReady: true,
         hostHeartbeatAt: now,
         hostUpdatedAt: now,
+        lastHeartbeatReason: reason,
         updatedAt: now,
-        remoteProtocol: 'fast-heartbeat-v2',
-        lastHeartbeatReason: reason
-      };
-      await state.sessionRef.set(payload, { merge: true });
+      }, { merge: true });
       state.remoteSessionLastWriteAt = now;
       return true;
     } catch (error) {
-      console.warn('Remote heartbeat/session write failed:', error);
+      console.warn('Remote session heartbeat failed:', error);
       return false;
     } finally {
       state.remoteSessionHeartbeatBusy = false;
@@ -3554,37 +3574,26 @@
   function startRemoteSessionHeartbeat() {
     if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return;
     if (state.remoteSessionHeartbeatTimer) clearInterval(state.remoteSessionHeartbeatTimer);
-    // Immediate + repeated host presence. This fixes the stuck phone state where
-    // the QR opens but the remote stays on "Waiting for live desktop session"
-    // because the first Firestore write was slow, dropped, or blocked by a cache race.
     writeRemoteSessionHeartbeat('start');
     state.remoteSessionHeartbeatTimer = setInterval(() => {
       if (!state.sessionRef || (!state.activeFile && !state.mediaMode)) return stopRemoteSessionHeartbeat();
       writeRemoteSessionHeartbeat('interval');
-    }, 1350);
+    }, 3000);
   }
 
   async function ensureRemoteSessionReady(options = {}) {
     if (!state.activeFile && !state.mediaMode) return false;
     if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
-    if (state.firebaseReady && state.firebaseDb) {
-      state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
-      return await setupRemoteSessionIfPossible();
-    }
-    return await ensureFirebaseReadyForRemote(options.fast ? 900 : 1800).then((ready) => {
-      if (!ready) return false;
-      state.sessionRef = state.firebaseDb.collection(SESSION_COLLECTION).doc(state.sessionId);
-      return setupRemoteSessionIfPossible();
-    }).catch(() => false);
+    return await setupRemoteSessionIfPossible();
   }
 
   function startRemoteSessionStartupLoop(reason = 'qr-open') {
     if (!state.activeFile && !state.mediaMode) return;
     if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
-    if (state.remoteSessionStartupRunning) return;
+    if (state.remoteSessionStartupTimer) clearTimeout(state.remoteSessionStartupTimer);
     state.remoteSessionStartupRunning = true;
-
     const startedAt = Date.now();
+
     const attempt = async () => {
       let ok = false;
       try { ok = await setupRemoteSessionIfPossible(); } catch (error) { ok = false; }
@@ -3597,17 +3606,18 @@
             ? `Media Viewing session ${state.sessionId} is live. Scan the CONTROL QR, then cast files or paste links from the phone.`
             : `Session ${state.sessionId} is live. Scan the CONTROL QR for buttons. Viewer QR is preview-only / view-only.`;
         }
+        updateFirebaseStatus('Remote ready');
         return;
       }
 
       const elapsed = Date.now() - startedAt;
       if (els.qrHelp && els.qrModal && !els.qrModal.classList.contains('hidden')) {
-        els.qrHelp.textContent = elapsed > 9000
-          ? 'QR is ready. Still reconnecting the desktop live session; keep this viewer open and make sure internet/Firebase is allowed.'
+        els.qrHelp.textContent = elapsed > 8000
+          ? 'QR is ready, but the live session is still reconnecting. Check Firebase Auth/Firestore rules if the phone stays waiting.'
           : 'QR is ready. Starting the desktop live session...';
       }
       if (elapsed < 45000 && (state.activeFile || state.mediaMode)) {
-        state.remoteSessionStartupTimer = setTimeout(attempt, elapsed < 5000 ? 850 : 1800);
+        state.remoteSessionStartupTimer = setTimeout(attempt, elapsed < 5000 ? 700 : 1500);
       } else {
         state.remoteSessionStartupRunning = false;
       }
@@ -3617,7 +3627,7 @@
 
   async function setupRemoteSessionIfPossible() {
     if (!state.activeFile && !state.mediaMode) return false;
-    const ready = (state.firebaseReady && state.firebaseDb) || await ensureFirebaseReadyForRemote(1800);
+    const ready = (state.firebaseReady && state.firebaseDb) || await ensureFirebaseReadyForRemote(1400);
     if (!ready || !state.firebaseDb) return false;
 
     if (state.unsubscribeSession) state.unsubscribeSession();
@@ -3631,7 +3641,8 @@
       await state.sessionRef.set(buildRemoteSessionPayload(), { merge: true });
       await publishSessionState(true);
     } catch (error) {
-      console.warn('Could not create/publish remote session:', error);
+      console.warn('Could not create/publish remote session. Check Firestore rules/Auth.', error);
+      updateFirebaseStatus('Remote write blocked');
       return false;
     }
 
@@ -3643,6 +3654,7 @@
       processMediaCastSignal(data && data.mediaCast);
     }, (error) => {
       console.warn('Remote live listener failed; command polling fallback remains active.', error);
+      updateFirebaseStatus('Remote listener blocked');
     });
     startRemoteCommandFallbackPoll();
     startRemoteSessionHeartbeat();
@@ -5733,6 +5745,9 @@
       if (!state.activeFile && !state.mediaMode) return;
       if (!els.qrModal || !els.hostQr || !els.viewerQr) return;
 
+      // Generate the session id and QR links immediately. Firebase/GDrive/Auth must
+      // never block this modal again; the live Firestore session starts/retries in
+      // the background after the QR is visible.
       if (!state.sessionId || state.sessionId === 'NO-FIREBASE') state.sessionId = makeSessionId();
       const session = state.sessionId;
       const baseUrl = window.location.href.split('?')[0].split('#')[0];
@@ -5745,7 +5760,6 @@
       if (els.viewerRemoteLink) els.viewerRemoteLink.value = viewerUrl;
       if (els.qrHelp) els.qrHelp.textContent = 'QR is ready. Starting the desktop live session...';
 
-      // Render the QR immediately. Never block the QR screen while Firebase/Drive/auth loads.
       renderRemoteQr(els.hostQr, hostUrl).catch(() => renderQrFallback(els.hostQr, hostUrl));
       renderRemoteQr(els.viewerQr, viewerUrl).catch(() => renderQrFallback(els.viewerQr, viewerUrl));
 

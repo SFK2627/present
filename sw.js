@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-remote-emergency-v11-1';
+const CACHE_NAME = 'presentation-hub-remote-firestore-stable-v12-0';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,7 @@ const CORE_ASSETS = [
   './icon.svg'
 ];
 
-// remote-emergency-qr-session-fix
+// remote-reconnect-heartbeat-fix
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
   self.skipWaiting();
