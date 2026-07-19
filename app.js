@@ -92,6 +92,7 @@
     remoteSlideThumbsCount: 0,
     remoteSlideThumbsBusy: false,
     magicEffectTimer: null,
+    activeMagicToggle: null,
     magicEffectVolume: 200,
     magicEffectSound: true,
     magicEffectIntensity: 'grand',
@@ -109,6 +110,7 @@
     { id: 'micdrop', label: 'Mic Drop', emoji: '🎤', shortcut: 'M', hint: 'Strong ending moment' },
     { id: 'curtain', label: 'Curtain Reveal', emoji: '🎭', shortcut: 'U', hint: 'Reveal with curtains' },
     { id: 'bubbles', label: 'Bubbles', emoji: '🫧', shortcut: 'O', hint: 'Light floating effect' },
+    { id: 'blur', label: 'Blur Screen', emoji: '🌫️', shortcut: 'B', hint: 'Hide answers until toggled again' },
     { id: 'quiet', label: 'Be Quiet', emoji: '🤫', shortcut: 'Q', hint: 'Calm class reminder' },
     { id: 'applause', label: 'Applause', emoji: '👏', shortcut: 'P', hint: 'Clap for students' },
     { id: 'spotlight', label: 'Spotlight', emoji: '🔦', shortcut: 'S', hint: 'Focus attention' },
@@ -156,15 +158,17 @@
   function magicEffectMarkup(effectId) {
     switch (effectId) {
       case 'drumroll':
-        return `<div class="magic-stage-flash amber"></div><div class="magic-center magic-plain magic-visual-only"><div class="magic-drum-hero"><div class="magic-drum-kit"><span class="magic-stick left"></span><span class="magic-drum-emoji left">🥁</span><span class="magic-drum-emoji main">🥁</span><span class="magic-drum-emoji right">🥁</span><span class="magic-stick right"></span></div></div></div>`;
+        return `<div class="magic-stage-flash amber"></div><div class="magic-center magic-plain magic-visual-only"><div class="magic-drum-hero magic-drum-big-center"><span class="magic-stick left"></span><span class="magic-stick right"></span><span class="magic-big-drum">🥁</span></div></div>`;
       case 'confetti':
         return `<canvas class="magic-fx-canvas"></canvas><div class="magic-stage-flash"></div><div class="magic-glow-ring rainbow"></div><div class="magic-particles confetti-full">${magicParticleMarkup('confetti', 120)}</div>${magicCenter('🎉', '', '', 'magic-pop')}`;
       case 'micdrop':
-        return `<div class="magic-reveal-shine"></div><div class="magic-center magic-plain magic-visual-only"><div class="magic-micdrop-hero"><div class="magic-mic">🎤</div><div class="magic-mic-shadow"></div></div></div>`;
+        return `<div class="magic-reveal-shine"></div><div class="magic-center magic-plain magic-visual-only"><div class="magic-micdrop-hero magic-micdrop-hand-scene"><div class="magic-mic-hand">🤚</div><div class="magic-mic">🎤</div><div class="magic-mic-shadow"></div></div></div>`;
       case 'curtain':
-        return `<div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div><div class="magic-center magic-plain magic-reveal magic-visual-only"><div class="magic-emoji magic-curtain-emoji">🎭</div></div>`;
+        return `<div class="magic-curtain-stage"><div class="magic-curtain left"></div><div class="magic-curtain right"></div><div class="magic-curtain valance"></div><span class="magic-curtain-tie left"></span><span class="magic-curtain-tie right"></span></div>`;
       case 'bubbles':
-        return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas><div class="magic-glow-ring"></div><div class="magic-particles bubbles-full">${magicParticleMarkup('bubble', 96)}</div>${magicCenter('🫧', '', '', 'magic-pop')}`;
+        return `<canvas class="magic-fx-canvas magic-bubbles-canvas"></canvas><div class="magic-glow-ring"></div><div class="magic-particles bubbles-full">${magicParticleMarkup('bubble', 86)}</div>${magicCenter('🫧', '', '', 'magic-pop')}`;
+      case 'blur':
+        return `<div class="magic-screen-blur"><span class="magic-blur-cloud one"></span><span class="magic-blur-cloud two"></span><span class="magic-blur-cloud three"></span></div>`;
       case 'quiet':
         return `<div class="magic-quiet-backdrop"></div><div class="magic-quiet-halo"></div><div class="magic-quiet-halo halo-two"></div><div class="magic-center magic-plain magic-quiet-hero magic-visual-only"><span class="magic-quiet-aura"></span><span class="magic-shush-wave"></span><span class="magic-shush-wave two"></span><span class="magic-shush-wave three"></span><div class="magic-emoji">🤫</div></div>`;
       case 'applause':
@@ -1433,14 +1437,21 @@
       return { width: Math.max(320, window.innerWidth), height: Math.max(240, window.innerHeight) };
     }
 
-    // Normal desktop view has a floating toolbar. Use the actual canvas well,
-    // not the full stage, so the PDF fits below the toolbar instead of looking
-    // cropped or oversized.
+    // Normal viewer must open in a true fit-to-page layout: the whole PDF/PPT
+    // page should be visible below the floating toolbar, like a presentation
+    // preview, instead of being rendered too tall and getting cut off.
     const wrapRect = els.viewerCanvasWrap ? els.viewerCanvasWrap.getBoundingClientRect() : null;
     if (wrapRect && wrapRect.width > 120 && wrapRect.height > 120) {
+      const style = window.getComputedStyle ? window.getComputedStyle(els.viewerCanvasWrap) : null;
+      const padX = style ? (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0) : 0;
+      const padY = style ? (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) : 0;
+      const stageRect = els.viewerStage ? els.viewerStage.getBoundingClientRect() : { height: window.innerHeight };
+      const toolbarRect = els.viewerToolbar ? els.viewerToolbar.getBoundingClientRect() : null;
+      const toolbarReserve = toolbarRect ? Math.max(96, toolbarRect.height + 44) : 110;
+      const safeHeightBelowToolbar = Math.max(240, stageRect.height - toolbarReserve);
       return {
-        width: Math.max(320, wrapRect.width - 40),
-        height: Math.max(240, wrapRect.height - 40),
+        width: Math.max(320, wrapRect.width - padX),
+        height: Math.max(240, Math.min(wrapRect.height - padY, safeHeightBelowToolbar)),
       };
     }
 
@@ -1741,9 +1752,65 @@
     return layer;
   }
 
+  function clearMagicEffectLayer(layer) {
+    if (!layer) return;
+    layer.classList.remove('show', 'magic-toggle-active', 'magic-curtain-close', 'magic-curtain-open', 'magic-blur-on', 'magic-blur-off');
+    layer.classList.add('hidden');
+    layer.style.display = 'none';
+    layer.style.opacity = '';
+    layer.style.visibility = '';
+    layer.innerHTML = '';
+  }
+
+  function showMagicLayer(layer) {
+    layer.style.display = 'grid';
+    layer.style.opacity = '1';
+    layer.style.visibility = 'visible';
+    void layer.offsetWidth;
+    layer.classList.add('show');
+  }
+
+  function togglePersistentMagicEffect(effect) {
+    if (!['blur', 'curtain'].includes(effect.id)) return false;
+    const existing = document.getElementById('magicEffectLayer');
+    const intensity = state.magicEffectIntensity || 'grand';
+
+    if (state.activeMagicToggle === effect.id && existing) {
+      clearTimeout(state.magicEffectTimer);
+      state.activeMagicToggle = null;
+      existing.classList.remove('magic-toggle-active', 'magic-blur-on', 'magic-curtain-close');
+      existing.classList.add(effect.id === 'curtain' ? 'magic-curtain-open' : 'magic-blur-off');
+      showMagicLayer(existing);
+      playMagicEffectSound(effect.id);
+      state.magicEffectTimer = setTimeout(() => clearMagicEffectLayer(existing), effect.id === 'curtain' ? 1850 : 560);
+      return true;
+    }
+
+    if (state.activeMagicToggle && existing) clearMagicEffectLayer(existing);
+    const layer = createMagicLayer();
+    layer.className = `magic-effect-layer magic-${effect.id} magic-toggle-active magic-intensity-${intensity} ${effect.id === 'curtain' ? 'magic-curtain-close' : 'magic-blur-on'}`;
+    try {
+      layer.innerHTML = magicEffectMarkup(effect.id);
+    } catch (error) {
+      console.warn('Magic effect markup failed; using safe fallback.', error);
+      layer.innerHTML = magicCenter(effect.emoji || '✨', '', '', 'magic-pop');
+    }
+    showMagicLayer(layer);
+    state.activeMagicToggle = effect.id;
+    clearTimeout(state.magicEffectTimer);
+    playMagicEffectSound(effect.id);
+    return true;
+  }
+
   function triggerMagicEffect(effectId) {
     const effectKey = String(effectId || 'confetti').trim().toLowerCase();
     const effect = MAGIC_EFFECT_MAP[effectKey] || MAGIC_EFFECT_MAP.confetti;
+    if (togglePersistentMagicEffect(effect)) return;
+    const oldLayer = document.getElementById('magicEffectLayer');
+    if (state.activeMagicToggle && oldLayer) {
+      clearMagicEffectLayer(oldLayer);
+      state.activeMagicToggle = null;
+    }
     const layer = createMagicLayer();
     layer.className = `magic-effect-layer magic-${effect.id} magic-intensity-${state.magicEffectIntensity || 'grand'}`;
     try {
@@ -1754,22 +1821,13 @@
     }
     // Inline visibility guards make the effect show even if an old CSS cache or
     // a stacking-context bug is still present on GitHub Pages.
-    layer.style.display = 'grid';
-    layer.style.opacity = '1';
-    layer.style.visibility = 'visible';
-    void layer.offsetWidth;
-    layer.classList.add('show');
+    showMagicLayer(layer);
     if (effect.id === 'confetti' || effect.id === 'bubbles') startCanvasMagicEffect(layer, effect.id);
     playMagicEffectSound(effect.id);
     clearTimeout(state.magicEffectTimer);
-    const durations = { drumroll: 2600, confetti: 3200, micdrop: 2200, curtain: 3400, bubbles: 6400, quiet: 6200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
+    const durations = { drumroll: 3300, confetti: 3200, micdrop: 2600, curtain: 3400, bubbles: 8200, blur: 999999, quiet: 6200, applause: 2400, spotlight: 5400, correct: 2200, wrong: 2100, timesup: 2500, sparkle: 2300, stars: 2400, hype: 2300, freeze: 2300 };
     state.magicEffectTimer = setTimeout(() => {
-      layer.classList.remove('show');
-      layer.classList.add('hidden');
-      layer.style.display = 'none';
-      layer.style.opacity = '';
-      layer.style.visibility = '';
-      layer.innerHTML = '';
+      clearMagicEffectLayer(layer);
     }, durations[effect.id] || 2200);
   }
 
@@ -1805,11 +1863,12 @@
     if (volume <= 0) return;
 
     const effectMixMap = {
-      drumroll: 1.24,
+      drumroll: 1.28,
       confetti: 1.1,
-      micdrop: 1.05,
-      curtain: 1.0,
-      bubbles: 0.86,
+      micdrop: 1.16,
+      curtain: 1.06,
+      bubbles: 0.92,
+      blur: 0.95,
       quiet: 0.78,
       applause: 1.02,
       spotlight: 0.82,
@@ -1937,16 +1996,17 @@
 
     switch (effectId) {
       case 'drumroll': {
-        for (let i = 0; i < 42; i++) {
-          const t = now + i * 0.03;
-          noise(t, 0.042, i % 2 ? 0.16 : 0.13, 'bandpass', i % 2 ? 1350 : 980, 2.2);
-          tone(t, i % 2 ? 148 : 118, 0.05, 'square', 0.055, i % 2 ? 128 : 104);
+        for (let i = 0; i < 88; i++) {
+          const t = now + i * 0.029;
+          const swell = 0.82 + i / 120;
+          noise(t, 0.05, (i % 2 ? 0.16 : 0.13) * swell, 'bandpass', i % 2 ? 1420 : 940, 2.35);
+          tone(t, i % 2 ? 152 : 112, 0.052, 'square', 0.052 * swell, i % 2 ? 122 : 96);
         }
-        for (let i = 0; i < 6; i++) {
-          tone(now + 0.98 + i * 0.04, 186 + i * 12, 0.08, 'triangle', 0.08, 110 + i * 8);
+        for (let i = 0; i < 10; i++) {
+          tone(now + 2.18 + i * 0.045, 174 + i * 16, 0.085, 'triangle', 0.085, 96 + i * 8);
         }
-        boom(now + 1.18, 1.0);
-        cymbal(now + 1.2, 1.1);
+        boom(now + 2.72, 1.18);
+        cymbal(now + 2.76, 1.2);
         break;
       }
       case 'confetti':
@@ -2010,20 +2070,32 @@
         }
         break;
       case 'micdrop':
-        whoosh(now, 0.28, 0.6);
-        tone(now + 0.08, 360, 0.12, 'triangle', 0.12, 180);
-        boom(now + 0.28, 1.3);
-        noise(now + 0.32, 0.36, 0.13, 'lowpass', 260, 0.65);
+        whoosh(now, 0.42, 0.72);
+        tone(now + 0.12, 360, 0.16, 'triangle', 0.12, 160);
+        tone(now + 0.56, 220, 0.12, 'sawtooth', 0.09, 118);
+        boom(now + 0.82, 1.45);
+        noise(now + 0.86, 0.46, 0.16, 'lowpass', 230, 0.72);
+        noise(now + 0.98, 0.28, 0.08, 'bandpass', 760, 0.55);
         break;
       case 'curtain':
-        whoosh(now, 0.75, 1.12);
-        chord(now + 0.14, [196, 247, 330], 0.42, 'triangle', 0.09);
-        chord(now + 0.48, [392, 494, 659, 784], 0.46, 'triangle', 0.09);
-        cymbal(now + 0.8, 0.82);
+        whoosh(now, 0.95, 1.12);
+        chord(now + 0.18, [196, 247, 330], 0.42, 'triangle', 0.08);
+        noise(now + 0.2, 0.72, 0.08, 'bandpass', 620, 0.7);
+        chord(now + 0.72, [392, 494, 659], 0.34, 'triangle', 0.07);
         break;
       case 'bubbles':
-        [784, 932, 1046, 1174, 1396, 1568, 1760].forEach((freq, i) => tone(now + i * 0.065, freq, 0.1, 'sine', 0.06, freq * 1.18));
-        noise(now + 0.16, 0.42, 0.04, 'highpass', 5200, 0.55);
+        [698, 784, 880, 988, 1174, 1318, 1568, 1760, 1975].forEach((freq, i) => {
+          const t = now + i * 0.21;
+          tone(t, freq, 0.16, 'sine', 0.052, freq * 1.1);
+          noise(t + 0.035, 0.12, 0.026, 'highpass', 4700 + i * 210, 0.46);
+        });
+        noise(now + 0.44, 1.55, 0.028, 'highpass', 5600, 0.36);
+        break;
+      case 'blur':
+        whoosh(now, 0.62, 0.78);
+        noise(now + 0.08, 0.72, 0.07, 'lowpass', 420, 0.5);
+        tone(now + 0.1, 220, 0.42, 'triangle', 0.08, 118);
+        tone(now + 0.34, 146, 0.34, 'sine', 0.05, 96);
         break;
       case 'spotlight':
         whoosh(now, 0.44, 0.78);
@@ -2040,7 +2112,8 @@
         break;
     }
 
-    disconnectLater(master, ['curtain','drumroll','confetti','bubbles','spotlight','applause','hype'].includes(effectId) ? 3.6 : 2.9);
+    const disconnectDelayMap = { drumroll: 4.4, bubbles: 4.4, curtain: 3.8, confetti: 3.6, spotlight: 3.6, applause: 3.6, hype: 3.6, blur: 3.4 };
+    disconnectLater(master, disconnectDelayMap[effectId] || 2.9);
   }
 
   function handleKeyboard(event) {
@@ -4928,9 +5001,9 @@
     const count=type==='confetti'?150:62; const colors=['#ff4d6d','#ffd166','#06d6a0','#4cc9f0','#8338ec','#ffffff'];
     const parts=Array.from({length:count},(_,i)=> type==='confetti'
       ? {x:Math.random()*innerWidth,y:-20-Math.random()*innerHeight*.35,vx:(Math.random()-.5)*4,vy:3+Math.random()*5,r:3+Math.random()*6,h:7+Math.random()*12,rot:Math.random()*6,vr:(Math.random()-.5)*.25,c:colors[i%colors.length]}
-      : {x:Math.random()*innerWidth,y:innerHeight*.58+Math.random()*(innerHeight*.52),r:9+Math.random()*24,vx:(Math.random()-.5)*.65,vy:2.15+Math.random()*2.1,a:.45+Math.random()*.42,wobble:Math.random()*Math.PI*2,wobbleSpeed:.0014+Math.random()*.0018});
-    function frame(now){ const t=now-start; ctx.clearRect(0,0,innerWidth,innerHeight); for(const p of parts){ if(type==='confetti'){p.x+=p.vx;p.y+=p.vy;p.vy+=.035;p.rot+=p.vr;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.fillStyle=p.c;ctx.fillRect(-p.r,-p.h/2,p.r*2,p.h);ctx.restore();}else{p.x+=p.vx+Math.sin(t*p.wobbleSpeed+p.wobble)*.34;p.y-=p.vy;const fadeIn=Math.min(1,(innerHeight+80-p.y)/150);const fadeOut=Math.max(0,Math.min(1,(p.y+p.r*2)/150));const alpha=Math.max(0,Math.min(1,fadeIn*fadeOut));ctx.save();ctx.globalAlpha=alpha;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);const g=ctx.createRadialGradient(p.x-p.r*.38,p.y-p.r*.4,1,p.x,p.y,p.r);g.addColorStop(0,'rgba(255,255,255,.96)');g.addColorStop(.18,'rgba(255,255,255,.36)');g.addColorStop(.58,'rgba(125,211,252,.19)');g.addColorStop(.82,'rgba(167,139,250,.12)');g.addColorStop(1,'rgba(59,130,246,.025)');ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=`rgba(255,255,255,${p.a})`;ctx.lineWidth=1.25;ctx.stroke();ctx.beginPath();ctx.arc(p.x-p.r*.28,p.y-p.r*.28,p.r*.22,Math.PI*1.05,Math.PI*1.72);ctx.strokeStyle='rgba(255,255,255,.65)';ctx.lineWidth=1.05;ctx.stroke();ctx.restore();}}
-      if(t<(type==='confetti'?3100:6250) && layer.classList.contains('show')) raf=requestAnimationFrame(frame); }
+      : {x:Math.random()*innerWidth,y:innerHeight*.62+Math.random()*(innerHeight*.58),r:10+Math.random()*26,vx:(Math.random()-.5)*.42,vy:0.86+Math.random()*1.08,a:.45+Math.random()*.42,wobble:Math.random()*Math.PI*2,wobbleSpeed:.00075+Math.random()*.00105});
+    function frame(now){ const t=now-start; ctx.clearRect(0,0,innerWidth,innerHeight); for(const p of parts){ if(type==='confetti'){p.x+=p.vx;p.y+=p.vy;p.vy+=.035;p.rot+=p.vr;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.fillStyle=p.c;ctx.fillRect(-p.r,-p.h/2,p.r*2,p.h);ctx.restore();}else{p.x+=p.vx+Math.sin(t*p.wobbleSpeed+p.wobble)*.24;p.y-=p.vy;const fadeIn=Math.min(1,(innerHeight+80-p.y)/150);const fadeOut=Math.max(0,Math.min(1,(p.y+p.r*2)/150));const alpha=Math.max(0,Math.min(1,fadeIn*fadeOut));ctx.save();ctx.globalAlpha=alpha;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);const g=ctx.createRadialGradient(p.x-p.r*.38,p.y-p.r*.4,1,p.x,p.y,p.r);g.addColorStop(0,'rgba(255,255,255,.96)');g.addColorStop(.18,'rgba(255,255,255,.36)');g.addColorStop(.58,'rgba(125,211,252,.19)');g.addColorStop(.82,'rgba(167,139,250,.12)');g.addColorStop(1,'rgba(59,130,246,.025)');ctx.fillStyle=g;ctx.fill();ctx.strokeStyle=`rgba(255,255,255,${p.a})`;ctx.lineWidth=1.25;ctx.stroke();ctx.beginPath();ctx.arc(p.x-p.r*.28,p.y-p.r*.28,p.r*.22,Math.PI*1.05,Math.PI*1.72);ctx.strokeStyle='rgba(255,255,255,.65)';ctx.lineWidth=1.05;ctx.stroke();ctx.restore();}}
+      if(t<(type==='confetti'?3100:8100) && layer.classList.contains('show')) raf=requestAnimationFrame(frame); }
     raf=requestAnimationFrame(frame);
   }
 
