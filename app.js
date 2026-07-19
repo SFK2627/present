@@ -26,7 +26,7 @@
       { urls: 'stun:stun1.l.google.com:19302' }
     ]
   };
-  const MEDIA_CAST_CHUNK_SIZE = 64 * 1024;
+  const MEDIA_CAST_CHUNK_SIZE = 128 * 1024;
   const MEDIA_CAST_MAX_FILE_BYTES = 350 * 1024 * 1024;
 
   const state = {
@@ -2993,7 +2993,7 @@
     return { name, type, size, kind: getMediaKindFromType(type, name) };
   }
 
-  function waitForIceGatheringComplete(pc, timeout = 5200) {
+  function waitForIceGatheringComplete(pc, timeout = 2200) {
     return new Promise((resolve) => {
       if (!pc || pc.iceGatheringState === 'complete') return resolve();
       let done = false;
@@ -3095,9 +3095,13 @@
     if (!chunk || !chunk.byteLength) return;
     transfer.chunks.push(chunk);
     transfer.received += chunk.byteLength;
-    showMediaCastReceiving(transfer.meta, transfer.received);
-    if (!transfer.lastStatusAt || Date.now() - transfer.lastStatusAt > 700) {
-      transfer.lastStatusAt = Date.now();
+    const now = Date.now();
+    if (!transfer.lastUiAt || now - transfer.lastUiAt > 90 || transfer.received >= (Number(transfer.meta.size) || 0)) {
+      transfer.lastUiAt = now;
+      showMediaCastReceiving(transfer.meta, transfer.received);
+    }
+    if (!transfer.lastStatusAt || now - transfer.lastStatusAt > 900) {
+      transfer.lastStatusAt = now;
       await updateMediaCastSignal({ receiverStatus: 'receiving', receiverReceived: transfer.received, receiverMessage: `Received ${formatMediaBytes(transfer.received)} of ${formatMediaBytes(transfer.meta.size)}`, receiverUpdatedAt: Date.now() });
     }
   }
@@ -3131,16 +3135,27 @@
     const layer = ensureMediaCastLayer();
     const total = Number(meta.size) || 0;
     const pct = total ? Math.max(0, Math.min(100, Math.round((received / total) * 100))) : 0;
+    const name = meta.name || 'Media file';
+    const shouldBuild = !layer.classList.contains('receiving') || !layer.querySelector('#mediaCastProgressBar');
     layer.className = 'media-cast-layer show receiving';
-    layer.innerHTML = `
-      <div class="media-cast-card receiving-card">
-        <div class="media-cast-spinner"></div>
-        <strong>Receiving media from phone...</strong>
-        <span>${escapeHtml(meta.name || 'Media file')}</span>
-        <div class="media-cast-progress"><i style="width:${pct}%"></i></div>
-        <small>${formatMediaBytes(received)} / ${formatMediaBytes(total)}</small>
-      </div>
-    `;
+    if (shouldBuild) {
+      layer.innerHTML = `
+        <div class="media-cast-card receiving-card">
+          <div class="media-cast-spinner"></div>
+          <strong>Receiving media from phone...</strong>
+          <span id="mediaCastReceivingName">${escapeHtml(name)}</span>
+          <div class="media-cast-progress"><i id="mediaCastProgressBar" style="width:${pct}%"></i></div>
+          <small id="mediaCastProgressText">${formatMediaBytes(received)} / ${formatMediaBytes(total)}</small>
+        </div>
+      `;
+      return;
+    }
+    const nameNode = document.getElementById('mediaCastReceivingName');
+    if (nameNode && nameNode.textContent !== name) nameNode.textContent = name;
+    const bar = document.getElementById('mediaCastProgressBar');
+    if (bar) bar.style.width = `${pct}%`;
+    const text = document.getElementById('mediaCastProgressText');
+    if (text) text.textContent = `${formatMediaBytes(received)} / ${formatMediaBytes(total)}`;
   }
 
   function showMediaCastStatus(message, tone = '') {
@@ -3396,14 +3411,14 @@
 
   function waitForBufferedAmountLow(channel) {
     return new Promise((resolve) => {
-      if (!channel || channel.bufferedAmount < 2 * 1024 * 1024) return resolve();
+      if (!channel || channel.bufferedAmount < 8 * 1024 * 1024) return resolve();
       const prev = channel.onbufferedamountlow;
-      channel.bufferedAmountLowThreshold = 512 * 1024;
+      channel.bufferedAmountLowThreshold = 2 * 1024 * 1024;
       channel.onbufferedamountlow = (...args) => {
         channel.onbufferedamountlow = prev || null;
         resolve(...args);
       };
-      setTimeout(resolve, 900);
+      setTimeout(resolve, 520);
     });
   }
 
@@ -3411,7 +3426,7 @@
     const meta = cleanMediaMeta({ name: file.name, type: file.type, size: file.size });
     channel.send(`PH_MEDIA_META:${JSON.stringify(meta)}`);
     let offset = 0;
-    const statusEvery = 280;
+    const statusEvery = 420;
     let lastStatus = 0;
     while (offset < file.size) {
       if (channel.readyState !== 'open') throw new Error('Media channel closed.');
@@ -3496,6 +3511,8 @@
     const fileInput = $('remoteMediaFile');
     const sendBtn = $('remoteMediaSend');
     const fileName = $('remoteMediaFileName');
+    const fileDetails = document.querySelector('.remote-media-file-details');
+    if (fileDetails) fileDetails.addEventListener('toggle', () => { fileDetails.dataset.userTouched = '1'; });
     if (!fileInput || !sendBtn) return;
     let selectedFile = null;
     fileInput.addEventListener('change', () => {
@@ -3510,18 +3527,31 @@
     });
     const linkInput = $('remoteMediaLink');
     const linkBtn = $('remoteMediaLinkCast');
+    const castMediaLink = () => {
+      if (!isHost || !linkInput) return;
+      const url = String(linkInput.value || '').trim();
+      if (!url) { setRemoteMediaStatus('Paste a YouTube, TikTok, or media link first.', 'warn'); return; }
+      let parsed = null;
+      try { parsed = new URL(url); } catch (error) {}
+      if (!parsed || !/^https?:$/i.test(parsed.protocol)) { setRemoteMediaStatus('Use a valid http/https media link.', 'warn'); return; }
+      const volumeNode = $('remoteMediaVolume');
+      const volumeValue = volumeNode ? Math.max(0, Math.min(1, Number(volumeNode.value) / 100)) : 0.9;
+      sendRemoteCommand(ref, 'mediaLinkCast', { url, volume: volumeValue, autoplay: true });
+      setRemoteMediaStatus('Link sent. Desktop should open and play it now.', 'busy');
+    };
     if (linkBtn && linkInput) {
-      linkBtn.addEventListener('click', () => {
-        if (!isHost) return;
-        const url = String(linkInput.value || '').trim();
-        if (!url) { setRemoteMediaStatus('Paste a YouTube, TikTok, or media link first.', 'warn'); return; }
-        let parsed = null;
-        try { parsed = new URL(url); } catch (error) {}
-        if (!parsed || !/^https?:$/i.test(parsed.protocol)) { setRemoteMediaStatus('Use a valid http/https media link.', 'warn'); return; }
-        const volumeNode = $('remoteMediaVolume');
-        const volumeValue = volumeNode ? Math.max(0, Math.min(1, Number(volumeNode.value) / 100)) : 0.9;
-        sendRemoteCommand(ref, 'mediaLinkCast', { url, volume: volumeValue, autoplay: true });
-        setRemoteMediaStatus('Link sent. Desktop should open and play it now.', 'busy');
+      linkBtn.addEventListener('click', castMediaLink);
+      linkInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          castMediaLink();
+        }
+      });
+      linkInput.addEventListener('paste', () => {
+        window.setTimeout(() => {
+          const url = String(linkInput.value || '').trim();
+          if (/^https?:\/\//i.test(url)) setRemoteMediaStatus('Link pasted. Tap “Play Link on Desktop”.', 'ok');
+        }, 80);
       });
     }
     const command = (type, value) => {
@@ -4017,6 +4047,18 @@
     showModal(els.qrModal);
   }
 
+  function setRemoteMediaOnlyMode(enabled) {
+    const dashboard = $('remoteControlDashboard');
+    if (dashboard) dashboard.classList.toggle('remote-media-only-mode', !!enabled);
+    document.body.classList.toggle('remote-media-only-mode', !!enabled);
+    const title = $('remoteMediaSectionTitle');
+    if (title) title.textContent = enabled ? 'Media Viewing Remote' : 'Media Remote Control';
+    const sub = $('remoteMediaSectionSub');
+    if (sub) sub.textContent = enabled ? 'Focused controls for links, audio, video, and pictures' : 'Paste links first, or cast files from this phone';
+    const fileDetails = document.querySelector('.remote-media-file-details');
+    if (fileDetails && enabled && !fileDetails.dataset.userTouched) fileDetails.open = false;
+  }
+
   function renderRemoteApp() {
     document.documentElement.classList.add('presentation-hub-remote-mode');
     document.body.classList.add('presentation-hub-remote-mode');
@@ -4076,30 +4118,39 @@
         </section>
 
         <section class="remote-section remote-premium-section remote-media-cast-section" data-host-only="true">
-          <div class="remote-section-title"><span>Media Cast Beta</span><small>Pictures, audio, or MP4 from this phone</small></div>
+          <div class="remote-section-title"><span id="remoteMediaSectionTitle">Media Remote Control</span><small id="remoteMediaSectionSub">Paste links first, or cast files from this phone</small></div>
           <div class="remote-media-cast-card">
-            <label class="remote-media-picker">Choose media
-              <input id="remoteMediaFile" type="file" accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.m4v,.mp3,.wav,.m4a,.aac,.ogg,.png,.jpg,.jpeg,.webp,.gif" data-host-only="true">
-            </label>
-            <div id="remoteMediaFileName" class="remote-media-file-name">No media selected</div>
-            <button id="remoteMediaSend" type="button" class="remote-media-send" disabled data-host-only="true">Cast to Screen</button>
-            <div class="remote-media-link-card">
-              <label>Online media link
-                <input id="remoteMediaLink" type="url" inputmode="url" placeholder="Paste YouTube, TikTok, MP4, MP3, or image link" data-host-only="true">
+            <div class="remote-media-primary-link-card">
+              <div class="remote-media-link-heading">
+                <span>🔗</span>
+                <div><strong>Play online media link</strong><small>YouTube, TikTok, MP4, MP3, image, or direct media URL</small></div>
+              </div>
+              <label class="remote-media-link-field">Paste link here
+                <input id="remoteMediaLink" type="url" inputmode="url" autocomplete="off" placeholder="Paste YouTube / TikTok / MP4 / MP3 link" data-host-only="true">
               </label>
-              <button id="remoteMediaLinkCast" type="button" class="remote-media-link-send" data-host-only="true">Play Link on Screen</button>
+              <button id="remoteMediaLinkCast" type="button" class="remote-media-link-send primary" data-host-only="true">▶ Play Link on Desktop</button>
             </div>
-            <div class="remote-media-controls">
-              <button id="remoteMediaPlay" type="button" data-host-only="true">Play</button>
-              <button id="remoteMediaPause" type="button" data-host-only="true">Pause</button>
-              <button id="remoteMediaShow" type="button" data-host-only="true">Show</button>
-              <button id="remoteMediaHide" type="button" data-host-only="true">Hide</button>
-              <button id="remoteMediaStop" type="button" data-host-only="true">Stop</button>
+
+            <div class="remote-media-controls remote-media-main-controls">
+              <button id="remoteMediaPlay" type="button" data-host-only="true">▶ Play</button>
+              <button id="remoteMediaPause" type="button" data-host-only="true">⏸ Pause</button>
+              <button id="remoteMediaShow" type="button" data-host-only="true">👁 Show</button>
+              <button id="remoteMediaHide" type="button" data-host-only="true">🙈 Hide</button>
+              <button id="remoteMediaStop" type="button" data-host-only="true">■ Stop</button>
             </div>
-            <label class="remote-media-volume">Volume <span id="remoteMediaVolumeLabel">90%</span>
+            <label class="remote-media-volume">Desktop volume <span id="remoteMediaVolumeLabel">90%</span>
               <input id="remoteMediaVolume" type="range" min="0" max="100" step="1" value="90" data-host-only="true">
             </label>
-            <div id="remoteMediaStatus" class="remote-media-status">No permanent upload. File is sent only for this live session.</div>
+
+            <details class="remote-media-file-details" open>
+              <summary>📱 Cast file from this phone</summary>
+              <label class="remote-media-picker">Choose picture, MP3, or MP4
+                <input id="remoteMediaFile" type="file" accept="image/*,audio/*,video/*,.mp4,.webm,.mov,.m4v,.mp3,.wav,.m4a,.aac,.ogg,.png,.jpg,.jpeg,.webp,.gif" data-host-only="true">
+              </label>
+              <div id="remoteMediaFileName" class="remote-media-file-name">No media selected</div>
+              <button id="remoteMediaSend" type="button" class="remote-media-send" disabled data-host-only="true">Cast Selected File to Screen</button>
+            </details>
+            <div id="remoteMediaStatus" class="remote-media-status">Links are instant. Local phone files are sent live for this session only.</div>
           </div>
         </section>
 
@@ -4154,7 +4205,7 @@
           </div>
         </section>
 
-        <section class="remote-section remote-premium-section">
+        <section class="remote-section remote-premium-section remote-presentation-section">
           <div class="remote-section-title"><span>Presentation</span><small>Desktop screen</small></div>
           <div class="remote-control-row remote-segment-row">
             <button data-command="toggleFullscreen" data-host-only="true">Fullscreen</button>
@@ -4201,7 +4252,7 @@
           </div>
         </section>
 
-        <section class="remote-section remote-premium-section">
+        <section class="remote-section remote-premium-section remote-zoom-section">
           <div class="remote-section-title"><span>Zoom</span><small>Desktop viewer</small></div>
           <div class="remote-control-row remote-segment-row">
             <button data-command="zoomOut" data-host-only="true">− Out</button>
@@ -4210,7 +4261,7 @@
           </div>
         </section>
 
-        <section class="remote-section remote-premium-section">
+        <section class="remote-section remote-premium-section remote-autoplay-section">
           <div class="remote-section-title"><span>Auto Play</span><small>Global or per-slide</small></div>
           <div class="remote-control-row remote-segment-row">
             <button data-command="autoStart" data-host-only="true">Start</button>
@@ -4248,7 +4299,7 @@
           </div>
         </section>
 
-        <section class="remote-section remote-premium-section">
+        <section class="remote-section remote-premium-section remote-timer-section">
           <div class="remote-section-title"><span>Timer</span><small>Overlay controls</small></div>
           <div class="remote-control-row remote-segment-row">
             <button data-command="timerShow" data-host-only="true">Show</button>
@@ -4376,6 +4427,7 @@
         window.__phRemoteInkStrokes = Array.isArray(data.inkStrokes) ? data.inkStrokes : [];
         $('remoteStatusPill').textContent = isHost ? 'Host' : 'Viewer';
         const isMediaSession = data.mediaMode || data.type === 'media';
+        setRemoteMediaOnlyMode(isMediaSession);
         $('remoteSlideLabel').textContent = isMediaSession ? 'Media Viewing Mode' : `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFullLabel').textContent = isMediaSession ? 'Media Preview' : `${data.type === 'pdf' ? 'Page' : 'Slide'} ${data.currentPage || '--'} / ${data.totalPages || '--'}`;
         $('remoteFileLabel').textContent = isMediaSession ? 'Cast local files or paste online links from this phone.' : (data.fileName || 'Active presentation');

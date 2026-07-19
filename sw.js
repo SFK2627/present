@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v11-40';
+const CACHE_NAME = 'presentation-hub-v128-media-remote';
 const CORE_ASSETS = [
   './',
   './index.html',

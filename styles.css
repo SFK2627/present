@@ -6085,3 +6085,148 @@ body.is-dragging-card .folder-chip-wrap[data-folder-drop] {
   .media-viewer-welcome { border-radius: 26px; }
   .remote-media-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* Media Viewing remote focus mode and clearer link controls */
+.remote-media-primary-link-card {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border-radius: 22px;
+  border: 1px solid rgba(125, 211, 252, .34);
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, .24), transparent 55%),
+    linear-gradient(145deg, rgba(15, 23, 42, .66), rgba(88, 28, 135, .24));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 16px 42px rgba(14,165,233,.12);
+}
+.remote-media-link-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+}
+.remote-media-link-heading > span {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #7dd3fc, #c4b5fd, #fde68a);
+  box-shadow: 0 12px 26px rgba(125, 211, 252, .22);
+}
+.remote-media-link-heading strong {
+  display: block;
+  font-size: .98rem;
+  line-height: 1.1;
+}
+.remote-media-link-heading small {
+  display: block;
+  margin-top: 3px;
+  color: rgba(226,232,240,.72);
+  font-size: .74rem;
+  line-height: 1.25;
+}
+.remote-media-link-field {
+  display: grid;
+  gap: 8px;
+  color: rgba(255,255,255,.9);
+  font-size: .82rem;
+  font-weight: 950;
+}
+.remote-media-link-field input,
+.remote-media-primary-link-card input {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 17px;
+  padding: 12px 14px;
+  color: #0f172a;
+  background: rgba(255,255,255,.97);
+  font-weight: 850;
+  box-shadow: 0 10px 24px rgba(0,0,0,.14);
+}
+.remote-media-link-send.primary {
+  min-height: 54px;
+  border-radius: 18px;
+  font-size: .95rem;
+  color: #062449;
+  background: linear-gradient(135deg, #67e8f9, #c4b5fd 52%, #fde68a);
+  box-shadow: 0 18px 40px rgba(34, 211, 238, .22);
+}
+.remote-media-main-controls {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.remote-media-main-controls button {
+  min-height: 46px;
+}
+.remote-media-file-details {
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.055);
+  overflow: hidden;
+}
+.remote-media-file-details summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  color: rgba(255,255,255,.92);
+  font-weight: 950;
+  list-style-position: inside;
+}
+.remote-media-file-details[open] {
+  padding: 0 12px 12px;
+}
+.remote-media-file-details[open] summary {
+  margin: 0 -12px 12px;
+  background: rgba(255,255,255,.06);
+}
+.remote-media-only-mode .remote-card,
+.remote-media-only-mode .remote-premium-card {
+  width: min(620px, 100%) !important;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(34,211,238,.23), transparent 24rem),
+    radial-gradient(circle at 100% 20%, rgba(244,114,182,.18), transparent 20rem),
+    linear-gradient(145deg, rgba(15,23,42,.93), rgba(30,41,59,.78)) !important;
+}
+.remote-media-only-mode .remote-nav-pad,
+.remote-media-only-mode .remote-magic-section,
+.remote-media-only-mode .remote-classroom-section,
+.remote-media-only-mode .remote-presentation-section,
+.remote-media-only-mode .remote-zoom-section,
+.remote-media-only-mode .remote-autoplay-section,
+.remote-media-only-mode .remote-timer-section,
+.remote-media-only-mode .remote-hint,
+.remote-media-only-mode .remote-preview-actions,
+.remote-media-only-mode .remote-control-banner {
+  display: none !important;
+}
+.remote-media-only-mode .remote-now-card {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: linear-gradient(135deg, rgba(14,165,233,.14), rgba(168,85,247,.13)), rgba(2,6,23,.34);
+}
+.remote-media-only-mode .remote-preview {
+  display: none !important;
+}
+.remote-media-only-mode .remote-media-cast-section {
+  border-color: rgba(125, 211, 252, .38) !important;
+  background: linear-gradient(145deg, rgba(14,165,233,.16), rgba(236,72,153,.12)), rgba(15,23,42,.68) !important;
+  box-shadow: 0 22px 60px rgba(14,165,233,.14), inset 0 1px 0 rgba(255,255,255,.08);
+}
+.remote-media-only-mode .remote-media-file-details:not([open]) {
+  background: rgba(15,23,42,.35);
+}
+.remote-media-only-mode #remoteSlideLabel {
+  font-size: clamp(1.35rem, 7vw, 2.3rem) !important;
+}
+.remote-media-only-mode .remote-file-label {
+  color: rgba(224,242,254,.9) !important;
+}
+.receiving-card #mediaCastReceivingName,
+.receiving-card #mediaCastProgressText {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .remote-media-main-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .remote-media-main-controls button:last-child { grid-column: 1 / -1; }
+  .remote-media-primary-link-card { padding: 13px; border-radius: 20px; }
+  .remote-media-link-heading > span { width: 40px; height: 40px; }
+}
