@@ -5,6 +5,7 @@
 window.PRESENTATION_HUB_FIREBASE_CONFIG = {
   apiKey: "AIzaSyCk73rdxBV_MzMxY1Tis6WTwCvKzWmO5nE",
   authDomain: "presentation-hub-34909.firebaseapp.com",
+  databaseURL: "https://presentation-hub-34909-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "presentation-hub-34909",
   storageBucket: "presentation-hub-34909.firebasestorage.app",
   messagingSenderId: "508600326891",

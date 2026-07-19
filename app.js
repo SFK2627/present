@@ -20,7 +20,9 @@
   const DB_VERSION = 1;
   const STORE = 'presentations';
   const SESSION_COLLECTION = 'presentationHubSessions';
-  const REMOTE_REST_TRANSPORT = false; // v6: use Firestore SDK realtime sync; REST caused 429 quota spikes
+  const RTDB_SESSION_ROOT = 'presentationHubSessions';
+  const REMOTE_REALTIME_DATABASE_URL = 'https://presentation-hub-34909-default-rtdb.asia-southeast1.firebasedatabase.app/';
+  const REMOTE_REST_TRANSPORT = false; // kept for legacy fallback, but fresh remote uses Realtime Database
   const DEFAULT_REMOTE_BASE_URL = 'https://sfk2627.github.io/present/';
   const MEDIA_CAST_ICE_SERVERS = {
     iceServers: [
@@ -89,6 +91,7 @@
     viewportQualityTimer: null,
     firebaseReady: false,
     firebaseDb: null,
+    firebaseRtdb: null,
     firebaseAuthReady: false,
     sessionId: null,
     sessionRef: null,
@@ -601,32 +604,48 @@
       return false;
     }
     try {
-      await initRemoteFirestoreOnly();
+      if (!firebase.apps.length) firebase.initializeApp(window.PRESENTATION_HUB_FIREBASE_CONFIG);
+
+      // Remote control uses Realtime Database. Initialize it first and do not
+      // let Firestore/auth delays break the QR remote.
+      await initRemoteRealtimeOnly();
+
+      // Firestore is optional here and is only used for account-based classroom
+      // cloud sync. If it fails, local classroom/randomizer and phone remote still work.
+      try {
+        if (firebase.firestore) {
+          const db = firebase.firestore();
+          try { db.settings({ ignoreUndefinedProperties: true }); } catch (settingsError) {}
+          state.firebaseDb = db;
+        }
+      } catch (firestoreError) {
+        console.warn('Optional Firestore classroom sync unavailable:', firestoreError);
+      }
+
       let user = null;
       try {
-        const authStart = Date.now();
-        user = firebase.auth().currentUser;
-        if (!user) {
+        user = firebase.auth && firebase.auth().currentUser;
+        if (!user && firebase.auth) {
           const authPromise = firebase.auth().signInAnonymously();
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Anonymous auth timeout')), 3500));
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Anonymous auth timeout')), 2500));
           const cred = await Promise.race([authPromise, timeoutPromise]);
           user = cred.user;
         }
         state.firebaseAuthReady = !!user;
-        console.log('Firebase auth ready in', Date.now() - authStart, 'ms');
       } catch (authError) {
-        console.warn('Firebase anonymous auth unavailable/slow; remote will use Firestore-only mode.', authError);
+        // Realtime Database test/public remote does not require auth.
+        console.warn('Optional anonymous auth unavailable/slow; remote still uses RTDB.', authError);
         state.firebaseAuthReady = false;
       }
       state.firebaseUser = user || (firebase.auth && firebase.auth().currentUser) || null;
-      state.firebaseReady = !!state.firebaseDb;
+      state.firebaseReady = !!state.firebaseRtdb;
       try {
-        firebase.auth().onAuthStateChanged(async (nextUser) => {
+        if (firebase.auth) firebase.auth().onAuthStateChanged(async (nextUser) => {
           state.firebaseUser = nextUser || null;
           state.firebaseAuthReady = !!nextUser;
           updateFirebaseStatus();
           updateClassroomAuthUI();
-          if (nextUser && !nextUser.isAnonymous) await loadClassroomCloud();
+          if (nextUser && !nextUser.isAnonymous && state.firebaseDb) await loadClassroomCloud();
         });
       } catch (error) {}
       updateFirebaseStatus();
@@ -3203,84 +3222,158 @@
     };
   }
 
+
+  function sanitizeRealtimeData(value, seen = new WeakSet()) {
+    if (value === undefined) return null;
+    if (value === null) return null;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' || typeof value === 'boolean') return value;
+    if (value instanceof Date) return value.getTime();
+    if (typeof Blob !== 'undefined' && value instanceof Blob) return null;
+    if (typeof File !== 'undefined' && value instanceof File) return null;
+    if (typeof Element !== 'undefined' && value instanceof Element) return null;
+    if (Array.isArray(value)) return value.map((item) => sanitizeRealtimeData(item, seen));
+    if (typeof value === 'object') {
+      if (seen.has(value)) return null;
+      seen.add(value);
+      const out = {};
+      Object.keys(value).forEach((key) => {
+        if (key == null) return;
+        const cleanKey = String(key).replace(/[.$#[\]/]/g, '_');
+        const clean = sanitizeRealtimeData(value[key], seen);
+        if (clean !== undefined) out[cleanKey] = clean;
+      });
+      seen.delete(value);
+      return out;
+    }
+    return null;
+  }
+
+  function makeRealtimeSnapshot(value) {
+    const exists = value !== null && value !== undefined;
+    return { exists, data: () => (exists && typeof value === 'object' ? value : (exists ? { value } : {})) };
+  }
+
+  function makeRealtimeCollectionStub() {
+    return {
+      doc() {
+        return {
+          set() { return Promise.resolve(); },
+          get: async () => makeRealtimeSnapshot(null),
+        };
+      },
+      orderBy() { return this; },
+      limit() { return this; },
+      async get() { return { forEach() {} }; },
+    };
+  }
+
+  function makeRealtimeSessionRef(sessionId) {
+    if (!state.firebaseRtdb) throw new Error('Firebase Realtime Database is not ready.');
+    const cleanId = String(sessionId || '').replace(/[^A-Za-z0-9_-]/g, '_') || makeSessionId();
+    const raw = state.firebaseRtdb.ref(`${RTDB_SESSION_ROOT}/${cleanId}`);
+    return {
+      __rtdb: true,
+      id: cleanId,
+      set(data = {}, options = {}) {
+        const clean = sanitizeRealtimeData(data || {});
+        if (options && options.merge) return raw.update(clean || {});
+        return raw.set(clean || {});
+      },
+      async get() {
+        const snap = await raw.get();
+        return makeRealtimeSnapshot(snap.exists() ? snap.val() : null);
+      },
+      onSnapshot(onNext, onError) {
+        const handler = (snap) => {
+          try { onNext(makeRealtimeSnapshot(snap.exists() ? snap.val() : null)); }
+          catch (error) { if (onError) onError(error); }
+        };
+        const errorHandler = (error) => { if (onError) onError(error); };
+        raw.on('value', handler, errorHandler);
+        return () => raw.off('value', handler);
+      },
+      collection() { return makeRealtimeCollectionStub(); },
+    };
+  }
+
+  async function initRemoteRealtimeOnly() {
+    if (!hasFirebaseConfig() || !window.firebase || !firebase.database) {
+      state.firebaseReady = false;
+      updateFirebaseStatus('Remote DB missing');
+      return false;
+    }
+    try {
+      const app = firebase.apps.length
+        ? firebase.app()
+        : firebase.initializeApp(window.PRESENTATION_HUB_FIREBASE_CONFIG);
+
+      // Compat RTDB is safest when created from the initialized app. Passing
+      // the URL directly to firebase.database(url) can be interpreted as an app
+      // argument in some SDK builds, which leaves RTDB "not ready" even when
+      // the database URL is correct. Try the URL-specific app.database(...) path
+      // first, then fall back to the default databaseURL from firebase-config.js.
+      let db = null;
+      try {
+        if (app && typeof app.database === 'function') {
+          db = app.database(REMOTE_REALTIME_DATABASE_URL);
+        }
+      } catch (urlError) {
+        console.warn('RTDB URL init failed, trying default databaseURL:', urlError);
+      }
+      if (!db) db = firebase.database();
+
+      state.firebaseRtdb = db;
+      state.firebaseReady = !!state.firebaseRtdb;
+      updateFirebaseStatus(state.firebaseReady ? 'Remote ready' : 'Remote DB missing');
+      return state.firebaseReady;
+    } catch (error) {
+      console.warn('Remote Realtime Database setup failed:', error);
+      state.firebaseRtdb = null;
+      state.firebaseReady = false;
+      updateFirebaseStatus('Remote offline');
+      return false;
+    }
+  }
+
   function makeRemoteSessionRef(sessionId) {
-    if (REMOTE_REST_TRANSPORT) return makeRestSessionRef(sessionId);
-    if (!state.firebaseDb) throw new Error('Firebase Firestore is not ready.');
-    return state.firebaseDb.collection(SESSION_COLLECTION).doc(sessionId);
+    return makeRealtimeSessionRef(sessionId);
   }
 
   async function ensureRemoteTransportReady() {
-    if (REMOTE_REST_TRANSPORT) {
-      getFirebaseRemoteConfig();
-      state.remoteRestTransportReady = true;
-      updateFirebaseStatus('Remote ready');
-      return true;
-    }
     return ensureRemoteAccessReady();
   }
 
   async function ensureRemoteFirebaseReady() {
-    if (state.firebaseReady && state.firebaseDb) return true;
+    return ensureRemoteRealtimeReady();
+  }
+
+  async function ensureRemoteRealtimeReady() {
+    if (state.firebaseReady && state.firebaseRtdb) return true;
     if (!hasFirebaseConfig()) throw new Error('Firebase config is missing. Check firebase-config.js.');
-    const ok = await initRemoteFirestoreOnly();
-    if (!ok || !state.firebaseReady || !state.firebaseDb) {
-      throw new Error('Firebase Firestore is not ready. Check firebase-config.js and internet connection.');
+    const ok = await initRemoteRealtimeOnly();
+    if (!ok || !state.firebaseRtdb) {
+      throw new Error('Firebase Realtime Database is not ready. Check the database URL, internet connection, and RTDB rules.');
     }
     return true;
   }
 
   async function ensureRemoteAccessReady() {
-    await ensureRemoteFirebaseReady();
-
-    // Support BOTH common rule styles:
-    // 1) public temporary presentationHubSessions rules, and
-    // 2) request.auth != null rules with Anonymous Auth enabled.
-    // We try Anonymous Auth first when available, but we do not make public-rule
-    // projects fail just because auth is unavailable.
-    try {
-      if (window.firebase && firebase.auth) {
-        let user = firebase.auth().currentUser;
-        if (!user) {
-          const cred = await promiseWithTimeout(
-            firebase.auth().signInAnonymously(),
-            6500,
-            'Anonymous Firebase sign-in timed out. Enable Anonymous Auth or make presentationHubSessions public.'
-          );
-          user = cred && cred.user ? cred.user : firebase.auth().currentUser;
-        }
-        state.firebaseUser = user || null;
-        state.firebaseAuthReady = !!user;
-        updateFirebaseStatus();
-      }
-    } catch (authError) {
-      state.firebaseAuthReady = false;
-      state.firebaseUser = null;
-      console.warn('Remote anonymous auth not ready; trying Firestore session with current rules:', authError);
-    }
+    // Fresh remote v8 uses Firebase Realtime Database, not Firestore.
+    // This avoids Firestore REST quota/throttling and is the lightest path for
+    // tiny remote commands like next/prev/play/pause/magic effects.
+    await ensureRemoteRealtimeReady();
     return true;
   }
 
   async function verifyRemoteSessionDocument(ref) {
-    try {
-      const snap = await promiseWithTimeout(
-        ref.get({ source: 'server' }),
-        12000,
-        'Firestore session verification timed out'
-      );
-      if (!snap.exists) throw new Error('Firestore session was not created on the server');
-      return true;
-    } catch (serverError) {
-      // Some old compat/browser combinations may reject source:'server'. Try a
-      // normal get before giving up, but still use a timeout so the QR modal
-      // never stays on Connecting forever.
-      const snap = await promiseWithTimeout(
-        ref.get(),
-        12000,
-        'Firestore session readback timed out'
-      );
-      if (!snap.exists) throw serverError;
-      return true;
-    }
+    const snap = await promiseWithTimeout(
+      ref.get(),
+      7000,
+      'Realtime Database session verification timed out'
+    );
+    if (!snap.exists) throw new Error('Realtime Database session was not created');
+    return true;
   }
 
   function getRemoteAppBaseUrl() {
@@ -3316,7 +3409,7 @@
     const isMedia = !state.activeFile && !!state.mediaMode;
     return {
       status: 'live',
-      remoteVersion: 'fresh-remote-v7-sdk-longpoll',
+      remoteVersion: 'fresh-remote-v8-rtdb',
       fileName: state.activeFile ? state.activeFile.name : 'Media Viewing',
       type: state.activeFile ? state.activeFile.type : 'media',
       currentPage: state.activeFile ? (state.currentPage || 1) : 0,
@@ -3351,7 +3444,7 @@
     await promiseWithTimeout(
       state.sessionRef.set(baseRemoteSessionPayload(), { merge: true }),
       18000,
-      'Firestore session create timed out'
+      'Realtime Database session create timed out'
     );
     await verifyRemoteSessionDocument(state.sessionRef);
 
@@ -3384,19 +3477,17 @@
       .catch((error) => {
         console.error('Fresh remote session failed:', error);
         const message = error && error.message ? error.message : String(error || 'Unknown error');
-        const publicRuleHint = /quota|429/i.test(message)
-          ? ' Firestore quota is temporarily throttled. Wait a few minutes, hard refresh, then try again.'
-          : (/permission|insufficient|denied|403/i.test(message)
-            ? ' Firestore rules still block presentationHubSessions. Publish public read/write for presentationHubSessions, then hard refresh.'
-            : (/timed out|Failed to fetch|NetworkError|unavailable|offline/i.test(message)
-              ? ' Firestore connection is slow or blocked. This build uses auto long-polling for stricter networks; hard refresh once and try again. If it remains, check ad blocker, Firestore database status, or internet.'
-              : ''));
+        const publicRuleHint = /permission|denied|PERMISSION_DENIED/i.test(message)
+          ? ' Realtime Database rules must allow read/write for presentationHubSessions.'
+          : (/timed out|Failed to fetch|NetworkError|unavailable|offline/i.test(message)
+            ? ' Realtime Database connection is slow or blocked. Check internet, site cache, and database status.'
+            : '');
         if (els.qrHelp) {
           els.qrHelp.textContent = `Remote session error: ${message}.${publicRuleHint}`;
         }
         const badge = $('qrSessionBadge');
         if (badge) {
-          badge.textContent = /quota|429/i.test(message) ? 'Quota cooldown' : (/permission|insufficient|denied|403/i.test(message) ? 'Needs rules' : 'Retry');
+          badge.textContent = /permission|denied|PERMISSION_DENIED/i.test(message) ? 'Needs RTDB rules' : 'Retry';
         }
         throw error;
       })
@@ -3416,7 +3507,7 @@
       await promiseWithTimeout(
         state.sessionRef.set(baseRemoteSessionPayload(), { merge: true }),
         9000,
-        'Firestore session update timed out'
+        'Realtime Database session update timed out'
       );
       await publishSessionState(true);
       if (!state.unsubscribeSession) {
@@ -3463,7 +3554,7 @@
         processRemoteCommand(data && data.lastMagicCommand, 'poll-magic');
         processMediaCastSignal(data && data.mediaCast);
       } catch (error) {}
-    }, state.sessionRef && state.sessionRef.__rest ? 6000 : 8000);
+    }, state.sessionRef && state.sessionRef.__rtdb ? 2500 : 8000);
   }
 
 
@@ -6105,9 +6196,9 @@
         renderRemoteInkPreview(window.__phRemoteInkStrokes, window.__phRemoteCurrentPage, remoteViewport);
       }, (error) => {
         const message = error && error.message ? error.message : String(error || 'Unknown remote listener error');
-        $('remoteStatusPill').textContent = 'Check rules';
-        $('remoteFileLabel').textContent = /permission|insufficient|denied/i.test(message)
-          ? 'Remote session blocked by Firestore rules. Allow read/write on presentationHubSessions, then rescan.'
+        $('remoteStatusPill').textContent = 'Check RTDB';
+        $('remoteFileLabel').textContent = /permission|denied|PERMISSION_DENIED/i.test(message)
+          ? 'Remote session blocked by Realtime Database rules. Allow presentationHubSessions read/write, then rescan.'
           : `Remote listener error: ${message}`;
       });
 
@@ -6882,7 +6973,7 @@
         const message = error && error.message ? error.message : String(error || 'Command failed');
         if (pill) pill.textContent = 'Command blocked';
         if (label) label.textContent = /permission|insufficient|denied/i.test(message)
-          ? 'Command blocked by Firestore rules. Allow presentationHubSessions read/write, then rescan.'
+          ? 'Command blocked by Realtime Database rules. Allow presentationHubSessions read/write, then rescan.'
           : `Command failed: ${message}`;
       });
     }

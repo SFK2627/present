@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v7-longpoll';
+const CACHE_NAME = 'presentation-hub-v8-rtdb-remote';
 const CORE_ASSETS = [
   './',
   './index.html',
