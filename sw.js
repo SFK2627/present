@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v8-rtdb-remote';
+const CACHE_NAME = 'presentation-hub-v8-rtdb-remote-gdrive1';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,7 @@ const CORE_ASSETS = [
   './icon.svg'
 ];
 
-// fresh-remote-v6-rest-direct-sanitize-fix
+// stable remote + isolated Google Drive Cloud Library add-on
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).catch(() => undefined));
   self.skipWaiting();

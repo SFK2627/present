@@ -48,6 +48,38 @@
         </div>
       </section>
 
+
+
+      <section id="driveCloudCard" class="drive-cloud-card glass">
+        <div class="drive-cloud-head">
+          <div>
+            <span class="eyebrow mini">Google Drive Cloud Library</span>
+            <h3>Save and reopen files from your own Google Drive.</h3>
+            <p>Sign in once, upload PDF/PPTX/media to your Drive folder, then open them later without uploading from the device again.</p>
+          </div>
+          <span id="driveCloudStatus" class="drive-cloud-status muted">Not connected</span>
+        </div>
+        <div class="drive-cloud-setup drive-cloud-ready-login">
+          <div class="drive-login-note">
+            <strong>Built-in Google login</strong>
+            <small>No Client ID paste needed. Files are saved in your own Google Drive folder: Presentation Hub Files.</small>
+          </div>
+          <button id="driveSignInBtn" type="button">Sign in with Google</button>
+          <button id="driveSignOutBtn" type="button" class="text-button hidden">Sign out</button>
+        </div>
+        <div class="drive-cloud-actions">
+          <label id="driveUploadZone" class="drive-upload-zone">
+            <input id="driveUploadInput" type="file" multiple accept=".pdf,.pptx,image/*,audio/*,video/*,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+            <span>☁️</span>
+            <strong>Upload to Google Drive</strong>
+            <small>PDF, PPTX, images, audio, and video</small>
+          </label>
+          <button id="driveRefreshBtn" type="button" class="text-button">Refresh Drive files</button>
+        </div>
+        <div id="driveFilesGrid" class="drive-files-grid"></div>
+        <p id="driveEmptyState" class="drive-empty-state">Sign in with Google, then upload files to your Drive Cloud Library.</p>
+      </section>
+
       <section class="toolbar-card glass">
         <div class="search-wrap">
           <span>⌕</span>
