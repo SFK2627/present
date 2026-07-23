@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v8-rtdb-remote-gdrive1';
+const CACHE_NAME = 'presentation-hub-v8-rtdb-remote-gdrive1-randomizer-smooth1';
 const CORE_ASSETS = [
   './',
   './index.html',

@@ -118,6 +118,7 @@
     magicEffectIntensity: 'grand',
     classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, groupRollMode: 'balanced', rolledGroups: [], pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null, revealMode: '', busy: false },
     classroomSyncTimer: null,
+    classroomRemoteTimer: null,
     firebaseUser: null,
     driveClientId: DEFAULT_GOOGLE_CLIENT_ID,
     driveTokenClient: null,
@@ -7374,10 +7375,26 @@
   }
 
   function saveClassroomLocal() { localStorage.setItem('presentationHubClassroom', JSON.stringify(state.classroom)); }
-  function scheduleClassroomSave() {
+  function scheduleClassroomSave(delay = 1800) {
+    // Local-first: keep the classroom randomizer instant even when internet is slow.
+    // Cloud sync is intentionally delayed and non-blocking so Pick Name / Roll Group
+    // animations never wait for Firebase or Google network calls.
     saveClassroomLocal();
     clearTimeout(state.classroomSyncTimer);
-    state.classroomSyncTimer = setTimeout(saveClassroomCloud, 350);
+    state.classroomSyncTimer = setTimeout(saveClassroomCloud, Math.max(900, Number(delay) || 1800));
+  }
+  function scheduleClassroomRemotePublish(delay = 900) {
+    // Publish only the small classroom snapshot, not the full viewer state.
+    // This prevents remote/classroom sync from competing with the roulette/dice animation.
+    clearTimeout(state.classroomRemoteTimer);
+    state.classroomRemoteTimer = setTimeout(async () => {
+      try {
+        if (!state.sessionRef) return;
+        await state.sessionRef.set({ classroom: classroomRemoteSnapshot(), updatedAt: Date.now() }, { merge: true });
+      } catch (error) {
+        console.warn('Classroom remote publish skipped', error);
+      }
+    }, Math.max(250, Number(delay) || 900));
   }
   async function saveClassroomCloud() {
     const user = state.firebaseUser;
@@ -7669,12 +7686,16 @@
     state.classroom.busy = true;
     state.classroom.revealMode = 'name';
     state.classroom.lastGroup = null;
-    renderClassroomTools(); publishSessionState(true);
+    // Local UI only before the animation. Do not publish/save while roulette is running.
+    renderClassroomTools();
     await showNameRoulette(sec.students.map(s => cleanStudentName(s.name)), cleanStudentName(chosen.name));
     state.classroom.lastStudent = chosen;
     if (state.classroom.removePicked && !state.classroom.pickedIds.includes(chosen.id)) state.classroom.pickedIds.push(chosen.id);
     state.classroom.busy = false;
-    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return chosen;
+    renderClassroomTools();
+    scheduleClassroomSave(2200);
+    scheduleClassroomRemotePublish(900);
+    return chosen;
   }
   function chooseGroupRoll() {
     const n = Math.max(2, Number(state.classroom.groupCount) || 6);
@@ -7705,14 +7726,18 @@
     state.classroom.busy = true;
     state.classroom.revealMode = 'group';
     state.classroom.lastGroup = null;
-    renderClassroomTools(); publishSessionState(true);
+    // Local UI only before the animation. Network sync is deferred until after the roll.
+    renderClassroomTools();
     await showRollingGroupDice(group);
     state.classroom.lastGroup = group;
     if (student) state.classroom.assignments[student.id] = group;
     state.classroom.busy = false;
-    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return group;
+    renderClassroomTools();
+    scheduleClassroomSave(2200);
+    scheduleClassroomRemotePublish(900);
+    return group;
   }
-  function resetClassroomRound() { if (state.classroom.busy) return; state.classroom.pickedIds=[]; state.classroom.rolledGroups=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; state.classroom.revealMode=''; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
+  function resetClassroomRound() { if (state.classroom.busy) return; state.classroom.pickedIds=[]; state.classroom.rolledGroups=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; state.classroom.revealMode=''; renderClassroomTools(); scheduleClassroomSave(1800); scheduleClassroomRemotePublish(500); }
   function getClassroomPresentationLayer() {
     let layer = document.getElementById('classroomPresentationLayer');
     if (layer) return layer;
@@ -7782,6 +7807,13 @@
     return layer;
   }
   function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  function waitAnimation(ms) {
+    return new Promise((resolve) => {
+      const start = performance.now();
+      const frame = (now) => (now - start >= ms ? resolve() : requestAnimationFrame(frame));
+      requestAnimationFrame(frame);
+    });
+  }
   function playClassroomTone(kind = 'tick', step = 0) {
     try {
       primePresentationAudio();
@@ -7861,12 +7893,12 @@
       const eased = progress * progress * progress;
       const delay = Math.round(42 + eased * 500);
       const strip = renderRouletteMovingStrip(track, safePool, current, next);
-      fitClassroomNames(track);
+      if (i === 0 || i % 4 === 0 || isLastStep) fitClassroomNames(track);
       playClassroomTone('tick', i);
       strip.style.setProperty('--roulette-duration', `${Math.max(38, Math.round(delay * 0.82))}ms`);
       void strip.offsetHeight;
       strip.classList.add('spinning');
-      await wait(delay);
+      await waitAnimation(delay);
       current = next;
     }
 
@@ -7921,7 +7953,7 @@
       die.style.setProperty('--jump', `${-18 - (tick % 3) * 9}px`);
       playClassroomTone('dice', tick);
       tick++;
-      await wait(Math.min(170, 52 + tick*6));
+      await waitAnimation(Math.min(170, 52 + tick*6));
     }
     paintDiceFaces(faces, finalGroup, max);
     playClassroomTone('land');
