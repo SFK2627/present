@@ -703,6 +703,69 @@
     });
   }
 
+  function classroomSyncSetupMessage(error) {
+    const code = error && error.code ? String(error.code) : '';
+    const message = error && error.message ? String(error.message) : String(error || '');
+    if (code === 'auth/operation-not-allowed' || /operation-not-allowed|provider is disabled|not enabled/i.test(message)) {
+      return 'Enable Firebase Authentication > Sign-in method > Google provider so Classroom names can load from this account.';
+    }
+    if (code === 'auth/unauthorized-domain' || /unauthorized.*domain/i.test(message)) {
+      return 'Add sfk2627.github.io to Firebase Authentication > Settings > Authorized domains.';
+    }
+    if (/popup|cancelled|closed/i.test(message)) return 'Google sign-in was closed before Classroom sync finished.';
+    return message || 'Classroom account sync failed.';
+  }
+
+  function setDriveTokenFromFirebaseResult(result) {
+    try {
+      const credential = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
+      const token = credential && credential.accessToken;
+      if (token) {
+        state.driveAccessToken = token;
+        state.driveTokenExpiry = Date.now() + (55 * 60 * 1000);
+        return token;
+      }
+    } catch (error) {
+      console.warn('Could not read Drive token from Firebase Google result:', error);
+    }
+    return '';
+  }
+
+  async function signInFirebaseGoogleForClassroomAndDrive(refreshClassroom = true) {
+    if (!window.firebase || !hasFirebaseConfig() || !firebase.auth) {
+      throw new Error('Firebase Authentication is not available.');
+    }
+    await initFirebaseIfConfigured();
+    const auth = firebase.auth();
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/drive.file');
+    provider.addScope('profile');
+    provider.addScope('email');
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const current = auth.currentUser;
+    let result = null;
+    if (current && current.isAnonymous && typeof current.linkWithPopup === 'function') {
+      try {
+        result = await current.linkWithPopup(provider);
+      } catch (error) {
+        if (error && ['auth/credential-already-in-use', 'auth/email-already-in-use', 'auth/provider-already-linked'].includes(error.code)) {
+          result = await auth.signInWithPopup(provider);
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      result = await auth.signInWithPopup(provider);
+    }
+    const token = setDriveTokenFromFirebaseResult(result);
+    state.firebaseUser = (result && result.user) || auth.currentUser || null;
+    state.firebaseAuthReady = !!state.firebaseUser;
+    if (refreshClassroom) await loadClassroomCloud();
+    updateClassroomAuthUI();
+    updateFirebaseStatus();
+    return { token, user: state.firebaseUser };
+  }
+
   async function connectFirebaseWithGoogleToken(accessToken, refreshClassroom = true) {
     if (!accessToken || !window.firebase || !hasFirebaseConfig() || !firebase.auth) return false;
     try {
@@ -731,7 +794,7 @@
       updateFirebaseStatus();
       return !!(state.firebaseUser && !state.firebaseUser.isAnonymous);
     } catch (error) {
-      state.sharedGoogleLoginLastError = error && (error.message || error.code) ? (error.message || error.code) : String(error || '');
+      state.sharedGoogleLoginLastError = classroomSyncSetupMessage(error);
       console.warn('Classroom Google sync after Drive sign-in failed:', error);
       updateClassroomAuthUI();
       return false;
@@ -744,23 +807,39 @@
     state.sharedGoogleLoginPromise = (async () => {
       state.driveClientId = DEFAULT_GOOGLE_CLIENT_ID;
       state.sharedGoogleLoginLastError = '';
-      updateDriveStatus('Opening Google sign-in...', 'warning');
+      updateDriveStatus('Opening one Google sign-in for Classroom and Drive...', 'warning');
       if (els.driveSignInBtn) els.driveSignInBtn.disabled = true;
       if (els.classroomAuthBtn) els.classroomAuthBtn.disabled = true;
-      updateClassroomAuthUI('Signing in...');
+      updateClassroomAuthUI('Signing in once for Classroom and Drive...');
 
-      const token = needDrive ? await requestGoogleAccessToken(state.driveAccessToken ? '' : 'consent') : state.driveAccessToken;
-      if (token) {
-        updateDriveStatus('Google account connected. Syncing Classroom...', 'ready');
-        renderDriveCloud();
+      try {
+        // True one-login path: Firebase Google popup signs in Classroom first
+        // and returns the same Google access token for Drive.
+        const result = await signInFirebaseGoogleForClassroomAndDrive(refreshClassroom);
+        if (result && result.token) {
+          updateDriveStatus('Google connected for Drive and Classroom Randomizer.', 'ready');
+          renderDriveCloud();
+          return result.token;
+        }
+        if (state.driveAccessToken) return state.driveAccessToken;
+        throw new Error('Google did not return a Drive access token. Try signing in again.');
+      } catch (firebasePopupError) {
+        state.sharedGoogleLoginLastError = classroomSyncSetupMessage(firebasePopupError);
+        console.warn('Primary Firebase Google sign-in failed:', firebasePopupError);
+
+        // Fallback: Drive can still connect using Google Identity Services, but
+        // Classroom account names will load only after Firebase Google provider
+        // is enabled. This fallback keeps Drive usable without blocking the app.
+        const token = needDrive ? await requestGoogleAccessToken(state.driveAccessToken ? '' : 'consent') : state.driveAccessToken;
+        if (token) {
+          updateDriveStatus('Drive connected. Classroom account sync needs Firebase Google provider enabled.', 'warning');
+          renderDriveCloud();
+          await connectFirebaseWithGoogleToken(token, refreshClassroom);
+          updateClassroomAuthUI();
+          return token;
+        }
+        throw firebasePopupError;
       }
-
-      const classroomConnected = await connectFirebaseWithGoogleToken(token, refreshClassroom);
-      if (classroomConnected) updateDriveStatus('Google connected for Drive and Classroom Randomizer.', 'ready');
-      else updateDriveStatus('Drive connected. Classroom cloud needs Firebase Google sign-in enabled.', 'warning');
-      renderDriveCloud();
-      updateClassroomAuthUI();
-      return token || state.driveAccessToken || '';
     })().finally(() => {
       state.sharedGoogleLoginPromise = null;
       if (els.driveSignInBtn) els.driveSignInBtn.disabled = false;
@@ -7530,10 +7609,11 @@
     const signed = user && !user.isAnonymous;
     const driveSigned = !!state.driveAccessToken && Date.now() < state.driveTokenExpiry;
     if (customText) els.classroomAuthStatus.textContent = customText;
-    else if (signed) els.classroomAuthStatus.textContent = `Synced as ${user.displayName || user.email || 'Google account'} • Drive ready`;
-    else if (driveSigned) els.classroomAuthStatus.textContent = 'Drive connected. Classroom cloud sync is finishing or needs Firebase Google provider enabled.';
-    else els.classroomAuthStatus.textContent = 'Local save active. Sign in once for Classroom and Google Drive.';
-    els.classroomAuthBtn.textContent = signed ? 'Account Synced' : (driveSigned ? 'Finish Classroom Sync' : 'Sign in with Google');
+    else if (signed) els.classroomAuthStatus.textContent = `Synced as ${user.displayName || user.email || 'Google account'} • names load from this Classroom account`;
+    else if (state.sharedGoogleLoginLastError) els.classroomAuthStatus.textContent = state.sharedGoogleLoginLastError;
+    else if (driveSigned) els.classroomAuthStatus.textContent = 'Drive is connected, but Classroom names need the same Firebase Google account. Click once to sync Classroom.';
+    else els.classroomAuthStatus.textContent = 'Local save active. Sign in once for Classroom Randomizer and Google Drive.';
+    els.classroomAuthBtn.textContent = signed ? 'Account Synced' : 'Sign in with Google';
     els.classroomAuthBtn.disabled = !!signed || !!state.sharedGoogleLoginPromise;
   }
   function openClassroomTools() { renderClassroomTools(); updateClassroomAuthUI(); showModal(els.classroomModal); }
