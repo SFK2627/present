@@ -1,4 +1,4 @@
-const CACHE_NAME = 'presentation-hub-v8-rtdb-remote-gdrive2-single-login';
+const CACHE_NAME = 'presentation-hub-v8-rtdb-remote-gdrive3-fast-login';
 const CORE_ASSETS = [
   './',
   './index.html',
