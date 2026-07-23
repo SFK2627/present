@@ -22,7 +22,7 @@
   const SESSION_COLLECTION = 'presentationHubSessions';
   const DRIVE_FOLDER_NAME = 'Presentation Hub Files';
   const DEFAULT_GOOGLE_CLIENT_ID = '752163036148-vch4f0p8eggkimdgu4h4ppdcuijq5057.apps.googleusercontent.com';
-  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
   const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
   const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
   const RTDB_SESSION_ROOT = 'presentationHubSessions';
@@ -118,7 +118,6 @@
     magicEffectIntensity: 'grand',
     classroom: { sections: [], activeSectionId: '', groupCount: 6, removePicked: true, balanced: true, groupRollMode: 'balanced', rolledGroups: [], pickedIds: [], assignments: {}, lastStudent: null, lastGroup: null, revealMode: '', busy: false },
     classroomSyncTimer: null,
-    classroomRemotePublishTimer: null,
     firebaseUser: null,
     driveClientId: DEFAULT_GOOGLE_CLIENT_ID,
     driveTokenClient: null,
@@ -127,8 +126,6 @@
     driveFolderId: localStorage.getItem('presentationHubDriveFolderId') || '',
     driveFiles: [],
     driveBusy: false,
-    sharedGoogleLoginPromise: null,
-    sharedGoogleLoginLastError: '',
     remoteRestTransportReady: false,
     mediaCastReceiver: null,
     mediaCastReceiverId: '',
@@ -515,32 +512,32 @@
     if (els.presentClassroomBtn) els.presentClassroomBtn.addEventListener('click', openClassroomPresentationMode);
     if (els.classroomAuthBtn) els.classroomAuthBtn.addEventListener('click', signInClassroomAccount);
     if (els.addSectionBtn) els.addSectionBtn.addEventListener('click', addClassroomSection);
-    if (els.sectionSelect) els.sectionSelect.addEventListener('change', () => { state.classroom.activeSectionId = els.sectionSelect.value; state.classroom.pickedIds = []; state.classroom.rolledGroups = []; renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100); });
+    if (els.sectionSelect) els.sectionSelect.addEventListener('change', () => { state.classroom.activeSectionId = els.sectionSelect.value; state.classroom.pickedIds = []; state.classroom.rolledGroups = []; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); });
     if (els.saveNamesBtn) els.saveNamesBtn.addEventListener('click', saveClassroomNames);
     if (els.importClassListBtn) els.importClassListBtn.addEventListener('click', () => els.classListFileInput && els.classListFileInput.click());
     if (els.classListFileInput) els.classListFileInput.addEventListener('change', importClassListFile);
     if (els.groupCountInput) els.groupCountInput.addEventListener('change', () => {
       state.classroom.groupCount = Math.max(2, Math.min(20, Number(els.groupCountInput.value) || 6));
       state.classroom.rolledGroups = [];
-      scheduleClassroomSave(); publishClassroomRemoteState(100);
+      scheduleClassroomSave(); publishSessionState(true);
     });
     if (els.pickNameModeSelect) els.pickNameModeSelect.addEventListener('change', () => {
       state.classroom.removePicked = els.pickNameModeSelect.value !== 'allow-repeat';
-      scheduleClassroomSave(); publishClassroomRemoteState(100);
+      scheduleClassroomSave(); publishSessionState(true);
     });
-    if (els.removePickedInput) els.removePickedInput.addEventListener('change', () => { state.classroom.removePicked = els.removePickedInput.checked; scheduleClassroomSave(); publishClassroomRemoteState(100); });
+    if (els.removePickedInput) els.removePickedInput.addEventListener('change', () => { state.classroom.removePicked = els.removePickedInput.checked; scheduleClassroomSave(); publishSessionState(true); });
     if (els.groupRollModeSelect) els.groupRollModeSelect.addEventListener('change', () => {
       const mode = ['balanced', 'no-repeat', 'free'].includes(els.groupRollModeSelect.value) ? els.groupRollModeSelect.value : 'balanced';
       state.classroom.groupRollMode = mode;
       state.classroom.balanced = mode === 'balanced';
       state.classroom.rolledGroups = [];
-      scheduleClassroomSave(); publishClassroomRemoteState(100);
+      scheduleClassroomSave(); publishSessionState(true);
     });
     if (els.balancedGroupsInput) els.balancedGroupsInput.addEventListener('change', () => {
       state.classroom.groupRollMode = els.balancedGroupsInput.checked ? 'balanced' : 'free';
       state.classroom.balanced = els.balancedGroupsInput.checked;
       state.classroom.rolledGroups = [];
-      scheduleClassroomSave(); publishClassroomRemoteState(100);
+      scheduleClassroomSave(); publishSessionState(true);
     });
     if (els.pickNameBtn) els.pickNameBtn.addEventListener('click', pickRandomStudent);
     if (els.rollGroupBtn) els.rollGroupBtn.addEventListener('click', rollGroupDice);
@@ -608,18 +605,13 @@
   function renderDriveCloud() {
     if (!els.driveCloudCard) return;
     const signedIn = !!state.driveAccessToken && Date.now() < state.driveTokenExpiry;
-    const loginBusy = !!state.sharedGoogleLoginPromise;
-    if (els.driveSignInBtn) {
-      els.driveSignInBtn.textContent = loginBusy ? 'Signing in...' : (signedIn ? 'Google Connected' : 'Sign in with Google');
-      els.driveSignInBtn.disabled = loginBusy || state.driveBusy;
-    }
+    if (els.driveSignInBtn) els.driveSignInBtn.textContent = signedIn ? 'Reconnect Google' : 'Sign in with Google';
     if (els.driveSignOutBtn) els.driveSignOutBtn.classList.toggle('hidden', !signedIn);
-    if (els.driveRefreshBtn) els.driveRefreshBtn.disabled = state.driveBusy || loginBusy;
-    if (els.driveUploadInput) els.driveUploadInput.disabled = state.driveBusy || loginBusy || !signedIn;
-    if (els.driveUploadZone) els.driveUploadZone.classList.toggle('disabled', state.driveBusy || loginBusy || !signedIn);
-    if (loginBusy) updateDriveStatus('Signing in with Google...', 'warning');
-    else if (signedIn) updateDriveStatus(`${state.driveFiles.length} Drive files ready • same login as Classroom`, 'ready');
-    else updateDriveStatus('Sign in once for Google Drive and Classroom Randomizer', 'ready');
+    if (els.driveRefreshBtn) els.driveRefreshBtn.disabled = state.driveBusy;
+    if (els.driveUploadInput) els.driveUploadInput.disabled = state.driveBusy || !signedIn;
+    if (els.driveUploadZone) els.driveUploadZone.classList.toggle('disabled', state.driveBusy || !signedIn);
+    if (signedIn) updateDriveStatus(`${state.driveFiles.length} Drive files ready`, 'ready');
+    else updateDriveStatus('Ready to sign in with Google', 'ready');
 
     if (!els.driveFilesGrid) return;
     if (!state.driveFiles.length) {
@@ -670,184 +662,29 @@
     state.driveClientId = DEFAULT_GOOGLE_CLIENT_ID;
     if (state.driveAccessToken && Date.now() < state.driveTokenExpiry - 15000) return state.driveAccessToken;
     if (!interactive) throw new Error('Google Drive needs sign-in again.');
-    return signInUnifiedGoogleAccount({ needDrive: true, refreshClassroom: true });
-  }
-
-  function requestGoogleAccessToken(promptMode = 'consent') {
-    return new Promise(async (resolve, reject) => {
+    await ensureGoogleIdentityScript();
+    return new Promise((resolve, reject) => {
       try {
-        await ensureGoogleIdentityScript();
         state.driveTokenClient = window.google.accounts.oauth2.initTokenClient({
-          client_id: DEFAULT_GOOGLE_CLIENT_ID,
+          client_id: state.driveClientId,
           scope: DRIVE_SCOPE,
           callback: (response) => {
             if (!response || response.error) {
-              reject(new Error(response && response.error ? response.error : 'Google sign-in was cancelled.'));
+              reject(new Error(response && response.error ? response.error : 'Google Drive sign-in was cancelled.'));
               return;
             }
-            const token = response.access_token || '';
-            if (!token) {
-              reject(new Error('Google did not return an access token.'));
-              return;
-            }
-            state.driveAccessToken = token;
+            state.driveAccessToken = response.access_token || '';
             state.driveTokenExpiry = Date.now() + Math.max(60, Number(response.expires_in || 3600) - 60) * 1000;
-            resolve(token);
+            updateDriveStatus('Drive connected', 'ready');
+            renderDriveCloud();
+            resolve(state.driveAccessToken);
           },
-          error_callback: (error) => reject(new Error((error && (error.message || error.type)) || 'Google sign-in failed.')),
         });
-        state.driveTokenClient.requestAccessToken({ prompt: promptMode });
+        state.driveTokenClient.requestAccessToken({ prompt: state.driveAccessToken ? '' : 'consent' });
       } catch (error) {
         reject(error);
       }
     });
-  }
-
-  function classroomSyncSetupMessage(error) {
-    const code = error && error.code ? String(error.code) : '';
-    const message = error && error.message ? String(error.message) : String(error || '');
-    if (code === 'auth/operation-not-allowed' || /operation-not-allowed|provider is disabled|not enabled/i.test(message)) {
-      return 'Enable Firebase Authentication > Sign-in method > Google provider so Classroom names can load from this account.';
-    }
-    if (code === 'auth/unauthorized-domain' || /unauthorized.*domain/i.test(message)) {
-      return 'Add sfk2627.github.io to Firebase Authentication > Settings > Authorized domains.';
-    }
-    if (/popup|cancelled|closed/i.test(message)) return 'Google sign-in was closed before Classroom sync finished.';
-    return message || 'Classroom account sync failed.';
-  }
-
-  function setDriveTokenFromFirebaseResult(result) {
-    try {
-      const credential = firebase.auth.GoogleAuthProvider.credentialFromResult(result);
-      const token = credential && credential.accessToken;
-      if (token) {
-        state.driveAccessToken = token;
-        state.driveTokenExpiry = Date.now() + (55 * 60 * 1000);
-        return token;
-      }
-    } catch (error) {
-      console.warn('Could not read Drive token from Firebase Google result:', error);
-    }
-    return '';
-  }
-
-  async function signInFirebaseGoogleForClassroomAndDrive(refreshClassroom = true) {
-    if (!window.firebase || !hasFirebaseConfig() || !firebase.auth) {
-      throw new Error('Firebase Authentication is not available.');
-    }
-    await initFirebaseIfConfigured();
-    const auth = firebase.auth();
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.addScope('https://www.googleapis.com/auth/drive.file');
-    provider.addScope('profile');
-    provider.addScope('email');
-    provider.setCustomParameters({ prompt: 'select_account' });
-    const current = auth.currentUser;
-    let result = null;
-    if (current && current.isAnonymous && typeof current.linkWithPopup === 'function') {
-      try {
-        result = await current.linkWithPopup(provider);
-      } catch (error) {
-        if (error && ['auth/credential-already-in-use', 'auth/email-already-in-use', 'auth/provider-already-linked'].includes(error.code)) {
-          result = await auth.signInWithPopup(provider);
-        } else {
-          throw error;
-        }
-      }
-    } else {
-      result = await auth.signInWithPopup(provider);
-    }
-    const token = setDriveTokenFromFirebaseResult(result);
-    state.firebaseUser = (result && result.user) || auth.currentUser || null;
-    state.firebaseAuthReady = !!state.firebaseUser;
-    if (refreshClassroom) await loadClassroomCloud();
-    updateClassroomAuthUI();
-    updateFirebaseStatus();
-    return { token, user: state.firebaseUser };
-  }
-
-  async function connectFirebaseWithGoogleToken(accessToken, refreshClassroom = true) {
-    if (!accessToken || !window.firebase || !hasFirebaseConfig() || !firebase.auth) return false;
-    try {
-      await initFirebaseIfConfigured();
-      const auth = firebase.auth();
-      const credential = firebase.auth.GoogleAuthProvider.credential(null, accessToken);
-      const current = auth.currentUser;
-      let result = null;
-      if (current && current.isAnonymous && typeof current.linkWithCredential === 'function') {
-        try {
-          result = await current.linkWithCredential(credential);
-        } catch (error) {
-          if (error && ['auth/credential-already-in-use', 'auth/provider-already-linked', 'auth/email-already-in-use'].includes(error.code)) {
-            result = await auth.signInWithCredential(credential);
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        result = await auth.signInWithCredential(credential);
-      }
-      state.firebaseUser = (result && result.user) || auth.currentUser || null;
-      state.firebaseAuthReady = !!state.firebaseUser;
-      if (refreshClassroom) await loadClassroomCloud();
-      updateClassroomAuthUI();
-      updateFirebaseStatus();
-      return !!(state.firebaseUser && !state.firebaseUser.isAnonymous);
-    } catch (error) {
-      state.sharedGoogleLoginLastError = classroomSyncSetupMessage(error);
-      console.warn('Classroom Google sync after Drive sign-in failed:', error);
-      updateClassroomAuthUI();
-      return false;
-    }
-  }
-
-  async function signInUnifiedGoogleAccount(options = {}) {
-    const { needDrive = true, refreshClassroom = true } = options;
-    if (state.sharedGoogleLoginPromise) return state.sharedGoogleLoginPromise;
-    state.sharedGoogleLoginPromise = (async () => {
-      state.driveClientId = DEFAULT_GOOGLE_CLIENT_ID;
-      state.sharedGoogleLoginLastError = '';
-      updateDriveStatus('Opening one Google sign-in for Classroom and Drive...', 'warning');
-      if (els.driveSignInBtn) els.driveSignInBtn.disabled = true;
-      if (els.classroomAuthBtn) els.classroomAuthBtn.disabled = true;
-      updateClassroomAuthUI('Signing in once for Classroom and Drive...');
-
-      try {
-        // True one-login path: Firebase Google popup signs in Classroom first
-        // and returns the same Google access token for Drive.
-        const result = await signInFirebaseGoogleForClassroomAndDrive(refreshClassroom);
-        if (result && result.token) {
-          updateDriveStatus('Google connected for Drive and Classroom Randomizer.', 'ready');
-          renderDriveCloud();
-          return result.token;
-        }
-        if (state.driveAccessToken) return state.driveAccessToken;
-        throw new Error('Google did not return a Drive access token. Try signing in again.');
-      } catch (firebasePopupError) {
-        state.sharedGoogleLoginLastError = classroomSyncSetupMessage(firebasePopupError);
-        console.warn('Primary Firebase Google sign-in failed:', firebasePopupError);
-
-        // Fallback: Drive can still connect using Google Identity Services, but
-        // Classroom account names will load only after Firebase Google provider
-        // is enabled. This fallback keeps Drive usable without blocking the app.
-        const token = needDrive ? await requestGoogleAccessToken(state.driveAccessToken ? '' : 'consent') : state.driveAccessToken;
-        if (token) {
-          updateDriveStatus('Drive connected. Classroom account sync needs Firebase Google provider enabled.', 'warning');
-          renderDriveCloud();
-          await connectFirebaseWithGoogleToken(token, refreshClassroom);
-          updateClassroomAuthUI();
-          return token;
-        }
-        throw firebasePopupError;
-      }
-    })().finally(() => {
-      state.sharedGoogleLoginPromise = null;
-      if (els.driveSignInBtn) els.driveSignInBtn.disabled = false;
-      if (els.classroomAuthBtn && !(state.firebaseUser && !state.firebaseUser.isAnonymous)) els.classroomAuthBtn.disabled = false;
-      renderDriveCloud();
-      updateClassroomAuthUI();
-    });
-    return state.sharedGoogleLoginPromise;
   }
 
   async function driveFetch(url, options = {}) {
@@ -1035,7 +872,7 @@
     }
   }
 
-  async function signOutDrive() {
+  function signOutDrive() {
     const token = state.driveAccessToken;
     if (token && window.google && window.google.accounts && window.google.accounts.oauth2) {
       try { window.google.accounts.oauth2.revoke(token, () => undefined); } catch (error) {}
@@ -1044,12 +881,8 @@
     state.driveTokenExpiry = 0;
     state.driveTokenClient = null;
     state.driveFiles = [];
-    try { if (window.firebase && firebase.auth) await firebase.auth().signOut(); } catch (error) {}
-    state.firebaseUser = null;
-    state.firebaseAuthReady = false;
-    updateDriveStatus('Signed out from Google account.', '');
+    updateDriveStatus('Signed out from Google Drive.', '');
     renderDriveCloud();
-    updateClassroomAuthUI();
   }
 
   function isDriveFileSupported(file) {
@@ -5843,18 +5676,18 @@
         state.classroom.activeSectionId = String(command.value || '');
         state.classroom.pickedIds = [];
         state.classroom.rolledGroups = [];
-        renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100);
+        renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
         break;
       case 'classroomSetRepeatMode':
         state.classroom.removePicked = String(command.value || '') !== 'allow-repeat';
-        renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100);
+        renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
         break;
       case 'classroomSetGroupMode': {
         const mode = ['balanced', 'no-repeat', 'free'].includes(String(command.value || '')) ? String(command.value) : 'balanced';
         state.classroom.groupRollMode = mode;
         state.classroom.balanced = mode === 'balanced';
         state.classroom.rolledGroups = [];
-        renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100);
+        renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
         break;
       }
       case 'classroomPick': pickRandomStudent(); break;
@@ -6603,22 +6436,10 @@
     if (remoteClassSection) remoteClassSection.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetSection', remoteClassSection.value); });
     if (remoteNameRepeat) remoteNameRepeat.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetRepeatMode', remoteNameRepeat.value); });
     if (remoteGroupMode) remoteGroupMode.addEventListener('change', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, 'classroomSetGroupMode', remoteGroupMode.value); });
-    const bindClassCommand = (id, action, label = 'Sent') => {
-      const node = $(id);
-      if (!node) return;
-      node.addEventListener('click', () => {
-        const ref = remoteRef();
-        if (!ref || !isHost) return;
-        const result = $('remoteClassResult');
-        if (result) result.textContent = label;
-        node.disabled = true;
-        window.setTimeout(() => { node.disabled = false; }, action === 'classroomRoll' ? 900 : 650);
-        sendRemoteCommand(ref, action);
-      });
-    };
-    bindClassCommand('remotePickName', 'classroomPick', 'Picking name...');
-    bindClassCommand('remoteRollGroup', 'classroomRoll', 'Rolling group...');
-    bindClassCommand('remoteClassReset', 'classroomReset', 'Resetting...');
+    const bindClassCommand = (id, action) => { const node = $(id); if (node) node.addEventListener('click', () => { const ref = remoteRef(); if (ref) sendRemoteCommand(ref, action); }); };
+    bindClassCommand('remotePickName', 'classroomPick');
+    bindClassCommand('remoteRollGroup', 'classroomRoll');
+    bindClassCommand('remoteClassReset', 'classroomReset');
 
     if (!hasFirebaseConfig()) {
       $('remoteFileLabel').textContent = 'Remote needs firebase-config.js because phones need realtime sync across devices.';
@@ -7556,21 +7377,7 @@
   function scheduleClassroomSave() {
     saveClassroomLocal();
     clearTimeout(state.classroomSyncTimer);
-    // Keep randomizer animations smooth: local save is instant, cloud sync is quiet
-    // and delayed so slow internet never blocks Pick Name or Roll Group reveals.
-    state.classroomSyncTimer = setTimeout(saveClassroomCloud, 1600);
-  }
-  function publishClassroomRemoteState(delay = 80) {
-    clearTimeout(state.classroomRemotePublishTimer);
-    state.classroomRemotePublishTimer = setTimeout(() => {
-      if (!state.sessionRef) return;
-      try {
-        const write = state.sessionRef.set({ classroom: classroomRemoteSnapshot(), updatedAt: Date.now() }, { merge: true });
-        if (write && typeof write.catch === 'function') write.catch((error) => console.warn('Classroom remote sync skipped:', error));
-      } catch (error) {
-        console.warn('Classroom remote sync skipped:', error);
-      }
-    }, Math.max(0, Number(delay) || 0));
+    state.classroomSyncTimer = setTimeout(saveClassroomCloud, 350);
   }
   async function saveClassroomCloud() {
     const user = state.firebaseUser;
@@ -7589,32 +7396,30 @@
         : (state.classroom.balanced === false ? 'free' : 'balanced');
       state.classroom.balanced = state.classroom.groupRollMode === 'balanced';
       state.classroom.rolledGroups = Array.isArray(state.classroom.rolledGroups) ? state.classroom.rolledGroups : [];
-      saveClassroomLocal(); renderClassroomTools(); publishClassroomRemoteState(100);
+      saveClassroomLocal(); renderClassroomTools(); publishSessionState(true);
     } catch (e) { console.warn('Classroom cloud load failed', e); }
   }
   async function signInClassroomAccount() {
+    if (!window.firebase || !hasFirebaseConfig()) return alert('Firebase config is needed first.');
     try {
-      await signInUnifiedGoogleAccount({ needDrive: true, refreshClassroom: true });
-      if (state.driveAccessToken && !state.driveFiles.length) {
-        refreshDriveFiles().catch((error) => console.warn('Drive refresh after shared sign-in skipped:', error));
-      }
-    } catch (e) {
-      console.warn(e);
-      alert('Google sign-in did not finish. Check pop-up permissions, authorized domain sfk2627.github.io, and internet connection.');
-    }
+      const provider = new firebase.auth.GoogleAuthProvider();
+      const current = firebase.auth().currentUser;
+      let result;
+      if (current && current.isAnonymous) {
+        try { result = await current.linkWithPopup(provider); }
+        catch (e) { if (e.code === 'auth/credential-already-in-use') result = await firebase.auth().signInWithCredential(e.credential); else throw e; }
+      } else result = await firebase.auth().signInWithPopup(provider);
+      state.firebaseUser = result.user;
+      await loadClassroomCloud(); updateClassroomAuthUI();
+    } catch (e) { console.warn(e); alert('Google sign-in did not finish. Check Firebase Authentication > Google provider and authorized domains.'); }
   }
-  function updateClassroomAuthUI(customText) {
+  function updateClassroomAuthUI() {
     if (!els.classroomAuthStatus || !els.classroomAuthBtn) return;
     const user = state.firebaseUser;
     const signed = user && !user.isAnonymous;
-    const driveSigned = !!state.driveAccessToken && Date.now() < state.driveTokenExpiry;
-    if (customText) els.classroomAuthStatus.textContent = customText;
-    else if (signed) els.classroomAuthStatus.textContent = `Synced as ${user.displayName || user.email || 'Google account'} • names load from this Classroom account`;
-    else if (state.sharedGoogleLoginLastError) els.classroomAuthStatus.textContent = state.sharedGoogleLoginLastError;
-    else if (driveSigned) els.classroomAuthStatus.textContent = 'Drive is connected, but Classroom names need the same Firebase Google account. Click once to sync Classroom.';
-    else els.classroomAuthStatus.textContent = 'Local save active. Sign in once for Classroom Randomizer and Google Drive.';
+    els.classroomAuthStatus.textContent = signed ? `Synced as ${user.displayName || user.email || 'Google account'}` : 'Local save active. Sign in to sync across devices.';
     els.classroomAuthBtn.textContent = signed ? 'Account Synced' : 'Sign in with Google';
-    els.classroomAuthBtn.disabled = !!signed || !!state.sharedGoogleLoginPromise;
+    els.classroomAuthBtn.disabled = !!signed;
   }
   function openClassroomTools() { renderClassroomTools(); updateClassroomAuthUI(); showModal(els.classroomModal); }
   function activeClassSection() { return state.classroom.sections.find(s => s.id === state.classroom.activeSectionId) || null; }
@@ -7622,7 +7427,7 @@
     const name = (els.newSectionName.value || '').trim(); if (!name) return;
     const id = `sec-${Date.now().toString(36)}`;
     state.classroom.sections.push({ id, name, students: [] }); state.classroom.activeSectionId = id; els.newSectionName.value = '';
-    renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100);
+    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
   }
   function normalizeClassHeader(value) {
     return String(value || '').replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -7755,7 +7560,7 @@
       state.classroom.assignments = {};
       renderClassroomTools();
       scheduleClassroomSave();
-      publishClassroomRemoteState(100);
+      publishSessionState(true);
       if (els.classImportStatus) els.classImportStatus.textContent = `Imported ${importedStudents} new student${importedStudents === 1 ? '' : 's'}${updatedStudents ? ` and updated ${updatedStudents}` : ''} across ${grouped.size} section${grouped.size === 1 ? '' : 's'}.`;
     } catch (error) {
       console.warn('Class list import failed', error);
@@ -7769,7 +7574,7 @@
     const sec = activeClassSection(); if (!sec) return alert('Create or select a section first.');
     const names = (els.studentNamesInput.value || '').split(/\r?\n/).map(cleanStudentName).filter(Boolean);
     sec.students = names.map((name, i) => ({ id: `${sec.id}-${i}-${name.toLowerCase().replace(/[^a-z0-9]+/g,'-')}`, name }));
-    state.classroom.pickedIds = []; state.classroom.assignments = {}; renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100);
+    state.classroom.pickedIds = []; state.classroom.assignments = {}; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true);
   }
   function renderClassroomTools() {
     if (!els.sectionSelect) return;
@@ -7864,12 +7669,12 @@
     state.classroom.busy = true;
     state.classroom.revealMode = 'name';
     state.classroom.lastGroup = null;
-    renderClassroomTools(); publishClassroomRemoteState(0);
+    renderClassroomTools(); publishSessionState(true);
     await showNameRoulette(sec.students.map(s => cleanStudentName(s.name)), cleanStudentName(chosen.name));
     state.classroom.lastStudent = chosen;
     if (state.classroom.removePicked && !state.classroom.pickedIds.includes(chosen.id)) state.classroom.pickedIds.push(chosen.id);
     state.classroom.busy = false;
-    renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100); return chosen;
+    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return chosen;
   }
   function chooseGroupRoll() {
     const n = Math.max(2, Number(state.classroom.groupCount) || 6);
@@ -7900,14 +7705,14 @@
     state.classroom.busy = true;
     state.classroom.revealMode = 'group';
     state.classroom.lastGroup = null;
-    renderClassroomTools(); publishClassroomRemoteState(0);
+    renderClassroomTools(); publishSessionState(true);
     await showRollingGroupDice(group);
     state.classroom.lastGroup = group;
     if (student) state.classroom.assignments[student.id] = group;
     state.classroom.busy = false;
-    renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100); return group;
+    renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); return group;
   }
-  function resetClassroomRound() { if (state.classroom.busy) return; state.classroom.pickedIds=[]; state.classroom.rolledGroups=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; state.classroom.revealMode=''; renderClassroomTools(); scheduleClassroomSave(); publishClassroomRemoteState(100); }
+  function resetClassroomRound() { if (state.classroom.busy) return; state.classroom.pickedIds=[]; state.classroom.rolledGroups=[]; state.classroom.assignments={}; state.classroom.lastStudent=null; state.classroom.lastGroup=null; state.classroom.revealMode=''; renderClassroomTools(); scheduleClassroomSave(); publishSessionState(true); }
   function getClassroomPresentationLayer() {
     let layer = document.getElementById('classroomPresentationLayer');
     if (layer) return layer;
